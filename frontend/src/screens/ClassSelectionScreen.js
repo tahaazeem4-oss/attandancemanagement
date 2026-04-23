@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet,
-  ActivityIndicator, Alert, ScrollView
+  View, Text, Pressable, StyleSheet,
+  ActivityIndicator, Alert, ScrollView, StatusBar, Animated
 } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
+import { LinearGradient } from 'expo-linear-gradient';
 import api from '../services/api';
+import { C, S } from '../config/theme';
+import { HeaderBlobs, useEntrance } from '../components/Deco';
+import PickerField from '../components/PickerField';
 
 export default function ClassSelectionScreen({ navigation, route }) {
   const mode = route?.params?.mode || 'attendance';  // 'attendance' | 'report'
@@ -14,6 +17,10 @@ export default function ClassSelectionScreen({ navigation, route }) {
   const [selectedClass,   setSelectedClass]   = useState('');
   const [selectedSection, setSelectedSection] = useState('');
   const [loading, setLoading] = useState(true);
+  const cardAnim = useEntrance();
+  const btnS = useRef(new Animated.Value(1)).current;
+  const pIn  = () => Animated.spring(btnS, { toValue: 0.96, useNativeDriver: true, speed: 50 }).start();
+  const pOut = () => Animated.spring(btnS, { toValue: 1,    useNativeDriver: true, speed: 20 }).start();
 
   useEffect(() => {
     api.get('/classes')
@@ -53,61 +60,81 @@ export default function ClassSelectionScreen({ navigation, route }) {
     }
   };
 
-  if (loading) return <ActivityIndicator style={{ marginTop: 80 }} color="#2563EB" size="large" />;
+  if (loading) return (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: C.bg }}>
+      <ActivityIndicator color={C.primary} size="large" />
+    </View>
+  );
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 24 }}>
-      <Text style={styles.heading}>
-        {mode === 'report' ? 'Select Class for Report' : 'Select Class & Section'}
-      </Text>
+    <ScrollView style={styles.container} contentContainerStyle={{ flexGrow: 1 }}>
+      <StatusBar barStyle="light-content" backgroundColor="#0F0C29" />
 
-      <Text style={styles.label}>Class</Text>
-      <View style={styles.pickerBox}>
-        <Picker
-          selectedValue={selectedClass}
-          onValueChange={v => setSelectedClass(v)}
-        >
-          <Picker.Item label="— Select Class —" value="" />
-          {classes.map(c => (
-            <Picker.Item key={c.id} label={c.class_name} value={String(c.id)} />
-          ))}
-        </Picker>
-      </View>
-
-      <Text style={styles.label}>Section</Text>
-      <View style={styles.pickerBox}>
-        <Picker
-          selectedValue={selectedSection}
-          onValueChange={v => setSelectedSection(v)}
-          enabled={sections.length > 0}
-        >
-          <Picker.Item label="— Select Section —" value="" />
-          {sections.map(s => (
-            <Picker.Item key={s.id} label={`Section ${s.section_name}`} value={String(s.id)} />
-          ))}
-        </Picker>
-      </View>
-
-      <TouchableOpacity style={styles.btn} onPress={handleProceed}>
-        <Text style={styles.btnText}>
-          {mode === 'report' ? 'View Report' : 'Load Students'}
+      {/* Gradient Header */}
+      <LinearGradient
+        colors={['#0F0C29', '#1E1B4B', '#312E81']}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={styles.header}
+      >
+        <HeaderBlobs />
+        <Text style={styles.headerTitle}>
+          {mode === 'report' ? '📊  Select Class for Report' : '📋  Select Class & Section'}
         </Text>
-      </TouchableOpacity>
+        <Text style={styles.headerSub}>
+          {mode === 'report' ? 'Choose a class to view its attendance report' : 'Choose a class and section to mark attendance'}
+        </Text>
+      </LinearGradient>
+
+      <Animated.View style={[styles.formCard, cardAnim]}>
+        <Text style={S.label}>Class</Text>
+        <PickerField
+          label="Class"
+          value={selectedClass}
+          onChange={v => setSelectedClass(v)}
+          placeholder="Tap to select a class"
+          items={classes.map(c => ({ label: c.class_name, value: String(c.id) }))}
+        />
+
+        <Text style={[S.label, { marginTop: 12 }]}>Section</Text>
+        <PickerField
+          label="Section"
+          value={selectedSection}
+          onChange={v => setSelectedSection(v)}
+          placeholder="Tap to select a section"
+          disabled={!sections.length}
+          items={sections.map(s => ({ label: `Section ${s.section_name}`, value: String(s.id) }))}
+        />
+
+        <Animated.View style={{ marginTop: 16, transform: [{ scale: btnS }] }}>
+          <Pressable onPress={handleProceed} onPressIn={pIn} onPressOut={pOut}>
+            <LinearGradient
+              colors={['#6366F1', '#4F46E5', '#3730A3']}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={S.btn}
+            >
+              <Text style={S.btnText}>
+                {mode === 'report' ? 'View Report  →' : 'Load Students  →'}
+              </Text>
+            </LinearGradient>
+          </Pressable>
+        </Animated.View>
+      </Animated.View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container:  { flex: 1, backgroundColor: '#F8FAFC' },
-  heading:    { fontSize: 20, fontWeight: '700', color: '#1E3A5F', marginBottom: 24 },
-  label:      { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 4 },
-  pickerBox:  {
-    borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 10,
-    backgroundColor: '#fff', marginBottom: 18, overflow: 'hidden'
+  container:      { flex: 1, backgroundColor: C.bg },
+  header:         {
+    paddingHorizontal: 24, paddingTop: 50, paddingBottom: 30, overflow: 'hidden',
   },
-  btn:        {
-    backgroundColor: '#2563EB', borderRadius: 12,
-    paddingVertical: 14, alignItems: 'center', marginTop: 8
+  headerTitle:    { fontSize: 20, fontWeight: '800', color: '#E0E7FF', marginBottom: 6 },
+  headerSub:      { fontSize: 13, color: C.headerSub, lineHeight: 18 },
+  formCard:       {
+    margin: 16, marginTop: 20,
+    backgroundColor: C.card, borderRadius: 20, padding: 22,
+    shadowColor: C.shadow, shadowOpacity: 0.08, shadowRadius: 14,
+    shadowOffset: { width: 0, height: 4 }, elevation: 5,
   },
-  btnText:    { color: '#fff', fontSize: 16, fontWeight: '700' }
+
 });

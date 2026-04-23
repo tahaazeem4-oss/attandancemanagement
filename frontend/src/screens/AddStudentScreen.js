@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ScrollView, Alert, ActivityIndicator
+  View, Text, TextInput, Pressable,
+  StyleSheet, ScrollView, Alert, ActivityIndicator, StatusBar, Animated
 } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
+import { LinearGradient } from 'expo-linear-gradient';
 import api from '../services/api';
+import { C, S } from '../config/theme';
+import { HeaderBlobs, useEntrance } from '../components/Deco';
+import PickerField from '../components/PickerField';
 
 export default function AddStudentScreen({ navigation }) {
   const [form, setForm] = useState({
@@ -14,6 +17,11 @@ export default function AddStudentScreen({ navigation }) {
   const [classes,  setClasses]  = useState([]);
   const [sections, setSections] = useState([]);
   const [loading,  setLoading]  = useState(false);
+  const cardAnim = useEntrance();
+  const btnS = useRef(new Animated.Value(1)).current;
+  const pIn  = () => Animated.spring(btnS, { toValue: 0.96, useNativeDriver: true, speed: 50 }).start();
+  const pOut = () => Animated.spring(btnS, { toValue: 1,    useNativeDriver: true, speed: 20 }).start();
+  const [focus, setFocus] = useState('');
 
   useEffect(() => {
     api.get('/classes').then(({ data }) => setClasses(data)).catch(() => {});
@@ -51,56 +59,137 @@ export default function AddStudentScreen({ navigation }) {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-      <Text style={styles.heading}>Add New Student</Text>
+    <ScrollView style={styles.wrapper} contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+      <StatusBar barStyle="light-content" backgroundColor="#0F0C29" />
 
-      <Text style={styles.label}>First Name *</Text>
-      <TextInput style={styles.input} placeholder="First Name" value={form.first_name} onChangeText={v => set('first_name', v)} />
+      {/* Gradient Header */}
+      <LinearGradient
+        colors={['#0F0C29', '#1E1B4B', '#312E81']}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={styles.header}
+      >
+        <HeaderBlobs />
+        <Text style={styles.headerTitle}>➕  Add New Student</Text>
+        <Text style={styles.headerSub}>Fill in the details to register a student</Text>
+      </LinearGradient>
 
-      <Text style={styles.label}>Last Name *</Text>
-      <TextInput style={styles.input} placeholder="Last Name" value={form.last_name} onChangeText={v => set('last_name', v)} />
+      <Animated.View style={[styles.formCard, cardAnim]}>
+        <View style={styles.row}>
+          <View style={styles.half}>
+            <Text style={S.label}>First Name *</Text>
+            <TextInput
+              style={[S.input, { marginBottom: 14 }, focus === 'fn' && styles.inputFocus]}
+              placeholder="First Name"
+              placeholderTextColor={C.textLight}
+              value={form.first_name}
+              onChangeText={v => set('first_name', v)}
+              onFocus={() => setFocus('fn')}
+              onBlur={() => setFocus('')}
+            />
+          </View>
+          <View style={styles.half}>
+            <Text style={S.label}>Last Name *</Text>
+            <TextInput
+              style={[S.input, { marginBottom: 14 }, focus === 'ln' && styles.inputFocus]}
+              placeholder="Last Name"
+              placeholderTextColor={C.textLight}
+              value={form.last_name}
+              onChangeText={v => set('last_name', v)}
+              onFocus={() => setFocus('ln')}
+              onBlur={() => setFocus('')}
+            />
+          </View>
+        </View>
 
-      <Text style={styles.label}>Age *</Text>
-      <TextInput style={styles.input} placeholder="Age" keyboardType="numeric" value={form.age} onChangeText={v => set('age', v)} />
+        <View style={styles.row}>
+          <View style={styles.half}>
+            <Text style={S.label}>Age *</Text>
+            <TextInput
+              style={[S.input, { marginBottom: 14 }, focus === 'age' && styles.inputFocus]}
+              placeholder="Age"
+              placeholderTextColor={C.textLight}
+              keyboardType="numeric"
+              value={form.age}
+              onChangeText={v => set('age', v)}
+              onFocus={() => setFocus('age')}
+              onBlur={() => setFocus('')}
+            />
+          </View>
+          <View style={styles.half}>
+            <Text style={S.label}>Roll No. (opt)</Text>
+            <TextInput
+              style={[S.input, { marginBottom: 14 }, focus === 'roll' && styles.inputFocus]}
+              placeholder="e.g. 12"
+              placeholderTextColor={C.textLight}
+              value={form.roll_no}
+              onChangeText={v => set('roll_no', v)}
+              onFocus={() => setFocus('roll')}
+              onBlur={() => setFocus('')}
+            />
+          </View>
+        </View>
 
-      <Text style={styles.label}>Roll Number (optional)</Text>
-      <TextInput style={styles.input} placeholder="e.g. 12" value={form.roll_no} onChangeText={v => set('roll_no', v)} />
+        <Text style={S.label}>Class *</Text>
+        <PickerField
+          label="Class"
+          value={form.class_id}
+          onChange={v => set('class_id', v)}
+          placeholder="Tap to select a class"
+          items={classes.map(c => ({ label: c.class_name, value: String(c.id) }))}
+        />
 
-      <Text style={styles.label}>Class *</Text>
-      <View style={styles.pickerBox}>
-        <Picker selectedValue={form.class_id} onValueChange={v => set('class_id', v)}>
-          <Picker.Item label="— Select Class —" value="" />
-          {classes.map(c => <Picker.Item key={c.id} label={c.class_name} value={String(c.id)} />)}
-        </Picker>
-      </View>
+        <Text style={[S.label, { marginTop: 12 }]}>Section *</Text>
+        <PickerField
+          label="Section"
+          value={form.section_id}
+          onChange={v => set('section_id', v)}
+          placeholder="Tap to select a section"
+          disabled={!sections.length}
+          items={sections.map(s => ({ label: `Section ${s.section_name}`, value: String(s.id) }))}
+        />
 
-      <Text style={styles.label}>Section *</Text>
-      <View style={styles.pickerBox}>
-        <Picker selectedValue={form.section_id} onValueChange={v => set('section_id', v)} enabled={sections.length > 0}>
-          <Picker.Item label="— Select Section —" value="" />
-          {sections.map(s => <Picker.Item key={s.id} label={`Section ${s.section_name}`} value={String(s.id)} />)}
-        </Picker>
-      </View>
-
-      <TouchableOpacity style={styles.btn} onPress={handleAdd} disabled={loading}>
-        {loading
-          ? <ActivityIndicator color="#fff" />
-          : <Text style={styles.btnText}>Add Student</Text>}
-      </TouchableOpacity>
+        <Animated.View style={{ marginTop: 18, transform: [{ scale: btnS }] }}>
+          <Pressable onPress={handleAdd} disabled={loading} onPressIn={pIn} onPressOut={pOut}>
+            <LinearGradient
+              colors={['#6366F1', '#4F46E5', '#3730A3']}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={S.btn}
+            >
+              {loading
+                ? <ActivityIndicator color="#fff" />
+                : <Text style={S.btnText}>Add Student</Text>}
+            </LinearGradient>
+          </Pressable>
+        </Animated.View>
+      </Animated.View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container:  { flexGrow: 1, padding: 24, backgroundColor: '#F8FAFC', paddingBottom: 40 },
-  heading:    { fontSize: 22, fontWeight: '700', color: '#1E3A5F', marginBottom: 20 },
-  label:      { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 4 },
-  input:      {
-    borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 10,
-    paddingHorizontal: 14, paddingVertical: 10, backgroundColor: '#fff',
-    marginBottom: 14, fontSize: 15
+  wrapper:        { flex: 1, backgroundColor: C.bg },
+  header:         {
+    paddingHorizontal: 24, paddingTop: 50, paddingBottom: 30, overflow: 'hidden',
   },
-  pickerBox:  { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 10, backgroundColor: '#fff', marginBottom: 16, overflow: 'hidden' },
-  btn:        { backgroundColor: '#2563EB', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 8 },
-  btnText:    { color: '#fff', fontSize: 16, fontWeight: '700' }
+  headerTitle:    { fontSize: 20, fontWeight: '800', color: '#E0E7FF', marginBottom: 6 },
+  headerSub:      { fontSize: 13, color: C.headerSub },
+  formCard:       {
+    margin: 16, marginTop: 20,
+    backgroundColor: C.card, borderRadius: 20, padding: 22,
+    paddingBottom: 32,
+    shadowColor: C.shadow, shadowOpacity: 0.08, shadowRadius: 14,
+    shadowOffset: { width: 0, height: 4 }, elevation: 5,
+  },
+  row:            { flexDirection: 'row', gap: 12 },
+  half:           { flex: 1 },
+  pickerBox:      {
+    borderWidth: 1.5, borderColor: C.border, borderRadius: 12,
+    backgroundColor: C.cardAlt, marginBottom: 4, overflow: 'hidden',
+  },
+  pickerDisabled: { opacity: 0.45 },
+  inputFocus:     {
+    borderColor: '#6366F1', backgroundColor: '#F5F3FF',
+    shadowColor: '#6366F1', shadowOpacity: 0.2, shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 }, elevation: 2,
+  },
 });
