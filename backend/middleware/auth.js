@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 
-module.exports = (req, res, next) => {
+// ── protect: verify JWT, set req.user (and req.teacher for compat) ──
+const protect = (req, res, next) => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -11,9 +12,21 @@ module.exports = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.teacher   = decoded;   // { id, email, first_name, last_name }
+    req.user    = decoded; // { id, email, role, first_name, last_name, student_id? }
+    req.teacher = decoded; // backward compatibility with existing controllers
     next();
   } catch {
     return res.status(401).json({ message: 'Invalid or expired token' });
   }
 };
+
+// ── requireRole: gate a route to specific roles ───────────────
+const requireRole = (...roles) => (req, res, next) => {
+  if (!req.user || !roles.includes(req.user.role)) {
+    return res.status(403).json({ message: 'Access denied' });
+  }
+  next();
+};
+
+module.exports             = protect;
+module.exports.requireRole = requireRole;

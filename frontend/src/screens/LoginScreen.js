@@ -77,7 +77,7 @@ export default function LoginScreen({ navigation }) {
       {/* ── Animated sliding card ─────────────────────────── */}
       <Animated.View style={[styles.card, cardAnim]}>
         <Text style={styles.cardTitle}>Welcome Back</Text>
-        <Text style={styles.cardSub}>Sign in to your teacher account</Text>
+        <Text style={styles.cardSub}>Sign in to your account</Text>
 
         {!!formError && (
           <View style={styles.formErrorBox}>

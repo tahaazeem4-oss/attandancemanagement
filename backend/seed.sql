@@ -8,9 +8,9 @@ USE school_db;
 -- ── 1. Teachers (passwords are bcrypt of "password123") ──────
 -- Passwords are bcrypt hash of: password123
 INSERT IGNORE INTO teachers (id, first_name, last_name, email, password, phone) VALUES
-  (1, 'Ahmed',   'Khan',    'ahmed.khan@school.com',   '$2a$12$J7ItX.dhXZPogKwKZBPPXu5sCurGeERFXoh6iZjEwR..C59oATHJi', '03001234567'),
-  (2, 'Sara',    'Ali',     'sara.ali@school.com',     '$2a$12$J7ItX.dhXZPogKwKZBPPXu5sCurGeERFXoh6iZjEwR..C59oATHJi', '03009876543'),
-  (3, 'Hassan',  'Malik',   'hassan.malik@school.com', '$2a$12$J7ItX.dhXZPogKwKZBPPXu5sCurGeERFXoh6iZjEwR..C59oATHJi', '03331112233');
+  (1, 'Ahmed',   'Khan',    'ahmed.khan@school.com',   '$2a$12$Ab4BL5H2Rjq/eVN5k1Jx2urLRgPSkEUt0nAPruf8rT.p1porl5jfa', '03001234567'),
+  (2, 'Sara',    'Ali',     'sara.ali@school.com',     '$2a$12$Ab4BL5H2Rjq/eVN5k1Jx2urLRgPSkEUt0nAPruf8rT.p1porl5jfa', '03009876543'),
+  (3, 'Hassan',  'Malik',   'hassan.malik@school.com', '$2a$12$Ab4BL5H2Rjq/eVN5k1Jx2urLRgPSkEUt0nAPruf8rT.p1porl5jfa', '03331112233');
 
 -- ── 2. Assign teachers to classes/sections ───────────────────
 -- Ahmed → Grade 1-A, Grade 2-B

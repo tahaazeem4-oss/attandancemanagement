@@ -6,46 +6,54 @@ import api from '../services/api';
 // expo-secure-store has no web implementation — fall back to localStorage
 const storage = {
   async setItem(key, value) {
-    if (Platform.OS === 'web') {
-      localStorage.setItem(key, value);
-    } else {
-      await SecureStore.setItemAsync(key, value);
-    }
+    if (Platform.OS === 'web') { localStorage.setItem(key, value); }
+    else { await SecureStore.setItemAsync(key, value); }
   },
   async getItem(key) {
-    if (Platform.OS === 'web') {
-      return localStorage.getItem(key);
-    }
+    if (Platform.OS === 'web') { return localStorage.getItem(key); }
     return await SecureStore.getItemAsync(key);
   },
   async removeItem(key) {
-    if (Platform.OS === 'web') {
-      localStorage.removeItem(key);
-    } else {
-      await SecureStore.deleteItemAsync(key);
-    }
+    if (Platform.OS === 'web') { localStorage.removeItem(key); }
+    else { await SecureStore.deleteItemAsync(key); }
   },
 };
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [teacher, setTeacher] = useState(null);
-  const [loading, setLoading]  = useState(true);
+  const [user,    setUser]    = useState(null); // { id, first_name, last_name, email, role, ... }
+  const [loading, setLoading] = useState(true);
 
-  // Restore session from secure storage on app launch
+  // Computed: backward-compat teacher ref (used by existing teacher screens)
+  const teacher = user?.role === 'teacher' ? user : null;
+
+  // Restore session from storage on launch
   useEffect(() => {
     (async () => {
       try {
-        const token        = await storage.getItem('token');
-        const teacherJson  = await storage.getItem('teacher');
-        if (token && teacherJson) {
+        const token    = await storage.getItem('token');
+        const userJson = await storage.getItem('user');
+
+        if (token && userJson) {
+          const parsed = JSON.parse(userJson);
+          // Migrate old sessions that had no role
+          if (!parsed.role) parsed.role = 'teacher';
           api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-          setTeacher(JSON.parse(teacherJson));
+          setUser(parsed);
+        } else {
+          // Migrate old 'teacher' storage key
+          const oldJson = await storage.getItem('teacher');
+          if (token && oldJson) {
+            const parsed = JSON.parse(oldJson);
+            if (!parsed.role) parsed.role = 'teacher';
+            api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+            setUser(parsed);
+            await storage.setItem('user', JSON.stringify(parsed));
+            await storage.removeItem('teacher');
+          }
         }
-      } catch {
-        // ignore
-      } finally {
+      } catch { /* ignore */ } finally {
         setLoading(false);
       }
     })();
@@ -53,31 +61,33 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const { data } = await api.post('/auth/login', { email, password });
-    await storage.setItem('token',   data.token);
-    await storage.setItem('teacher', JSON.stringify(data.teacher));
+    const u = data.user;
+    await storage.setItem('token', data.token);
+    await storage.setItem('user',  JSON.stringify(u));
     api.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
-    setTeacher(data.teacher);
+    setUser(u);
     return data;
   };
 
   const signup = async (payload) => {
     const { data } = await api.post('/auth/signup', payload);
-    await storage.setItem('token',   data.token);
-    await storage.setItem('teacher', JSON.stringify(data.teacher));
+    const u = data.user;
+    await storage.setItem('token', data.token);
+    await storage.setItem('user',  JSON.stringify(u));
     api.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
-    setTeacher(data.teacher);
+    setUser(u);
     return data;
   };
 
   const logout = async () => {
     await storage.removeItem('token');
-    await storage.removeItem('teacher');
+    await storage.removeItem('user');
     delete api.defaults.headers.common['Authorization'];
-    setTeacher(null);
+    setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ teacher, loading, login, signup, logout }}>
+    <AuthContext.Provider value={{ user, teacher, loading, login, signup, logout }}>
       {children}
     </AuthContext.Provider>
   );

@@ -19,11 +19,13 @@ export default function StudentAttendanceScreen({ navigation, route }) {
   const [attendance, setAttendance] = useState({}); // { [student_id]: 'present'|'absent'|'leave' }
   const [loading,    setLoading]    = useState(true);
   const [saving,     setSaving]     = useState(false);
+  const [frozen,     setFrozen]     = useState(false); // true when today's attendance already submitted
   const submitS = useRef(new Animated.Value(1)).current;
   const pIn  = () => Animated.spring(submitS, { toValue: 0.97, useNativeDriver: true, speed: 50 }).start();
   const pOut = () => Animated.spring(submitS, { toValue: 1,    useNativeDriver: true, speed: 20 }).start();
 
   useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10);
     api.get('/students', { params: { class_id, section_id } })
       .then(({ data }) => {
         setStudents(data);
@@ -31,12 +33,26 @@ export default function StudentAttendanceScreen({ navigation, route }) {
         const defaults = {};
         data.forEach(s => { defaults[s.id] = 'present'; });
         setAttendance(defaults);
+        // Check if attendance already submitted for today
+        return api.get('/attendance/report', { params: { class_id, section_id, date: today } })
+          .then(({ data: report }) => {
+            const alreadyMarked = report.records.length > 0 &&
+              report.records.some(r => r.status !== 'not_marked');
+            if (alreadyMarked) {
+              const existing = {};
+              report.records.forEach(r => { existing[r.id] = r.status; });
+              setAttendance(existing);
+              setFrozen(true);
+            }
+          })
+          .catch(() => {}); // silently ignore check failure
       })
       .catch(() => Alert.alert('Error', 'Could not load students'))
       .finally(() => setLoading(false));
   }, []);
 
   const toggle = (studentId, status) => {
+    if (frozen) return;
     setAttendance(prev => ({ ...prev, [studentId]: status }));
   };
 
@@ -48,7 +64,7 @@ export default function StudentAttendanceScreen({ navigation, route }) {
       const today   = new Date().toISOString().slice(0, 10);
       await api.post('/attendance/mark', { date: today, records });
       Alert.alert('Saved!', 'Attendance has been submitted successfully.', [
-        { text: 'OK', onPress: () => navigation.goBack() }
+        { text: 'OK', onPress: () => navigation.navigate('Home') }
       ]);
     } catch (err) {
       Alert.alert('Error', err?.response?.data?.message || 'Failed to save attendance');
@@ -131,19 +147,26 @@ export default function StudentAttendanceScreen({ navigation, route }) {
 
       {/* Submit footer */}
       <View style={styles.footer}>
-        <Animated.View style={{ transform: [{ scale: submitS }] }}>
-          <Pressable onPress={handleSubmit} disabled={saving} onPressIn={pIn} onPressOut={pOut}>
-            <LinearGradient
-              colors={['#10B981', '#059669', '#047857']}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-              style={styles.submitBtn}
-            >
-              {saving
-                ? <ActivityIndicator color="#fff" />
-                : <Text style={styles.submitText}>✓  Submit Attendance</Text>}
-            </LinearGradient>
-          </Pressable>
-        </Animated.View>
+        {frozen ? (
+          <View style={styles.frozenBanner}>
+            <Text style={styles.frozenIcon}>🔒</Text>
+            <Text style={styles.frozenText}>Attendance already submitted for today</Text>
+          </View>
+        ) : (
+          <Animated.View style={{ transform: [{ scale: submitS }] }}>
+            <Pressable onPress={handleSubmit} disabled={saving} onPressIn={pIn} onPressOut={pOut}>
+              <LinearGradient
+                colors={['#10B981', '#059669', '#047857']}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                style={styles.submitBtn}
+              >
+                {saving
+                  ? <ActivityIndicator color="#fff" />
+                  : <Text style={styles.submitText}>✓  Submit Attendance</Text>}
+              </LinearGradient>
+            </Pressable>
+          </Animated.View>
+        )}
       </View>
     </View>
   );
@@ -207,4 +230,12 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 }, elevation: 6,
   },
   submitText:   { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.3 },
+
+  frozenBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#F1F5F9', borderRadius: 14, paddingVertical: 15,
+    borderWidth: 1.5, borderColor: '#CBD5E1', gap: 8,
+  },
+  frozenIcon:   { fontSize: 18 },
+  frozenText:   { color: '#64748B', fontSize: 14, fontWeight: '700' },
 });

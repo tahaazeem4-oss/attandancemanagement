@@ -17,11 +17,7 @@ export default function ReportScreen({ route }) {
 
   const [records,  setRecords]  = useState([]);
   const [date,     setDate]     = useState(new Date().toISOString().slice(0, 10));
-  const [loading,  setLoading]  = useState(true);
-  const [sending,  setSending]  = useState(false);
-  const btnS = useRef(new Animated.Value(1)).current;
-  const pIn  = () => Animated.spring(btnS, { toValue: 0.97, useNativeDriver: true, speed: 50 }).start();
-  const pOut = () => Animated.spring(btnS, { toValue: 1,    useNativeDriver: true, speed: 20 }).start();
+  const [loading,  setLoading]  = useState(false);
   // Summary card entrance animations
   const s1o = useRef(new Animated.Value(0)).current, s1y = useRef(new Animated.Value(20)).current;
   const s2o = useRef(new Animated.Value(0)).current, s2y = useRef(new Animated.Value(20)).current;
@@ -51,16 +47,11 @@ export default function ReportScreen({ route }) {
     }
   };
 
-  const sendToWhatsApp = async () => {
-    setSending(true);
-    try {
-      await api.post('/attendance/send-whatsapp', { class_id, section_id, date });
-      Alert.alert('Sent!', 'Attendance report sent to WhatsApp group successfully 📲');
-    } catch (err) {
-      Alert.alert('Failed', err?.response?.data?.message || 'Could not send to WhatsApp');
-    } finally {
-      setSending(false);
-    }
+  const changeDate = (days) => {
+    const d = new Date(date);
+    d.setDate(d.getDate() + days);
+    const next = d.toISOString().slice(0, 10);
+    if (next <= today) setDate(next);
   };
 
   const counts = {
@@ -87,7 +78,20 @@ export default function ReportScreen({ route }) {
       >
         <HeaderBlobs />
         <Text style={styles.headerTitle}>{class_name} — Section {section_name}</Text>
-        <Text style={styles.headerDate}>📅  {date}</Text>
+        {/* Date navigator */}
+        <View style={styles.dateRow}>
+          <Pressable onPress={() => changeDate(-1)} style={styles.dateArrow}>
+            <Text style={styles.dateArrowText}>‹</Text>
+          </Pressable>
+          <Text style={styles.headerDate}>📅  {date}</Text>
+          <Pressable
+            onPress={() => changeDate(1)}
+            disabled={date >= today}
+            style={[styles.dateArrow, date >= today && styles.dateArrowDisabled]}
+          >
+            <Text style={[styles.dateArrowText, date >= today && { color: 'rgba(255,255,255,0.3)' }]}>›</Text>
+          </Pressable>
+        </View>
       </LinearGradient>
 
       {/* Animated summary cards */}
@@ -114,7 +118,7 @@ export default function ReportScreen({ route }) {
           <FlatList
             data={records}
             keyExtractor={item => String(item.id)}
-            contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 110, paddingTop: 8 }}
+            contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 24, paddingTop: 8 }}
             renderItem={({ item }) => (
               <View style={styles.row}>
                 <LinearGradient
@@ -137,23 +141,6 @@ export default function ReportScreen({ route }) {
             )}
           />
         )}
-
-      {/* Footer */}
-      <View style={styles.footer}>
-        <Animated.View style={{ transform: [{ scale: btnS }] }}>
-          <Pressable onPress={sendToWhatsApp} disabled={sending || loading} onPressIn={pIn} onPressOut={pOut}>
-            <LinearGradient
-              colors={['#25D366', '#1DA851', '#128C3E']}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-              style={styles.waBtn}
-            >
-              {sending
-                ? <ActivityIndicator color="#fff" />
-                : <Text style={styles.waBtnText}>📲  Send to WhatsApp Group</Text>}
-            </LinearGradient>
-          </Pressable>
-        </Animated.View>
-      </View>
     </View>
   );
 }
@@ -165,7 +152,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20, paddingVertical: 22, overflow: 'hidden',
   },
   headerTitle:  { color: '#E0E7FF', fontSize: 17, fontWeight: '800' },
-  headerDate:   { color: C.headerSub, fontSize: 13, marginTop: 4 },
+  headerDate:   { color: 'rgba(255,255,255,0.85)', fontSize: 14, fontWeight: '700' },
+
+  dateRow:      {
+    flexDirection: 'row', alignItems: 'center', marginTop: 10,
+    backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 12,
+    paddingHorizontal: 6, paddingVertical: 4, alignSelf: 'flex-start',
+  },
+  dateArrow:    { paddingHorizontal: 12, paddingVertical: 4 },
+  dateArrowDisabled: { opacity: 0.4 },
+  dateArrowText:{ color: '#fff', fontSize: 22, fontWeight: '300', lineHeight: 26 },
 
   summary:      {
     flexDirection: 'row',
@@ -198,19 +194,4 @@ const styles = StyleSheet.create({
   rowRoll:      { fontSize: 11, color: C.textLight, marginTop: 1 },
   statusPill:   { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 },
   statusText:   { fontSize: 11, fontWeight: '700' },
-
-  footer:       {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    padding: 16, paddingBottom: 24,
-    backgroundColor: C.card,
-    borderTopWidth: 1, borderColor: C.border,
-    shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8,
-    shadowOffset: { width: 0, height: -3 }, elevation: 8,
-  },
-  waBtn:        {
-    borderRadius: 14, paddingVertical: 15, alignItems: 'center',
-    shadowColor: '#25D366', shadowOpacity: 0.35, shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 }, elevation: 6,
-  },
-  waBtnText:    { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.3 },
 });

@@ -14,32 +14,42 @@ let client;
 let clientReady = false;
 
 function init() {
-  client = new Client({
-    authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
-    puppeteer: {
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    }
-  });
+  try {
+    client = new Client({
+      authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
+      puppeteer: {
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+      }
+    });
 
-  client.on('qr', (qr) => {
-    console.log('\n📱  Scan this QR code with WhatsApp to connect:\n');
-    qrcode.generate(qr, { small: true });
-  });
+    client.on('qr', (qr) => {
+      console.log('\n📱  Scan this QR code with WhatsApp to connect:\n');
+      qrcode.generate(qr, { small: true });
+    });
 
-  client.on('ready', () => {
-    clientReady = true;
-    console.log('WhatsApp client is ready ✅');
-  });
+    client.on('ready', () => {
+      clientReady = true;
+      console.log('WhatsApp client is ready ✅');
+    });
 
-  client.on('disconnected', (reason) => {
-    clientReady = false;
-    console.warn('WhatsApp disconnected:', reason);
-    // Auto-reconnect after 10 s
-    setTimeout(() => client.initialize(), 10_000);
-  });
+    client.on('auth_failure', (msg) => {
+      console.warn('WhatsApp auth failure (non-fatal):', msg);
+    });
 
-  client.initialize();
+    client.on('disconnected', (reason) => {
+      clientReady = false;
+      console.warn('WhatsApp disconnected:', reason);
+      // Auto-reconnect after 10 s
+      setTimeout(() => { try { client.initialize(); } catch (e) {} }, 10_000);
+    });
+
+    client.initialize().catch(err => {
+      console.warn('WhatsApp initialize failed (non-fatal):', err.message);
+    });
+  } catch (err) {
+    console.warn('WhatsApp service init error (non-fatal):', err.message);
+  }
 }
 
 /**

@@ -4,8 +4,10 @@
   "description": "School Attendance Management System — Node.js Backend",
   "main": "server.js",
   "scripts": {
+    "prestart": "powershell -NoProfile -Command \"$p = (Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue).OwningProcess; if ($p) { Stop-Process -Id $p -Force -ErrorAction SilentlyContinue }\"",
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "kill": "powershell -Command \"Stop-Process -Id (Get-NetTCPConnection -LocalPort 5000 -State Listen).OwningProcess -Force 2>$null; Write-Host 'Port freed'\""
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

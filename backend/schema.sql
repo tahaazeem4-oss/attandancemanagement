@@ -92,6 +92,39 @@ CREATE TABLE IF NOT EXISTS whatsapp_groups (
   FOREIGN KEY (section_id) REFERENCES sections(id) ON DELETE CASCADE
 );
 
+-- ── Admins (created via setup script only) ───────────────────
+CREATE TABLE IF NOT EXISTS admins (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  first_name   VARCHAR(100) NOT NULL,
+  last_name    VARCHAR(100) NOT NULL,
+  email        VARCHAR(150) NOT NULL UNIQUE,
+  password     VARCHAR(255) NOT NULL,
+  created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ── Student Portal Accounts ───────────────────────────────────
+CREATE TABLE IF NOT EXISTS student_accounts (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  student_id   INT NOT NULL UNIQUE,
+  email        VARCHAR(150) NOT NULL UNIQUE,
+  password     VARCHAR(255) NOT NULL,
+  phone        VARCHAR(20),
+  created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
+);
+
+-- ── Leave Applications ────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS leave_applications (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  student_id   INT NOT NULL,
+  date         DATE NOT NULL,
+  reason       TEXT NOT NULL,
+  status       ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+  applied_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_student_leave_date (student_id, date),
+  FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
+);
+
 -- ── Seed: Classes & Sections ──────────────────────────────────
 INSERT IGNORE INTO classes (id, class_name) VALUES
   (1, 'Grade 1'), (2, 'Grade 2'), (3, 'Grade 3'),

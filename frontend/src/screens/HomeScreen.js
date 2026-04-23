@@ -272,7 +272,7 @@ export default function HomeScreen({ navigation }) {
           </LinearGradient>
           <View style={styles.actionText}>
             <Text style={styles.actionTitle}>View & Send Report</Text>
-            <Text style={styles.actionSub}>Send attendance to WhatsApp group</Text>
+            <Text style={styles.actionSub}>View attendance records by date</Text>
           </View>
           <Text style={styles.chevron}>›</Text>
         </Pressable>
