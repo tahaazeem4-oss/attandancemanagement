@@ -15,7 +15,7 @@ exports.markAttendance = async (req, res) => {
     await db.query(
       `INSERT INTO teacher_attendance (teacher_id, date, status)
        VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE status = VALUES(status)`,
+       ON CONFLICT (teacher_id, date) DO UPDATE SET status = EXCLUDED.status`,
       [teacherId, today, status]
     );
     return res.json({ message: 'Attendance marked', date: today, status });

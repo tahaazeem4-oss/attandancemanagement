@@ -11,14 +11,14 @@ exports.markAttendance = async (req, res) => {
   }
 
   try {
-    const values = records.map(r => [r.student_id, teacherId, date, r.status]);
-
-    await db.query(
-      `INSERT INTO student_attendance (student_id, teacher_id, date, status)
-       VALUES ?
-       ON DUPLICATE KEY UPDATE status = VALUES(status), teacher_id = VALUES(teacher_id)`,
-      [values]
-    );
+    for (const r of records) {
+      await db.query(
+        `INSERT INTO student_attendance (student_id, teacher_id, date, status)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT (student_id, date) DO UPDATE SET status = EXCLUDED.status, teacher_id = EXCLUDED.teacher_id`,
+        [r.student_id, teacherId, date, r.status]
+      );
+    }
 
     return res.json({ message: 'Attendance saved successfully', count: records.length });
   } catch (err) {

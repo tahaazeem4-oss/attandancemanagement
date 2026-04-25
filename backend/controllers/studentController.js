@@ -42,10 +42,10 @@ exports.addStudent = async (req, res) => {
 
   try {
     const [result] = await db.query(
-      'INSERT INTO students (school_id, first_name, last_name, age, class_id, section_id, roll_no) VALUES (?,?,?,?,?,?,?)',
+      'INSERT INTO students (school_id, first_name, last_name, age, class_id, section_id, roll_no) VALUES (?,?,?,?,?,?,?) RETURNING id',
       [sid, first_name, last_name, age, class_id, section_id, roll_no || null]
     );
-    return res.status(201).json({ message: 'Student added', id: result.insertId });
+    return res.status(201).json({ message: 'Student added', id: result[0].id });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Server error' });

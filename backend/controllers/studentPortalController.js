@@ -21,7 +21,7 @@ exports.getAttendance = async (req, res) => {
   const { month, year } = req.query;
   let q = `SELECT date, status, marked_at FROM student_attendance WHERE student_id = ?`;
   const params = [req.user.student_id];
-  if (month && year) { q += ' AND MONTH(date) = ? AND YEAR(date) = ?'; params.push(month, year); }
+  if (month && year) { q += ' AND EXTRACT(MONTH FROM date) = ? AND EXTRACT(YEAR FROM date) = ?'; params.push(month, year); }
   q += ' ORDER BY date DESC';
   try {
     const [rows] = await db.query(q, params);
@@ -56,10 +56,10 @@ exports.applyLeave = async (req, res) => {
     if (ex.length > 0)
       return res.status(409).json({ message: 'Leave already applied for this date' });
     const [r] = await db.query(
-      'INSERT INTO leave_applications (student_id, date, reason) VALUES (?,?,?)',
+      'INSERT INTO leave_applications (student_id, date, reason) VALUES (?,?,?) RETURNING id',
       [req.user.student_id, date, reason]
     );
-    res.status(201).json({ message: 'Leave application submitted', id: r.insertId });
+    res.status(201).json({ message: 'Leave application submitted', id: r[0].id });
   } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
 };
 

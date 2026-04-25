@@ -123,19 +123,20 @@ exports.signup = async (req, res) => {
 
       const hashed = await bcrypt.hash(password, 12);
       const [result] = await db.query(
-        'INSERT INTO student_accounts (student_id, email, password, phone) VALUES (?,?,?,?)',
+        'INSERT INTO student_accounts (student_id, email, password, phone) VALUES (?,?,?,?) RETURNING id',
         [student.id, email.trim().toLowerCase(), hashed, phone || null]
       );
+      const newId = result[0].id;
 
       const school = await getSchool(student.school_id);
       const user   = {
-        id: result.insertId, student_id: student.id,
+        id: newId, student_id: student.id,
         first_name: student.first_name, last_name: student.last_name,
         email: email.trim().toLowerCase(), phone: phone || null, role: 'student',
         school_id: student.school_id,
         class_id: student.class_id, section_id: student.section_id, roll_no: student.roll_no
       };
-      const token = signToken({ id: result.insertId, email: user.email, role: 'student', first_name: student.first_name, last_name: student.last_name, student_id: student.id, school_id: student.school_id });
+      const token = signToken({ id: newId, email: user.email, role: 'student', first_name: student.first_name, last_name: student.last_name, student_id: student.id, school_id: student.school_id });
       return res.status(201).json({ token, role: 'student', user, school });
     } catch (err) {
       console.error('Student signup error:', err);
@@ -161,12 +162,13 @@ exports.signup = async (req, res) => {
 
     const hashed = await bcrypt.hash(password, 12);
     const [result] = await db.query(
-      'INSERT INTO teachers (school_id, first_name, last_name, email, password, phone) VALUES (?,?,?,?,?,?)',
+      'INSERT INTO teachers (school_id, first_name, last_name, email, password, phone) VALUES (?,?,?,?,?,?) RETURNING id',
       [school_id, first_name, last_name, email.trim().toLowerCase(), hashed, phone || null]
     );
+    const newId = result[0].id;
 
     const school = await getSchool(school_id);
-    const user   = { id: result.insertId, first_name, last_name, email: email.trim().toLowerCase(), phone: phone || null, role: 'teacher', school_id };
+    const user   = { id: newId, first_name, last_name, email: email.trim().toLowerCase(), phone: phone || null, role: 'teacher', school_id };
     const token  = signToken(user);
     return res.status(201).json({ token, role: 'teacher', user, school, teacher: user });
   } catch (err) {
@@ -174,6 +176,7 @@ exports.signup = async (req, res) => {
     return res.status(500).json({ message: 'Server error' });
   }
 };
+
 
 // -- GET /api/auth/me
 exports.getMe = async (req, res) => {

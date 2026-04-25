@@ -9,26 +9,24 @@ const db     = require('./config/db');
 
 async function main() {
   const email     = 'tahaazeem4@gmail.com';
-  const password  = 'Karachi@1234';
+  const password  = 'Karachi@123';
   const firstName = 'Taha';
   const lastName  = 'Azeem';
 
   const hash = await bcrypt.hash(password, 12);
 
-  const [result] = await db.query(
+  const [rows] = await db.query(
     `INSERT INTO super_admins (first_name, last_name, email, password)
      VALUES (?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE password = VALUES(password)`,
+     ON CONFLICT (email) DO UPDATE SET password = EXCLUDED.password
+     RETURNING id`,
     [firstName, lastName, email, hash]
   );
 
-  if (result.affectedRows > 0) {
-    console.log('✅ Super admin created / updated successfully.');
-    console.log('   Email   :', email);
-    console.log('   Password: Karachi@1234');
-  } else {
-    console.log('ℹ️  No changes made.');
-  }
+  console.log('✅ Super admin created / updated successfully.');
+  console.log('   Email   :', email);
+  console.log('   Password: Karachi@123');
+  console.log('   ID      :', rows[0].id);
 
   process.exit(0);
 }

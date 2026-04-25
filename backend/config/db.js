@@ -1,31 +1,59 @@
 require('dotenv').config();
-const mysql = require('mysql2');
+const { Pool, types } = require('pg');
 
-const pool = mysql.createPool({
-  host:     process.env.DB_HOST     || 'localhost',
-  user:     process.env.DB_USER     || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME     || 'school_db',
-  waitForConnections: true,
-  connectionLimit:    10,
-  queueLimit:         0
+// Parse PostgreSQL bigint (OID 20) as JS number instead of string
+types.setTypeParser(20, (val) => parseInt(val, 10));
+
+const connectionString = process.env.DATABASE_URL;
+
+const pool = new Pool({
+  host:     process.env.DB_HOST,
+  port:     parseInt(process.env.DB_PORT) || 5432,
+  user:     process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME || 'postgres',
+  ssl: process.env.DB_SSL === 'false' ? false : { rejectUnauthorized: false },
+  max: 10,
 });
 
-const db = pool.promise();
+function toPostgresParams(sql) {
+  let index = 0;
+  return sql.replace(/\?/g, () => `$${++index}`);
+}
 
-// Handle pool-level errors (prevents unhandled 'error' event crash)
+async function query(sql, params = []) {
+  const text = toPostgresParams(sql);
+  const result = await pool.query(text, params);
+  return [result.rows, result];
+}
+
+async function getFirstRow(sql, params = []) {
+  const [rows] = await query(sql, params);
+  return rows[0] || null;
+}
+
+async function getClient() {
+  return pool.connect();
+}
+
+const db = {
+  query,
+  getFirstRow,
+  getClient,
+  pool,
+};
+
 pool.on('error', (err) => {
   console.warn('[DB pool error]', err.message);
 });
 
-// Verify connection on startup
-pool.getConnection((err, connection) => {
-  if (err) {
+pool.connect()
+  .then((client) => {
+    console.log('Connected to Supabase PostgreSQL ✅');
+    client.release();
+  })
+  .catch((err) => {
     console.error('Database connection failed:', err.message);
-    return;
-  }
-  console.log('Connected to MySQL ✅');
-  connection.release();
-});
+  });
 
 module.exports = db;

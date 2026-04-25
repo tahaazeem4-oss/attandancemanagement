@@ -22,10 +22,10 @@ exports.addSchool = async (req, res) => {
     return res.status(400).json({ message: 'School name is required' });
   try {
     const [r] = await db.query(
-      'INSERT INTO schools (name, tagline, initials, logo_url, primary_color, accent_color) VALUES (?,?,?,?,?,?)',
+      'INSERT INTO schools (name, tagline, initials, logo_url, primary_color, accent_color) VALUES (?,?,?,?,?,?) RETURNING id',
       [name.trim(), tagline || 'Attendance Management System', initials || name.trim().slice(0,2).toUpperCase(), logo_url || null, primary_color || '#2563EB', accent_color || '#1D4ED8']
     );
-    res.status(201).json({ message: 'School added', id: r.insertId });
+    res.status(201).json({ message: 'School added', id: r[0].id });
   } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
 };
 
@@ -49,7 +49,7 @@ exports.deleteSchool = async (req, res) => {
     await db.query('DELETE FROM schools WHERE id=?', [req.params.id]);
     res.json({ message: 'School deleted' });
   } catch (err) {
-    if (err.code === 'ER_ROW_IS_REFERENCED_2')
+    if (err.code === '23503')
       return res.status(409).json({ message: 'Cannot delete school with existing teachers, students, or admins' });
     console.error(err); res.status(500).json({ message: 'Server error' });
   }
@@ -78,10 +78,10 @@ exports.addSchoolAdmin = async (req, res) => {
     if (ex.length > 0) return res.status(409).json({ message: 'Email already in use' });
     const hashed = await bcrypt.hash(password, 12);
     const [r] = await db.query(
-      'INSERT INTO admins (school_id, first_name, last_name, email, password) VALUES (?,?,?,?,?)',
+      'INSERT INTO admins (school_id, first_name, last_name, email, password) VALUES (?,?,?,?,?) RETURNING id',
       [req.params.id, first_name, last_name, email.trim().toLowerCase(), hashed]
     );
-    res.status(201).json({ message: 'School admin added', id: r.insertId });
+    res.status(201).json({ message: 'School admin added', id: r[0].id });
   } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
 };
 
@@ -177,7 +177,7 @@ exports.listSchoolTeachers = async (req, res) => {
        FROM teacher_classes tc
        JOIN classes  c ON c.id = tc.class_id
        JOIN sections s ON s.id = tc.section_id
-       WHERE tc.teacher_id IN (?)`,
+       WHERE tc.teacher_id = ANY(?)`,
       [ids]
     );
     const result = rows.map(t => {
@@ -201,16 +201,17 @@ exports.addSchoolTeacher = async (req, res) => {
     if (ex.length > 0) return res.status(409).json({ message: 'Email already in use' });
     const hashed = await bcrypt.hash(password, 12);
     const [r] = await db.query(
-      'INSERT INTO teachers (school_id, first_name, last_name, email, phone, password) VALUES (?,?,?,?,?,?)',
+      'INSERT INTO teachers (school_id, first_name, last_name, email, phone, password) VALUES (?,?,?,?,?,?) RETURNING id',
       [req.params.schoolId, first_name, last_name, email.trim().toLowerCase(), phone || null, hashed]
     );
+    const newId = r[0].id;
     if (Array.isArray(assignments)) {
       for (const { class_id, section_id } of assignments) {
         if (class_id && section_id)
-          await db.query('INSERT IGNORE INTO teacher_classes (teacher_id, class_id, section_id) VALUES (?,?,?)', [r.insertId, class_id, section_id]);
+          await db.query('INSERT INTO teacher_classes (teacher_id, class_id, section_id) VALUES (?,?,?) ON CONFLICT DO NOTHING', [newId, class_id, section_id]);
       }
     }
-    res.status(201).json({ message: 'Teacher added', id: r.insertId });
+    res.status(201).json({ message: 'Teacher added', id: newId });
   } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
 };
 
@@ -233,7 +234,7 @@ exports.updateSchoolTeacher = async (req, res) => {
       await db.query('DELETE FROM teacher_classes WHERE teacher_id = ?', [req.params.teacherId]);
       for (const { class_id, section_id } of assignments) {
         if (class_id && section_id)
-          await db.query('INSERT IGNORE INTO teacher_classes (teacher_id, class_id, section_id) VALUES (?,?,?)', [req.params.teacherId, class_id, section_id]);
+          await db.query('INSERT INTO teacher_classes (teacher_id, class_id, section_id) VALUES (?,?,?) ON CONFLICT DO NOTHING', [req.params.teacherId, class_id, section_id]);
       }
     }
     res.json({ message: 'Teacher updated' });
@@ -246,7 +247,7 @@ exports.removeSchoolTeacher = async (req, res) => {
     await db.query('DELETE FROM teachers WHERE id=? AND school_id=?', [req.params.teacherId, req.params.schoolId]);
     res.json({ message: 'Teacher removed' });
   } catch (err) {
-    if (err.code === 'ER_ROW_IS_REFERENCED_2')
+    if (err.code === '23503')
       return res.status(409).json({ message: 'Cannot delete teacher with existing attendance records' });
     console.error(err); res.status(500).json({ message: 'Server error' });
   }
@@ -314,7 +315,7 @@ exports.addSchoolStudent = async (req, res) => {
     return res.status(400).json({ message: 'first_name, last_name, age, class_id and section_id are required' });
   try {
     const [r] = await db.query(
-      'INSERT INTO students (school_id, first_name, last_name, age, class_id, section_id, roll_no) VALUES (?,?,?,?,?,?,?)',
+      'INSERT INTO students (school_id, first_name, last_name, age, class_id, section_id, roll_no) VALUES (?,?,?,?,?,?,?) RETURNING id',
       [req.params.schoolId, first_name, last_name, parseInt(age), class_id, section_id, roll_no || null]
     );
     res.status(201).json({ message: 'Student added', id: r.insertId });
@@ -341,7 +342,7 @@ exports.removeSchoolStudent = async (req, res) => {
     await db.query('DELETE FROM students WHERE id=? AND school_id=?', [req.params.studentId, req.params.schoolId]);
     res.json({ message: 'Student removed' });
   } catch (err) {
-    if (err.code === 'ER_ROW_IS_REFERENCED_2')
+    if (err.code === '23503')
       return res.status(409).json({ message: 'Cannot delete student with existing attendance records' });
     console.error(err); res.status(500).json({ message: 'Server error' });
   }
@@ -354,11 +355,11 @@ exports.resetStudentPassword = async (req, res) => {
     return res.status(400).json({ message: 'Password must be at least 6 characters' });
   try {
     const hashed = await bcrypt.hash(new_password, 12);
-    const [r] = await db.query(
+    const [r, meta] = await db.query(
       'UPDATE student_accounts SET password=? WHERE student_id=?',
       [hashed, req.params.studentId]
     );
-    if (r.affectedRows === 0)
+    if (meta.rowCount === 0)
       return res.status(404).json({ message: 'No portal account found for this student' });
     res.json({ message: 'Password reset successfully' });
   } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }

@@ -29,7 +29,7 @@ exports.listTeachers = async (req, res) => {
        FROM teacher_classes tc
        JOIN classes  c ON c.id = tc.class_id
        JOIN sections s ON s.id = tc.section_id
-       WHERE tc.teacher_id IN (?)`,
+       WHERE tc.teacher_id = ANY(?)`,
       [ids]
     );
     const rows = teachers.map(t => {
@@ -51,16 +51,17 @@ exports.addTeacher = async (req, res) => {
     if (ex.length > 0) return res.status(409).json({ message: 'Email already in use' });
     const hashed = await bcrypt.hash(password, 12);
     const [r] = await db.query(
-      'INSERT INTO teachers (school_id, first_name, last_name, email, password, phone) VALUES (?,?,?,?,?,?)',
+      'INSERT INTO teachers (school_id, first_name, last_name, email, password, phone) VALUES (?,?,?,?,?,?) RETURNING id',
       [sid, first_name, last_name, email, hashed, phone || null]
     );
+    const newId = r[0].id;
     if (Array.isArray(assignments)) {
       for (const { class_id, section_id } of assignments) {
         if (class_id && section_id)
-          await db.query('INSERT IGNORE INTO teacher_classes (teacher_id, class_id, section_id) VALUES (?,?,?)', [r.insertId, class_id, section_id]);
+          await db.query('INSERT INTO teacher_classes (teacher_id, class_id, section_id) VALUES (?,?,?) ON CONFLICT DO NOTHING', [newId, class_id, section_id]);
       }
     }
-    res.status(201).json({ message: 'Teacher added', id: r.insertId });
+    res.status(201).json({ message: 'Teacher added', id: newId });
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
 };
 
@@ -77,7 +78,7 @@ exports.updateTeacher = async (req, res) => {
       await db.query('DELETE FROM teacher_classes WHERE teacher_id = ?', [req.params.id]);
       for (const { class_id, section_id } of assignments) {
         if (class_id && section_id)
-          await db.query('INSERT IGNORE INTO teacher_classes (teacher_id, class_id, section_id) VALUES (?,?,?)', [req.params.id, class_id, section_id]);
+          await db.query('INSERT INTO teacher_classes (teacher_id, class_id, section_id) VALUES (?,?,?) ON CONFLICT DO NOTHING', [req.params.id, class_id, section_id]);
       }
     }
     res.json({ message: 'Teacher updated' });
@@ -130,10 +131,10 @@ exports.addStudent = async (req, res) => {
     return res.status(400).json({ message: 'All fields required' });
   try {
     const [r] = await db.query(
-      'INSERT INTO students (school_id, first_name, last_name, age, class_id, section_id, roll_no) VALUES (?,?,?,?,?,?,?)',
+      'INSERT INTO students (school_id, first_name, last_name, age, class_id, section_id, roll_no) VALUES (?,?,?,?,?,?,?) RETURNING id',
       [sid, first_name, last_name, age, class_id, section_id, roll_no || null]
     );
-    res.status(201).json({ message: 'Student added', id: r.insertId });
+    res.status(201).json({ message: 'Student added', id: r[0].id });
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
 };
 
@@ -162,11 +163,11 @@ exports.resetStudentPassword = async (req, res) => {
     return res.status(400).json({ message: 'Password must be at least 6 characters' });
   try {
     const hashed = await bcrypt.hash(new_password, 12);
-    const [r] = await db.query(
+    const [r, meta] = await db.query(
       'UPDATE student_accounts SET password = ? WHERE student_id = ?',
       [hashed, req.params.id]
     );
-    if (r.affectedRows === 0)
+    if (meta.rowCount === 0)
       return res.status(404).json({ message: 'No portal account found for this student' });
     res.json({ message: 'Password reset successfully' });
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
@@ -179,7 +180,7 @@ exports.listClasses = async (req, res) => {
     const [classes]  = await db.query('SELECT * FROM classes WHERE school_id=? ORDER BY id', [sid]);
     const classIds   = classes.map(c => c.id);
     if (classIds.length === 0) return res.json([]);
-    const [sections] = await db.query('SELECT * FROM sections WHERE class_id IN (?) ORDER BY class_id, section_name', [classIds]);
+    const [sections] = await db.query('SELECT * FROM sections WHERE class_id = ANY(?) ORDER BY class_id, section_name', [classIds]);
     res.json(classes.map(c => ({ ...c, sections: sections.filter(s => s.class_id === c.id) })));
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
 };
@@ -189,8 +190,8 @@ exports.addClass = async (req, res) => {
   const sid = req.user.school_id;
   if (!class_name) return res.status(400).json({ message: 'class_name required' });
   try {
-    const [r] = await db.query('INSERT INTO classes (school_id, class_name) VALUES (?,?)', [sid, class_name]);
-    res.status(201).json({ message: 'Class added', id: r.insertId });
+    const [r] = await db.query('INSERT INTO classes (school_id, class_name) VALUES (?,?) RETURNING id', [sid, class_name]);
+    res.status(201).json({ message: 'Class added', id: r[0].id });
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
 };
 
@@ -215,10 +216,10 @@ exports.addSection = async (req, res) => {
   if (!section_name) return res.status(400).json({ message: 'section_name required' });
   try {
     const [r] = await db.query(
-      'INSERT INTO sections (class_id, section_name) VALUES (?,?)',
+      'INSERT INTO sections (class_id, section_name) VALUES (?,?) RETURNING id',
       [classId, section_name]
     );
-    res.status(201).json({ message: 'Section added', id: r.insertId });
+    res.status(201).json({ message: 'Section added', id: r[0].id });
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
 };
 
@@ -255,12 +256,12 @@ exports.addAssignment = async (req, res) => {
     return res.status(400).json({ message: 'teacher_id, class_id, section_id required' });
   try {
     const [r] = await db.query(
-      'INSERT INTO teacher_classes (teacher_id, class_id, section_id) VALUES (?,?,?)',
+      'INSERT INTO teacher_classes (teacher_id, class_id, section_id) VALUES (?,?,?) RETURNING id',
       [teacher_id, class_id, section_id]
     );
-    res.status(201).json({ message: 'Assignment added', id: r.insertId });
+    res.status(201).json({ message: 'Assignment added', id: r[0].id });
   } catch (err) {
-    if (err.code === 'ER_DUP_ENTRY')
+    if (err.code === '23505')
       return res.status(409).json({ message: 'Assignment already exists' });
     res.status(500).json({ message: 'Server error' });
   }
