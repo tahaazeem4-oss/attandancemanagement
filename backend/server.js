@@ -1,4 +1,13 @@
 require('dotenv').config();
+
+// Prevent unhandled promise rejections from crashing the server
+process.on('unhandledRejection', (reason) => {
+  console.warn('[unhandledRejection]', reason?.message || reason);
+});
+process.on('uncaughtException', (err) => {
+  console.warn('[uncaughtException]', err.message);
+});
+
 const express    = require('express');
 const cors       = require('cors');
 
@@ -9,7 +18,10 @@ const studentRoutes       = require('./routes/students');
 const attendanceRoutes    = require('./routes/attendance');
 const adminRoutes         = require('./routes/admin');
 const studentPortalRoutes = require('./routes/studentPortal');
-// const whatsappService     = require('./services/whatsappService'); // disabled — requires Chromium
+const superAdminRoutes    = require('./routes/superAdmin');
+const uploadRoutes         = require('./routes/upload');
+const db                  = require('./config/db');
+const path                = require('path');
 
 const app  = express();
 const PORT = process.env.PORT || 5000;
@@ -17,6 +29,9 @@ const PORT = process.env.PORT || 5000;
 // ── Middleware ────────────────────────────────────────────────
 app.use(cors());
 app.use(express.json());
+
+// ── Static: uploaded school logos ────────────────────────────
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ── Routes ────────────────────────────────────────────────────
 app.use('/api/auth',           authRoutes);
@@ -26,7 +41,16 @@ app.use('/api/students',       studentRoutes);
 app.use('/api/attendance',     attendanceRoutes);
 app.use('/api/admin',          adminRoutes);
 app.use('/api/student-portal', studentPortalRoutes);
+app.use('/api/super-admin',    superAdminRoutes);
+app.use('/api/upload',         uploadRoutes);
 
+// ── Public: list schools (used by signup screen) ─────────────
+app.get('/api/schools', async (req, res) => {
+  try {
+    const [rows] = await db.query('SELECT id, name, initials, tagline, primary_color, accent_color FROM schools ORDER BY name');
+    res.json(rows);
+  } catch (err) { res.status(500).json({ message: 'Server error' }); }
+});
 // ── Health check ──────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'OK', time: new Date() }));
 

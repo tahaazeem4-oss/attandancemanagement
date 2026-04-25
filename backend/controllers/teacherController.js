@@ -54,8 +54,8 @@ exports.getAssignedClasses = async (req, res) => {
        FROM   teacher_classes tc
        JOIN   classes  c ON c.id = tc.class_id
        JOIN   sections s ON s.id = tc.section_id
-       WHERE  tc.teacher_id = ?`,
-      [teacherId]
+       WHERE  tc.teacher_id = ? AND c.school_id = ?`,
+      [teacherId, req.teacher.school_id]
     );
     return res.json(rows);
   } catch (err) {

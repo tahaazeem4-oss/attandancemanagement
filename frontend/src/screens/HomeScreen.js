@@ -6,47 +6,38 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
-import branding from '../config/branding';
 import { C } from '../config/theme';
 import { HeaderBlobs } from '../components/Deco';
 
-// ── Logo: shows image if branding.logo is set, else initials badge ──
-function SchoolLogo() {
-  if (branding.logo) {
-    return (
-      <Image
-        source={branding.logo}
-        style={styles.logoImage}
-        resizeMode="contain"
-      />
-    );
-  }
-  return (
-    <View style={styles.logoPlaceholder}>
-      <Text style={styles.logoInitials}>{branding.schoolInitials}</Text>
-    </View>
-  );
-}
+// ── School banner using dynamic branding from AuthContext ──────
+function SchoolBanner({ school }) {
+  const name     = school?.name     || 'EduTrack';
+  const tagline  = school?.tagline  || 'Attendance Management System';
+  const initials = school?.initials || name.slice(0, 2).toUpperCase();
+  const color1   = school?.primary_color || '#3730A3';
+  const color2   = school?.accent_color  || '#6366F1';
 
-// ── Banner: shows image if branding.banner is set, else gradient banner ──
-function SchoolBanner() {
-  if (branding.banner) {
-    return <Image source={branding.banner} style={styles.bannerImage} resizeMode="cover" />;
-  }
   return (
     <LinearGradient
-      colors={['#3730A3', '#4F46E5', '#6366F1']}
+      colors={[color1, color2]}
       start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
       style={styles.bannerPlaceholder}
     >
-      {/* Decorative geometric circles */}
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
         <View style={bb.c1} /><View style={bb.c2} /><View style={bb.c3} />
         <View style={bb.r1} /><View style={bb.r2} />
       </View>
       <View style={styles.bannerOverlay}>
-        <Text style={styles.bannerTitle}>{branding.schoolName}</Text>
-        <Text style={styles.bannerSub}>{branding.schoolTagline}</Text>
+        <View style={styles.bannerLogoRow}>
+          {school?.logo_url
+            ? <Image source={{ uri: school.logo_url }} style={[styles.schoolBadge, { backgroundColor: 'rgba(255,255,255,0.15)' }]} resizeMode="contain" />
+            : <View style={[styles.schoolBadge, { backgroundColor: 'rgba(255,255,255,0.2)' }]}><Text style={styles.schoolBadgeText}>{initials}</Text></View>
+          }
+          <View style={{ flex: 1 }}>
+            <Text style={styles.bannerTitle}>{name}</Text>
+            <Text style={styles.bannerSub}>{tagline}</Text>
+          </View>
+        </View>
         <View style={styles.bannerDivider} />
         <Text style={styles.bannerMotto}>🎓  Excellence in Education</Text>
       </View>
@@ -62,7 +53,7 @@ const bb = StyleSheet.create({
 });
 
 export default function HomeScreen({ navigation }) {
-  const { teacher, logout } = useAuth();
+  const { teacher, school, logout } = useAuth();
   const [todayStatus,   setTodayStatus]   = useState(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [marking,       setMarking]       = useState(false);
@@ -156,7 +147,10 @@ export default function HomeScreen({ navigation }) {
       >
         <HeaderBlobs />
         <View style={styles.headerLeft}>
-          <SchoolLogo />
+          {school?.logo_url
+            ? <Image source={{ uri: school.logo_url }} style={styles.schoolLogoImg} resizeMode="contain" />
+            : <View style={styles.schoolBadge}><Text style={styles.schoolBadgeText}>{school?.initials || school?.name?.slice(0,2).toUpperCase() || 'ET'}</Text></View>
+          }
           <View style={styles.headerText}>
             <Text style={styles.greeting}>Good morning 👋</Text>
             <Text style={styles.name}>{teacher.first_name} {teacher.last_name}</Text>
@@ -172,7 +166,7 @@ export default function HomeScreen({ navigation }) {
       </LinearGradient>
 
       {/* ── Banner ─────────────────────────────────────────── */}
-      <SchoolBanner />
+      <SchoolBanner school={school} />
 
       {/* ── Teacher Attendance Card ─────────────────────────── */}
       <View style={styles.card}>
@@ -302,26 +296,21 @@ const styles = StyleSheet.create({
   },
   logoutText:       { color: '#E0E7FF', fontSize: 13, fontWeight: '600' },
 
-  // Logo
-  logoImage:        { width: 46, height: 46, borderRadius: 12 },
-  logoPlaceholder:  {
-    width: 46, height: 46, borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    justifyContent: 'center', alignItems: 'center',
-    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.25)',
-  },
-  logoInitials:     { color: '#E0E7FF', fontSize: 16, fontWeight: '800' },
+  // School Badge (inside banner)
+  bannerLogoRow:    { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 },
+  schoolBadge:      { width: 46, height: 46, borderRadius: 12, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.2)' },
+  schoolBadgeText:  { color: '#E0E7FF', fontSize: 16, fontWeight: '900', letterSpacing: 1 },
+  schoolLogoImg:    { width: 46, height: 46, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.15)' },
 
   // Banner
-  bannerImage:      { width: '100%', height: 150 },
   bannerPlaceholder:{ height: 150, backgroundColor: C.primaryDark, overflow: 'hidden' },
   bannerOverlay:    {
-    flex: 1, justifyContent: 'center', alignItems: 'center',
+    flex: 1, justifyContent: 'center',
     paddingHorizontal: 24,
     backgroundColor: 'rgba(55,48,163,0.6)',
   },
-  bannerTitle:      { color: '#fff', fontSize: 24, fontWeight: '800', textAlign: 'center', letterSpacing: 0.5 },
-  bannerSub:        { color: '#C7D2FE', fontSize: 12, marginTop: 4, textAlign: 'center' },
+  bannerTitle:      { color: '#fff', fontSize: 20, fontWeight: '800', letterSpacing: 0.5 },
+  bannerSub:        { color: '#C7D2FE', fontSize: 12, marginTop: 2 },
   bannerDivider:    { width: 48, height: 2, backgroundColor: C.accent, borderRadius: 2, marginVertical: 10 },
   bannerMotto:      { color: '#E0E7FF', fontSize: 12, fontStyle: 'italic' },
 

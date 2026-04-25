@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  View, Text, ScrollView, Pressable,
+  View, Text, ScrollView, Pressable, Image,
   StyleSheet, ActivityIndicator, StatusBar, Animated
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -13,7 +13,7 @@ const STATUS_COLOR = { present: C.present, absent: C.absent, leave: C.leave };
 const STATUS_BG    = { present: C.presentBg, absent: C.absentBg, leave: C.leaveBg };
 
 export default function StudentHomeScreen({ navigation }) {
-  const { user, logout } = useAuth();
+  const { user, school, logout } = useAuth();
   const [stats,   setStats]   = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -50,7 +50,16 @@ export default function StudentHomeScreen({ navigation }) {
       <LinearGradient colors={['#064E3B', '#065F46', '#047857']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
         <HeaderBlobs />
         <View style={styles.headerRow}>
-          <View>
+          <View style={{ flex: 1 }}>
+            {school && (
+              <View style={styles.schoolRow}>
+                {school.logo_url
+                  ? <Image source={{ uri: school.logo_url }} style={[styles.schoolBadge, { backgroundColor: school.primary_color || '#047857' }]} resizeMode="contain" />
+                  : <View style={[styles.schoolBadge, { backgroundColor: school.primary_color || '#047857' }]}><Text style={styles.schoolBadgeText}>{school.initials || school.name.slice(0,2).toUpperCase()}</Text></View>
+                }
+                <Text style={styles.schoolName} numberOfLines={1}>{school.name}</Text>
+              </View>
+            )}
             <Text style={styles.greeting}>Student Portal 🎒</Text>
             <Text style={styles.name}>{user?.first_name} {user?.last_name}</Text>
             <Text style={styles.meta}>{user?.class_name} — Sec {user?.section_name}  •  #{user?.roll_no}</Text>
@@ -117,7 +126,11 @@ const styles = StyleSheet.create({
   container:    { flex: 1, backgroundColor: C.bg },
   header:       { paddingHorizontal: 20, paddingTop: 52, paddingBottom: 28, overflow: 'hidden' },
   headerRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  greeting:     { color: '#6EE7B7', fontSize: 13, fontWeight: '600' },
+  schoolRow:       { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  schoolBadge:     { width: 30, height: 30, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+  schoolBadgeText: { color: '#fff', fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
+  schoolName:      { color: '#D1FAE5', fontSize: 13, fontWeight: '700', flex: 1 },
+  greeting:        { color: '#6EE7B7', fontSize: 13, fontWeight: '600' },
   name:         { color: '#ECFDF5', fontSize: 22, fontWeight: '800', marginTop: 2 },
   meta:         { color: '#A7F3D0', fontSize: 13, marginTop: 4 },
   logoutBtn:    { backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 7 },

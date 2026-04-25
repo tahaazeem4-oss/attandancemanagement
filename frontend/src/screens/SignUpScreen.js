@@ -1,10 +1,11 @@
-﻿import React, { useState, useRef } from 'react';
+﻿import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, Pressable, Animated,
   StyleSheet, ScrollView, ActivityIndicator, StatusBar
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../context/AuthContext';
+import api from '../services/api';
 import { C, S } from '../config/theme';
 import { HeaderBlobs, useEntrance } from '../components/Deco';
 
@@ -18,6 +19,8 @@ export default function SignUpScreen({ navigation }) {
     first_name: '', last_name: '', email: '', password: '', phone: ''
   });
   const [studentForm, setStudentForm] = useState({ roll_no: '', email: '', password: '', phone: '' });
+  const [schools,     setSchools]     = useState([]);
+  const [schoolId,    setSchoolId]    = useState(null);
 
   const [loading,   setLoading]   = useState(false);
   const [errors,    setErrors]    = useState({});
@@ -28,6 +31,13 @@ export default function SignUpScreen({ navigation }) {
   const btnS = useRef(new Animated.Value(1)).current;
   const pIn  = () => Animated.spring(btnS, { toValue: 0.96, useNativeDriver: true, speed: 50 }).start();
   const pOut = () => Animated.spring(btnS, { toValue: 1,    useNativeDriver: true, speed: 20 }).start();
+
+  useEffect(() => {
+    api.get('/schools').then(({ data }) => {
+      setSchools(data);
+      if (data.length === 1) setSchoolId(data[0].id);
+    }).catch(() => {});
+  }, []);
 
   const setT = (key, value) => { setTeacherForm(p => ({ ...p, [key]: value })); setErrors(p => ({ ...p, [key]: '' })); };
   const setS = (key, value) => { setStudentForm(p => ({ ...p, [key]: value })); setErrors(p => ({ ...p, [key]: '' })); };
@@ -41,6 +51,7 @@ export default function SignUpScreen({ navigation }) {
       else if (!EMAIL_REGEX.test(teacherForm.email.trim())) e.email = 'Enter a valid email.';
       if (!teacherForm.password)          e.password   = 'Password is required.';
       else if (teacherForm.password.length < 6) e.password = 'Min 6 characters.';
+      if (!schoolId)                      e.school_id  = 'Please select your school.';
     } else {
       if (!studentForm.roll_no.trim()) e.roll_no  = 'Roll number is required.';
       if (!studentForm.email.trim())   e.email    = 'Email is required.';
@@ -58,7 +69,7 @@ export default function SignUpScreen({ navigation }) {
     setLoading(true);
     try {
       const payload = role === 'teacher'
-        ? { role: 'teacher', ...teacherForm }
+        ? { role: 'teacher', ...teacherForm, school_id: schoolId }
         : { role: 'student', ...studentForm };
       await signup(payload);
     } catch (err) {
@@ -79,11 +90,11 @@ export default function SignUpScreen({ navigation }) {
 
       <LinearGradient colors={['#0F0C29', '#1E1B4B', '#312E81']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
         <HeaderBlobs />
-        <View style={styles.logoCircle}>
-          <Text style={styles.logoEmoji}>✏️</Text>
+        <View style={styles.logoMark}>
+          <Text style={styles.logoMarkText}>ET</Text>
         </View>
-        <Text style={styles.heroTitle}>Create Account</Text>
-        <Text style={styles.heroSub}>Register to get started</Text>
+        <Text style={styles.heroTitle}>EduTrack</Text>
+        <Text style={styles.heroSub}>Create your account</Text>
       </LinearGradient>
 
       <Animated.View style={[styles.card, cardAnim]}>
@@ -143,6 +154,24 @@ export default function SignUpScreen({ navigation }) {
             <TextInput style={[S.input, isFocused('phone') && styles.inputFocus]}
               placeholder="Phone number" placeholderTextColor={C.textLight} keyboardType="phone-pad"
               value={teacherForm.phone} onFocus={() => setFocus('phone')} onBlur={() => setFocus('')} onChangeText={v => setT('phone', v)} />
+
+            <Text style={[S.label, { marginTop: 4 }]}>School *</Text>
+            {schools.length === 0
+              ? <ActivityIndicator size="small" color={C.primary} style={{ marginBottom: 4 }} />
+              : schools.map(sc => (
+                <Pressable key={sc.id}
+                  style={[styles.schoolBtn, schoolId === sc.id && styles.schoolBtnActive]}
+                  onPress={() => { setSchoolId(sc.id); setErrors(p => ({ ...p, school_id: '' })); }}
+                >
+                  <View style={[styles.schoolInitials, { backgroundColor: sc.primary_color || C.primary }]}>
+                    <Text style={styles.schoolInitialsText}>{sc.initials || sc.name.slice(0,2).toUpperCase()}</Text>
+                  </View>
+                  <Text style={[styles.schoolName, schoolId === sc.id && { color: C.primary, fontWeight: '700' }]}>{sc.name}</Text>
+                  {schoolId === sc.id && <Text style={{ color: C.primary, marginLeft: 'auto' }}>✓</Text>}
+                </Pressable>
+              ))
+            }
+            {!!errors.school_id && <Text style={S.errorText}>{errors.school_id}</Text>}
           </>
         )}
 
@@ -193,29 +222,34 @@ export default function SignUpScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  wrapper:        { flex: 1, backgroundColor: '#0F0C29' },
-  scrollContent:  { flexGrow: 1 },
-  header:         { paddingHorizontal: 28, paddingTop: 52, paddingBottom: 36, alignItems: 'center', overflow: 'hidden' },
-  logoCircle:     { width: 70, height: 70, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.12)', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.22)', justifyContent: 'center', alignItems: 'center', marginBottom: 14 },
-  logoEmoji:      { fontSize: 30 },
-  heroTitle:      { fontSize: 26, fontWeight: '800', color: '#E0E7FF', letterSpacing: 0.5 },
-  heroSub:        { fontSize: 13, color: '#818CF8', marginTop: 6 },
-  card:           { flex: 1, backgroundColor: C.card, borderTopLeftRadius: 36, borderTopRightRadius: 36, paddingHorizontal: 24, paddingTop: 28, paddingBottom: 40, shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 28, shadowOffset: { width: 0, height: -8 }, elevation: 20 },
-  roleRow:        { flexDirection: 'row', gap: 12, marginBottom: 20 },
-  roleBtn:        { flex: 1, alignItems: 'center', paddingVertical: 14, borderRadius: 14, borderWidth: 2, borderColor: C.border, backgroundColor: C.cardAlt },
-  roleBtnActive:  { borderColor: C.primary, backgroundColor: C.primaryLight },
-  roleEmoji:      { fontSize: 24, marginBottom: 4 },
-  roleLabel:      { fontSize: 13, fontWeight: '600', color: C.textMed },
-  roleLabelActive:{ color: C.primary },
-  infoBox:        { backgroundColor: '#EFF6FF', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#BFDBFE', marginBottom: 16 },
-  infoText:       { fontSize: 12, color: '#1D4ED8', lineHeight: 18 },
-  row:            { flexDirection: 'row', gap: 12 },
-  half:           { flex: 1 },
-  inputFocus:     { borderColor: C.primary, borderWidth: 2, backgroundColor: '#F5F3FF' },
-  gradBtn:        { borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
-  formErrorBox:   { backgroundColor: C.errorBg, borderWidth: 1, borderColor: '#FECACA', borderRadius: 10, padding: 12, marginBottom: 16 },
-  formErrorText:  { color: C.error, fontSize: 13, textAlign: 'center' },
-  linkRow:        { flexDirection: 'row', justifyContent: 'center', marginTop: 20 },
-  linkText:       { color: C.textMed, fontSize: 14 },
-  linkAccent:     { color: C.primary, fontSize: 14, fontWeight: '700' },
+  wrapper:          { flex: 1, backgroundColor: '#0F0C29' },
+  scrollContent:    { flexGrow: 1 },
+  header:           { paddingHorizontal: 28, paddingTop: 52, paddingBottom: 36, alignItems: 'center', overflow: 'hidden' },
+  logoMark:         { width: 72, height: 72, borderRadius: 22, backgroundColor: 'rgba(99,102,241,0.35)', borderWidth: 1.5, borderColor: 'rgba(165,180,252,0.5)', justifyContent: 'center', alignItems: 'center', marginBottom: 14, shadowColor: '#6366F1', shadowOpacity: 0.8, shadowRadius: 20, shadowOffset: { width: 0, height: 6 }, elevation: 14 },
+  logoMarkText:     { fontSize: 22, fontWeight: '900', color: '#E0E7FF', letterSpacing: 2 },
+  heroTitle:        { fontSize: 28, fontWeight: '900', color: '#E0E7FF', letterSpacing: 1 },
+  heroSub:          { fontSize: 13, color: '#A5B4FC', marginTop: 6 },
+  card:             { flex: 1, backgroundColor: C.card, borderTopLeftRadius: 36, borderTopRightRadius: 36, paddingHorizontal: 24, paddingTop: 28, paddingBottom: 40, shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 28, shadowOffset: { width: 0, height: -8 }, elevation: 20 },
+  roleRow:          { flexDirection: 'row', gap: 12, marginBottom: 20 },
+  roleBtn:          { flex: 1, alignItems: 'center', paddingVertical: 14, borderRadius: 14, borderWidth: 2, borderColor: C.border, backgroundColor: C.cardAlt },
+  roleBtnActive:    { borderColor: C.primary, backgroundColor: C.primaryLight },
+  roleEmoji:        { fontSize: 24, marginBottom: 4 },
+  roleLabel:        { fontSize: 13, fontWeight: '600', color: C.textMed },
+  roleLabelActive:  { color: C.primary },
+  infoBox:          { backgroundColor: '#EFF6FF', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#BFDBFE', marginBottom: 16 },
+  infoText:         { fontSize: 12, color: '#1D4ED8', lineHeight: 18 },
+  row:              { flexDirection: 'row', gap: 12 },
+  half:             { flex: 1 },
+  inputFocus:       { borderColor: C.primary, borderWidth: 2, backgroundColor: '#F5F3FF' },
+  gradBtn:          { borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+  formErrorBox:     { backgroundColor: C.errorBg, borderWidth: 1, borderColor: '#FECACA', borderRadius: 10, padding: 12, marginBottom: 16 },
+  formErrorText:    { color: C.error, fontSize: 13, textAlign: 'center' },
+  linkRow:          { flexDirection: 'row', justifyContent: 'center', marginTop: 20 },
+  linkText:         { color: C.textMed, fontSize: 14 },
+  linkAccent:       { color: C.primary, fontSize: 14, fontWeight: '700' },
+  schoolBtn:        { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.cardAlt, marginBottom: 8 },
+  schoolBtnActive:  { borderColor: C.primary, backgroundColor: C.primaryLight },
+  schoolInitials:   { width: 34, height: 34, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+  schoolInitialsText: { fontSize: 13, fontWeight: '800', color: '#fff' },
+  schoolName:       { fontSize: 14, color: C.textDark, fontWeight: '500', flex: 1 },
 });

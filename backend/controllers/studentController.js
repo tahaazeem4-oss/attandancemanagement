@@ -3,18 +3,20 @@ const db = require('../config/db');
 // ── GET /api/students?class_id=&section_id= ───────────────────
 exports.getStudents = async (req, res) => {
   const { class_id, section_id } = req.query;
+  const sid = req.user.school_id;
 
   let query  = `SELECT s.*, c.class_name, sec.section_name
                 FROM   students s
                 JOIN   classes  c   ON c.id   = s.class_id
-                JOIN   sections sec ON sec.id  = s.section_id`;
-  const params = [];
+                JOIN   sections sec ON sec.id  = s.section_id
+                WHERE  s.school_id = ?`;
+  const params = [sid];
 
   if (class_id && section_id) {
-    query += ' WHERE s.class_id = ? AND s.section_id = ?';
+    query += ' AND s.class_id = ? AND s.section_id = ?';
     params.push(class_id, section_id);
   } else if (class_id) {
-    query += ' WHERE s.class_id = ?';
+    query += ' AND s.class_id = ?';
     params.push(class_id);
   }
 
@@ -32,6 +34,7 @@ exports.getStudents = async (req, res) => {
 // ── POST /api/students ────────────────────────────────────────
 exports.addStudent = async (req, res) => {
   const { first_name, last_name, age, class_id, section_id, roll_no } = req.body;
+  const sid = req.user.school_id;
 
   if (!first_name || !last_name || !age || !class_id || !section_id) {
     return res.status(400).json({ message: 'first_name, last_name, age, class_id and section_id are required' });
@@ -39,8 +42,8 @@ exports.addStudent = async (req, res) => {
 
   try {
     const [result] = await db.query(
-      'INSERT INTO students (first_name, last_name, age, class_id, section_id, roll_no) VALUES (?,?,?,?,?,?)',
-      [first_name, last_name, age, class_id, section_id, roll_no || null]
+      'INSERT INTO students (school_id, first_name, last_name, age, class_id, section_id, roll_no) VALUES (?,?,?,?,?,?,?)',
+      [sid, first_name, last_name, age, class_id, section_id, roll_no || null]
     );
     return res.status(201).json({ message: 'Student added', id: result.insertId });
   } catch (err) {

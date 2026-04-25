@@ -30,6 +30,7 @@ exports.markAttendance = async (req, res) => {
 // ── GET /api/attendance/report?class_id=&section_id=&date= ────
 exports.getReport = async (req, res) => {
   const { class_id, section_id, date } = req.query;
+  const sid = req.user.school_id;
   const reportDate = date || new Date().toISOString().slice(0, 10);
 
   if (!class_id || !section_id) {
@@ -43,9 +44,9 @@ exports.getReport = async (req, res) => {
        FROM   students s
        LEFT   JOIN student_attendance a
               ON  a.student_id = s.id AND a.date = ?
-       WHERE  s.class_id = ? AND s.section_id = ?
+       WHERE  s.class_id = ? AND s.section_id = ? AND s.school_id = ?
        ORDER  BY s.last_name, s.first_name`,
-      [reportDate, class_id, section_id]
+      [reportDate, class_id, section_id, sid]
     );
 
     return res.json({ date: reportDate, class_id, section_id, records: rows });

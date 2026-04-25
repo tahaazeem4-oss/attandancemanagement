@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, ScrollView, Pressable,
+  View, Text, ScrollView, Pressable, Image,
   StyleSheet, ActivityIndicator, StatusBar, Animated
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -18,7 +18,7 @@ const CARDS = [
 ];
 
 export default function AdminHomeScreen({ navigation }) {
-  const { user, logout } = useAuth();
+  const { user, school, logout } = useAuth();
   const [stats,   setStats]   = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -53,7 +53,16 @@ export default function AdminHomeScreen({ navigation }) {
       <LinearGradient colors={['#4C1D95', '#5B21B6', '#6D28D9']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
         <HeaderBlobs />
         <View style={styles.headerRow}>
-          <View>
+          <View style={{ flex: 1 }}>
+            {school && (
+              <View style={styles.schoolRow}>
+                {school.logo_url
+                  ? <Image source={{ uri: school.logo_url }} style={[styles.schoolBadge, { backgroundColor: school.primary_color || '#7C3AED' }]} resizeMode="contain" />
+                  : <View style={[styles.schoolBadge, { backgroundColor: school.primary_color || '#7C3AED' }]}><Text style={styles.schoolBadgeText}>{school.initials || school.name.slice(0,2).toUpperCase()}</Text></View>
+                }
+                <Text style={styles.schoolName} numberOfLines={1}>{school.name}</Text>
+              </View>
+            )}
             <Text style={styles.greeting}>Admin Panel 🛡️</Text>
             <Text style={styles.name}>{user?.first_name} {user?.last_name}</Text>
           </View>
@@ -96,21 +105,25 @@ export default function AdminHomeScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container:   { flex: 1, backgroundColor: C.bg },
-  header:      { paddingHorizontal: 20, paddingTop: 52, paddingBottom: 24, overflow: 'hidden' },
-  headerRow:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  greeting:    { color: '#C4B5FD', fontSize: 13, fontWeight: '600' },
-  name:        { color: '#EDE9FE', fontSize: 20, fontWeight: '800', marginTop: 2 },
-  logoutBtn:   { backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 7 },
-  logoutText:  { color: '#fff', fontSize: 13, fontWeight: '600' },
-  statsRow:    { flexDirection: 'row', gap: 10, marginTop: 20, flexWrap: 'wrap' },
-  statPill:    { alignItems: 'center', borderRadius: 12, borderWidth: 1.5, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: 'rgba(255,255,255,0.08)' },
-  statNum:     { fontSize: 22, fontWeight: '800' },
-  statLabel:   { fontSize: 10, color: '#C4B5FD', fontWeight: '600', marginTop: 2 },
-  sectionTitle:{ fontSize: 15, fontWeight: '800', color: C.textMed, marginHorizontal: 20, marginTop: 24, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
-  grid:        { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 14, gap: 12, justifyContent: 'center' },
-  card:        { borderRadius: 18, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 4 },
-  cardGrad:    { paddingVertical: 28, paddingHorizontal: 20, alignItems: 'center', minWidth: 140 },
-  cardIcon:    { fontSize: 34, marginBottom: 8 },
-  cardLabel:   { color: '#fff', fontSize: 14, fontWeight: '800', letterSpacing: 0.2 },
+  container:       { flex: 1, backgroundColor: C.bg },
+  header:          { paddingHorizontal: 20, paddingTop: 52, paddingBottom: 24, overflow: 'hidden' },
+  headerRow:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  schoolRow:       { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  schoolBadge:     { width: 32, height: 32, borderRadius: 9, justifyContent: 'center', alignItems: 'center' },
+  schoolBadgeText: { color: '#fff', fontSize: 11, fontWeight: '900', letterSpacing: 0.5 },
+  schoolName:      { color: '#EDE9FE', fontSize: 14, fontWeight: '700', flex: 1 },
+  greeting:        { color: '#C4B5FD', fontSize: 13, fontWeight: '600' },
+  name:            { color: '#EDE9FE', fontSize: 20, fontWeight: '800', marginTop: 2 },
+  logoutBtn:       { backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 7 },
+  logoutText:      { color: '#fff', fontSize: 13, fontWeight: '600' },
+  statsRow:        { flexDirection: 'row', gap: 10, marginTop: 20, flexWrap: 'wrap' },
+  statPill:        { alignItems: 'center', borderRadius: 12, borderWidth: 1.5, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: 'rgba(255,255,255,0.08)' },
+  statNum:         { fontSize: 22, fontWeight: '800' },
+  statLabel:       { fontSize: 10, color: '#C4B5FD', fontWeight: '600', marginTop: 2 },
+  sectionTitle:    { fontSize: 15, fontWeight: '800', color: C.textMed, marginHorizontal: 20, marginTop: 24, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
+  grid:            { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 14, gap: 12, justifyContent: 'center' },
+  card:            { borderRadius: 18, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 4 },
+  cardGrad:        { paddingVertical: 28, paddingHorizontal: 20, alignItems: 'center', minWidth: 140 },
+  cardIcon:        { fontSize: 34, marginBottom: 8 },
+  cardLabel:       { color: '#fff', fontSize: 14, fontWeight: '800', letterSpacing: 0.2 },
 });

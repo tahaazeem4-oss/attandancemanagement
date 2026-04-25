@@ -13,6 +13,11 @@ const pool = mysql.createPool({
 
 const db = pool.promise();
 
+// Handle pool-level errors (prevents unhandled 'error' event crash)
+pool.on('error', (err) => {
+  console.warn('[DB pool error]', err.message);
+});
+
 // Verify connection on startup
 pool.getConnection((err, connection) => {
   if (err) {

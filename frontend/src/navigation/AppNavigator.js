@@ -21,6 +21,10 @@ import AdminClassesScreen     from '../screens/admin/AdminClassesScreen';
 import AdminAssignmentsScreen from '../screens/admin/AdminAssignmentsScreen';
 import AdminLeavesScreen      from '../screens/admin/AdminLeavesScreen';
 
+// Super admin screens
+import SuperAdminHomeScreen    from '../screens/superadmin/SuperAdminHomeScreen';
+import SuperAdminSchoolsScreen from '../screens/superadmin/SuperAdminSchoolsScreen';
+
 // Student / Parent screens
 import StudentHomeScreen      from '../screens/student/StudentHomeScreen';
 import StudentHistoryScreen   from '../screens/student/StudentHistoryScreen';
@@ -44,6 +48,12 @@ export default function AppNavigator() {
         <>
           <Stack.Screen name="Login"  component={LoginScreen}  options={{ title: 'Sign In' }} />
           <Stack.Screen name="SignUp" component={SignUpScreen} options={{ title: 'Create Account' }} />
+        </>
+      ) : user.role === 'super_admin' ? (
+        // ── Super Admin flow ─────────────────────────────────
+        <>
+          <Stack.Screen name="SuperAdminHome"    component={SuperAdminHomeScreen}    options={{ headerShown: false }} />
+          <Stack.Screen name="SuperAdminSchools" component={SuperAdminSchoolsScreen} options={{ title: 'Manage Schools' }} />
         </>
       ) : user.role === 'admin' ? (
         // ── Admin flow ───────────────────────────────────────

@@ -2,8 +2,9 @@ const db = require('../config/db');
 
 // ── GET /api/classes ──────────────────────────────────────────
 exports.getAllClasses = async (req, res) => {
+  const sid = req.user.school_id;
   try {
-    const [rows] = await db.query('SELECT * FROM classes ORDER BY id');
+    const [rows] = await db.query('SELECT * FROM classes WHERE school_id=? ORDER BY id', [sid]);
     return res.json(rows);
   } catch (err) {
     console.error(err);

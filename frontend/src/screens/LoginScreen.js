@@ -66,11 +66,11 @@ export default function LoginScreen({ navigation }) {
       >
         <HeaderBlobs />
         <View style={{ alignItems: 'center' }}>
-          <View style={styles.logoCircle}>
-            <Text style={styles.logoEmoji}>🏫</Text>
+          <View style={styles.logoMark}>
+            <Text style={styles.logoMarkText}>ET</Text>
           </View>
           <Text style={styles.appName}>EduTrack</Text>
-          <Text style={styles.appTagline}>Attendance Management System</Text>
+          <Text style={styles.appTagline}>Smart Attendance, Every Day</Text>
         </View>
       </LinearGradient>
 
@@ -146,17 +146,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24, paddingTop: 20,
     overflow: 'hidden',
   },
-  logoCircle:   {
-    width: 84, height: 84, borderRadius: 26,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.22)',
-    justifyContent: 'center', alignItems: 'center', marginBottom: 16,
-    shadowColor: '#6366F1', shadowOpacity: 0.7, shadowRadius: 22,
-    shadowOffset: { width: 0, height: 8 }, elevation: 14,
+  logoMark: {
+    width: 80, height: 80, borderRadius: 24,
+    backgroundColor: 'rgba(99,102,241,0.35)',
+    borderWidth: 1.5, borderColor: 'rgba(165,180,252,0.5)',
+    justifyContent: 'center', alignItems: 'center', marginBottom: 14,
+    shadowColor: '#6366F1', shadowOpacity: 0.8, shadowRadius: 24,
+    shadowOffset: { width: 0, height: 8 }, elevation: 16,
   },
-  logoEmoji:    { fontSize: 38 },
-  appName:      { fontSize: 30, fontWeight: '800', color: '#E0E7FF', letterSpacing: 1 },
-  appTagline:   { fontSize: 13, color: '#818CF8', marginTop: 6, letterSpacing: 0.3 },
+  logoMarkText: { fontSize: 26, fontWeight: '900', color: '#E0E7FF', letterSpacing: 2 },
+  appName:      { fontSize: 32, fontWeight: '900', color: '#E0E7FF', letterSpacing: 1.5 },
+  appTagline:   { fontSize: 13, color: '#A5B4FC', marginTop: 6, letterSpacing: 0.5 },
 
   card:         {
     flex: 0.58,

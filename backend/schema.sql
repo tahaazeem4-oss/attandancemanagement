@@ -1,25 +1,52 @@
 -- ============================================================
 --  School Attendance Management System — Database Schema
+--  Multi-school architecture: each school has its own data.
 -- ============================================================
 
 CREATE DATABASE IF NOT EXISTS school_db;
 USE school_db;
 
+-- ── Schools ──────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS schools (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  name          VARCHAR(200) NOT NULL,
+  tagline       VARCHAR(255) DEFAULT 'Attendance Management System',
+  initials      VARCHAR(10)  DEFAULT 'SC',
+  logo_url      VARCHAR(500) DEFAULT NULL,
+  primary_color VARCHAR(20)  DEFAULT '#2563EB',
+  accent_color  VARCHAR(20)  DEFAULT '#1D4ED8',
+  created_at    TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ── Super Admins (platform-level, no school affiliation) ─────
+CREATE TABLE IF NOT EXISTS super_admins (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  first_name VARCHAR(100) NOT NULL,
+  last_name  VARCHAR(100) NOT NULL,
+  email      VARCHAR(150) NOT NULL UNIQUE,
+  password   VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ── Teachers ─────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS teachers (
   id           INT AUTO_INCREMENT PRIMARY KEY,
+  school_id    INT NOT NULL,
   first_name   VARCHAR(100) NOT NULL,
   last_name    VARCHAR(100) NOT NULL,
   email        VARCHAR(150) NOT NULL UNIQUE,
   password     VARCHAR(255) NOT NULL,
   phone        VARCHAR(20),
-  created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE RESTRICT
 );
 
 -- ── Classes ───────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS classes (
   id           INT AUTO_INCREMENT PRIMARY KEY,
-  class_name   VARCHAR(50) NOT NULL   -- e.g. "Grade 1", "Grade 2"
+  school_id    INT NOT NULL,
+  class_name   VARCHAR(50) NOT NULL,   -- e.g. "Grade 1", "Grade 2"
+  FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE RESTRICT
 );
 
 -- ── Sections ──────────────────────────────────────────────────
@@ -45,6 +72,7 @@ CREATE TABLE IF NOT EXISTS teacher_classes (
 -- ── Students ──────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS students (
   id           INT AUTO_INCREMENT PRIMARY KEY,
+  school_id    INT NOT NULL,
   first_name   VARCHAR(100) NOT NULL,
   last_name    VARCHAR(100) NOT NULL,
   age          INT NOT NULL,
@@ -52,6 +80,7 @@ CREATE TABLE IF NOT EXISTS students (
   section_id   INT NOT NULL,
   roll_no      VARCHAR(20),
   created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (school_id)  REFERENCES schools(id)  ON DELETE RESTRICT,
   FOREIGN KEY (class_id)   REFERENCES classes(id)  ON DELETE CASCADE,
   FOREIGN KEY (section_id) REFERENCES sections(id) ON DELETE CASCADE
 );
@@ -92,14 +121,16 @@ CREATE TABLE IF NOT EXISTS whatsapp_groups (
   FOREIGN KEY (section_id) REFERENCES sections(id) ON DELETE CASCADE
 );
 
--- ── Admins (created via setup script only) ───────────────────
+-- ── Admins (school-level, created by super admin) ────────────
 CREATE TABLE IF NOT EXISTS admins (
   id           INT AUTO_INCREMENT PRIMARY KEY,
+  school_id    INT NOT NULL,
   first_name   VARCHAR(100) NOT NULL,
   last_name    VARCHAR(100) NOT NULL,
   email        VARCHAR(150) NOT NULL UNIQUE,
   password     VARCHAR(255) NOT NULL,
-  created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE RESTRICT
 );
 
 -- ── Student Portal Accounts ───────────────────────────────────
