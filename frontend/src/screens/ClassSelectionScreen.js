@@ -12,8 +12,7 @@ import PickerField from '../components/PickerField';
 export default function ClassSelectionScreen({ navigation, route }) {
   const mode = route?.params?.mode || 'attendance';  // 'attendance' | 'report'
 
-  const [classes,     setClasses]     = useState([]);
-  const [sections,    setSections]    = useState([]);
+  const [assignments,     setAssignments]     = useState([]);
   const [selectedClass,   setSelectedClass]   = useState('');
   const [selectedSection, setSelectedSection] = useState('');
   const [loading, setLoading] = useState(true);
@@ -23,44 +22,67 @@ export default function ClassSelectionScreen({ navigation, route }) {
   const pOut = () => Animated.spring(btnS, { toValue: 1,    useNativeDriver: true, speed: 20 }).start();
 
   useEffect(() => {
-    api.get('/classes')
-      .then(({ data }) => setClasses(data))
-      .catch(() => Alert.alert('Error', 'Could not load classes'))
+    api.get('/teachers/classes')
+      .then(({ data }) => {
+        setAssignments(data);
+        // Auto-navigate if exactly one assignment
+        if (data.length === 1) {
+          const a = data[0];
+          const dest = mode === 'report' ? 'Report' : 'StudentAttendance';
+          navigation.replace(dest, {
+            class_id:     a.class_id,
+            section_id:   a.section_id,
+            class_name:   a.class_name,
+            section_name: a.section_name,
+          });
+        }
+      })
+      .catch(() => Alert.alert('Error', 'Could not load assigned classes'))
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    if (!selectedClass) { setSections([]); setSelectedSection(''); return; }
-    api.get(`/classes/${selectedClass}/sections`)
-      .then(({ data }) => { setSections(data); setSelectedSection(''); })
-      .catch(() => Alert.alert('Error', 'Could not load sections'));
-  }, [selectedClass]);
+  // Unique classes from assignments
+  const uniqueClasses = [...new Map(
+    assignments.map(a => [a.class_id, { id: a.class_id, class_name: a.class_name }])
+  ).values()];
+
+  // Sections for the selected class
+  const sectionsForClass = assignments
+    .filter(a => String(a.class_id) === String(selectedClass))
+    .map(a => ({ id: a.section_id, section_name: a.section_name }));
 
   const handleProceed = () => {
     if (!selectedClass || !selectedSection) {
       return Alert.alert('Select both class and section', 'Please pick a class and a section first.');
     }
-    const classObj   = classes.find(c => String(c.id) === String(selectedClass));
-    const sectionObj = sections.find(s => String(s.id) === String(selectedSection));
+    const classObj   = uniqueClasses.find(c => String(c.id) === String(selectedClass));
+    const sectionObj = sectionsForClass.find(s => String(s.id) === String(selectedSection));
 
-    if (mode === 'report') {
-      navigation.navigate('Report', {
-        class_id:     selectedClass,
-        section_id:   selectedSection,
-        class_name:   classObj?.class_name,
-        section_name: sectionObj?.section_name
-      });
-    } else {
-      navigation.navigate('StudentAttendance', {
-        class_id:     selectedClass,
-        section_id:   selectedSection,
-        class_name:   classObj?.class_name,
-        section_name: sectionObj?.section_name
-      });
-    }
+    const dest = mode === 'report' ? 'Report' : 'StudentAttendance';
+    navigation.navigate(dest, {
+      class_id:     selectedClass,
+      section_id:   selectedSection,
+      class_name:   classObj?.class_name,
+      section_name: sectionObj?.section_name,
+    });
   };
 
   if (loading) return (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: C.bg }}>
+      <ActivityIndicator color={C.primary} size="large" />
+    </View>
+  );
+
+  if (!loading && assignments.length === 0) return (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: C.bg, padding: 32 }}>
+      <Text style={{ fontSize: 40, marginBottom: 12 }}>🏫</Text>
+      <Text style={{ fontSize: 16, fontWeight: '700', color: C.textDark, marginBottom: 6 }}>No class assigned</Text>
+      <Text style={{ fontSize: 14, color: C.textMed, textAlign: 'center' }}>You have not been assigned to any class yet. Contact your admin.</Text>
+    </View>
+  );
+
+  // Single assignment → auto-navigated by useEffect, show loader
+  if (assignments.length === 1) return (
     <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: C.bg }}>
       <ActivityIndicator color={C.primary} size="large" />
     </View>
@@ -90,9 +112,9 @@ export default function ClassSelectionScreen({ navigation, route }) {
         <PickerField
           label="Class"
           value={selectedClass}
-          onChange={v => setSelectedClass(v)}
+          onChange={v => { setSelectedClass(v); setSelectedSection(''); }}
           placeholder="Tap to select a class"
-          items={classes.map(c => ({ label: c.class_name, value: String(c.id) }))}
+          items={uniqueClasses.map(c => ({ label: c.class_name, value: String(c.id) }))}
         />
 
         <Text style={[S.label, { marginTop: 12 }]}>Section</Text>
@@ -101,8 +123,8 @@ export default function ClassSelectionScreen({ navigation, route }) {
           value={selectedSection}
           onChange={v => setSelectedSection(v)}
           placeholder="Tap to select a section"
-          disabled={!sections.length}
-          items={sections.map(s => ({ label: `Section ${s.section_name}`, value: String(s.id) }))}
+          disabled={!selectedClass}
+          items={sectionsForClass.map(s => ({ label: `Section ${s.section_name}`, value: String(s.id) }))}
         />
 
         <Animated.View style={{ marginTop: 16, transform: [{ scale: btnS }] }}>

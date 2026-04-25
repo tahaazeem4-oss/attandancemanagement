@@ -1,19 +1,99 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, FlatList, Pressable, TextInput,
-  Modal, StyleSheet, Alert, ActivityIndicator, StatusBar
+  Modal, ScrollView, StyleSheet, Alert, ActivityIndicator, StatusBar
 } from 'react-native';
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
 
-const EMPTY_FORM = { first_name: '', last_name: '', email: '', password: '', phone: '' };
+const EMPTY_FORM = { first_name: '', last_name: '', email: '', password: '', phone: '', assignments: [] };
+
+const ROLE = {
+  class_teacher:   { label: 'Class Teacher',   bg: '#ECFDF5', color: '#065F46' },
+  floor_incharge:  { label: 'Floor Incharge',  bg: '#F5F3FF', color: '#5B21B6' },
+  subject_teacher: { label: 'Subject Teacher', bg: '#FFFBEB', color: '#92400E' },
+};
+
+// ── Multi-Assignment Picker (inline) ─────────────────────────
+function MultiAssignmentPicker({ classes, assignments, onChange }) {
+  const [picking,   setPicking]   = useState(false);
+  const [pickClass, setPickClass] = useState(null);
+  const sections = pickClass ? (classes.find(c => c.id === pickClass)?.sections || []) : [];
+
+  const add = (classId, sectionId) => {
+    const cls = classes.find(c => c.id === classId);
+    const sec = cls?.sections?.find(s => s.id === sectionId);
+    if (!cls || !sec) return;
+    if (assignments.some(a => a.class_id === classId && a.section_id === sectionId)) return;
+    onChange([...assignments, { class_id: classId, section_id: sectionId, class_name: cls.class_name, section_name: sec.section_name }]);
+    setPickClass(null); setPicking(false);
+  };
+  const remove = (idx) => onChange(assignments.filter((_, i) => i !== idx));
+
+  return (
+    <View style={{ marginBottom: 8 }}>
+      <Text style={S.label}>Class / Section Assignments</Text>
+      <View style={{ gap: 6, marginBottom: 8 }}>
+        {assignments.length === 0 && (
+          <View style={mp.emptyTag}>
+            <Text style={mp.emptyTagTxt}>📚 No assignment — Subject Teacher</Text>
+          </View>
+        )}
+        {assignments.map((a, i) => (
+          <View key={i} style={mp.tag}>
+            <Text style={mp.tagTxt}>{a.class_name}  ·  Sec {a.section_name}</Text>
+            <Pressable onPress={() => remove(i)} hitSlop={8}>
+              <Text style={mp.tagX}>✕</Text>
+            </Pressable>
+          </View>
+        ))}
+      </View>
+      {picking ? (
+        <View style={mp.pickerBox}>
+          <Text style={[S.label, { marginBottom: 6 }]}>Select Class</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+            {classes.map(cls => (
+              <Pressable
+                key={cls.id}
+                style={[mp.pill, pickClass === cls.id && mp.pillActive]}
+                onPress={() => setPickClass(cls.id)}
+              >
+                <Text style={[mp.pillTxt, pickClass === cls.id && mp.pillTxtActive]}>{cls.class_name}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+          {pickClass !== null && sections.length > 0 && (
+            <>
+              <Text style={[S.label, { marginBottom: 6 }]}>Select Section</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {sections.map(sec => (
+                  <Pressable key={sec.id} style={mp.pill} onPress={() => add(pickClass, sec.id)}>
+                    <Text style={mp.pillTxt}>{sec.section_name}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </>
+          )}
+          <Pressable onPress={() => { setPicking(false); setPickClass(null); }} style={mp.cancelBtn}>
+            <Text style={mp.cancelBtnTxt}>Cancel</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <Pressable style={mp.addBtn} onPress={() => setPicking(true)}>
+          <Text style={mp.addBtnTxt}>＋  Add Class / Section</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
 
 export default function AdminTeachersScreen() {
   const [teachers,  setTeachers]  = useState([]);
+  const [classes,   setClasses]   = useState([]);
   const [loading,   setLoading]   = useState(true);
-  const [modal,     setModal]     = useState(false);  // add/edit
-  const [pwModal,   setPwModal]   = useState(false);  // reset password
-  const [editing,   setEditing]   = useState(null);   // teacher being edited
+  const [modal,     setModal]     = useState(false);
+  const [pwModal,   setPwModal]   = useState(false);
+  const [editing,   setEditing]   = useState(null);
   const [form,      setForm]      = useState(EMPTY_FORM);
   const [newPw,     setNewPw]     = useState('');
   const [saving,    setSaving]    = useState(false);
@@ -21,15 +101,25 @@ export default function AdminTeachersScreen() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { const { data } = await api.get('/admin/teachers'); setTeachers(data); }
-    catch { Alert.alert('Error', 'Could not load teachers'); }
+    try {
+      const [tRes, cRes] = await Promise.all([
+        api.get('/admin/teachers'),
+        api.get('/admin/classes'),
+      ]);
+      setTeachers(tRes.data);
+      setClasses(cRes.data);
+    } catch { Alert.alert('Error', 'Could not load data'); }
     finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, []);
 
   const openAdd  = () => { setEditing(null); setForm(EMPTY_FORM); setModal(true); };
-  const openEdit = (t) => { setEditing(t); setForm({ first_name: t.first_name, last_name: t.last_name, email: t.email, phone: t.phone || '', password: '' }); setModal(true); };
+  const openEdit = (t) => {
+    setEditing(t);
+    setForm({ first_name: t.first_name, last_name: t.last_name, email: t.email, phone: t.phone || '', password: '', assignments: t.assignments || [] });
+    setModal(true);
+  };
 
   const handleSave = async () => {
     if (!form.first_name || !form.last_name || !form.email) return Alert.alert('Validation', 'First name, last name and email are required.');
@@ -37,9 +127,9 @@ export default function AdminTeachersScreen() {
     setSaving(true);
     try {
       if (editing) {
-        await api.put(`/admin/teachers/${editing.id}`, { first_name: form.first_name, last_name: form.last_name, email: form.email, phone: form.phone });
+        await api.put(`/admin/teachers/${editing.id}`, { first_name: form.first_name, last_name: form.last_name, email: form.email, phone: form.phone, assignments: form.assignments });
       } else {
-        await api.post('/admin/teachers', form);
+        await api.post('/admin/teachers', { ...form, assignments: form.assignments });
       }
       setModal(false);
       load();
@@ -88,7 +178,16 @@ export default function AdminTeachersScreen() {
               <View style={styles.card}>
                 <View style={styles.avatar}><Text style={styles.avatarText}>{item.first_name[0]}{item.last_name[0]}</Text></View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.name}>{item.first_name} {item.last_name}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <Text style={styles.name}>{item.first_name} {item.last_name}</Text>
+                    {item.teacher_role && ROLE[item.teacher_role] && (
+                      <View style={[styles.rolePill, { backgroundColor: ROLE[item.teacher_role].bg }]}>
+                        <Text style={[styles.rolePillTxt, { color: ROLE[item.teacher_role].color }]}>
+                          {ROLE[item.teacher_role].label}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
                   <Text style={styles.sub}>{item.email}</Text>
                   {item.phone ? <Text style={styles.sub}>{item.phone}</Text> : null}
                 </View>
@@ -116,37 +215,44 @@ export default function AdminTeachersScreen() {
       {/* Add/Edit Modal */}
       <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}>
         <View style={styles.overlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{editing ? 'Edit Teacher' : 'Add Teacher'}</Text>
-            <View style={styles.row}>
-              <View style={{ flex: 1 }}>
-                <Text style={S.label}>First Name *</Text>
-                <TextInput style={S.input} placeholder="First Name" value={form.first_name} onChangeText={v => F('first_name', v)} />
+          <ScrollView contentContainerStyle={{ justifyContent: 'flex-end', flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>{editing ? 'Edit Teacher' : 'Add Teacher'}</Text>
+              <View style={styles.row}>
+                <View style={{ flex: 1 }}>
+                  <Text style={S.label}>First Name *</Text>
+                  <TextInput style={S.input} placeholder="First Name" value={form.first_name} onChangeText={v => F('first_name', v)} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={S.label}>Last Name *</Text>
+                  <TextInput style={S.input} placeholder="Last Name" value={form.last_name} onChangeText={v => F('last_name', v)} />
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={S.label}>Last Name *</Text>
-                <TextInput style={S.input} placeholder="Last Name" value={form.last_name} onChangeText={v => F('last_name', v)} />
+              <Text style={S.label}>Email *</Text>
+              <TextInput style={S.input} placeholder="Email" keyboardType="email-address" autoCapitalize="none" value={form.email} onChangeText={v => F('email', v)} />
+              {!editing && (
+                <>
+                  <Text style={S.label}>Password *</Text>
+                  <TextInput style={S.input} placeholder="Password (min 6)" secureTextEntry value={form.password} onChangeText={v => F('password', v)} />
+                </>
+              )}
+              <Text style={S.label}>Phone</Text>
+              <TextInput style={S.input} placeholder="Phone (optional)" keyboardType="phone-pad" value={form.phone} onChangeText={v => F('phone', v)} />
+              <MultiAssignmentPicker
+                classes={classes}
+                assignments={form.assignments}
+                onChange={v => F('assignments', v)}
+              />
+              <View style={styles.modalBtns}>
+                <Pressable style={[styles.modalBtn, styles.cancelBtn]} onPress={() => setModal(false)}>
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={[styles.modalBtn, styles.saveBtn]} onPress={handleSave} disabled={saving}>
+                  {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveBtnText}>Save</Text>}
+                </Pressable>
               </View>
             </View>
-            <Text style={S.label}>Email *</Text>
-            <TextInput style={S.input} placeholder="Email" keyboardType="email-address" autoCapitalize="none" value={form.email} onChangeText={v => F('email', v)} />
-            {!editing && (
-              <>
-                <Text style={S.label}>Password *</Text>
-                <TextInput style={S.input} placeholder="Password (min 6)" secureTextEntry value={form.password} onChangeText={v => F('password', v)} />
-              </>
-            )}
-            <Text style={S.label}>Phone</Text>
-            <TextInput style={S.input} placeholder="Phone (optional)" keyboardType="phone-pad" value={form.phone} onChangeText={v => F('phone', v)} />
-            <View style={styles.modalBtns}>
-              <Pressable style={[styles.modalBtn, styles.cancelBtn]} onPress={() => setModal(false)}>
-                <Text style={styles.cancelBtnText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={[styles.modalBtn, styles.saveBtn]} onPress={handleSave} disabled={saving}>
-                {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveBtnText}>Save</Text>}
-              </Pressable>
-            </View>
-          </View>
+          </ScrollView>
         </View>
       </Modal>
 
@@ -180,6 +286,8 @@ const styles = StyleSheet.create({
   avatarText: { color: C.primary, fontWeight: '800', fontSize: 14 },
   name:       { fontSize: 15, fontWeight: '700', color: C.textDark },
   sub:        { fontSize: 12, color: C.textLight, marginTop: 1 },
+  rolePill:   { borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
+  rolePillTxt:{ fontSize: 10, fontWeight: '700' },
   actions:    { flexDirection: 'row', gap: 6 },
   btn:        { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   btnText:    { fontSize: 12, fontWeight: '700' },
@@ -197,4 +305,21 @@ const styles = StyleSheet.create({
   saveBtn:    { backgroundColor: C.primary },
   cancelBtnText: { color: C.textMed, fontWeight: '700' },
   saveBtnText:   { color: '#fff', fontWeight: '700' },
+});
+
+const mp = StyleSheet.create({
+  emptyTag:     { backgroundColor: '#FFFBEB', borderRadius: 8, padding: 10, alignItems: 'center' },
+  emptyTagTxt:  { color: '#92400E', fontSize: 12 },
+  tag:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#EEF2FF', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  tagTxt:       { fontSize: 13, fontWeight: '600', color: C.primary, flex: 1 },
+  tagX:         { fontSize: 14, color: C.textMed, fontWeight: '700', marginLeft: 8 },
+  pickerBox:    { backgroundColor: '#F8FAFC', borderRadius: 10, padding: 12, marginBottom: 4, borderWidth: 1, borderColor: C.border },
+  pill:         { backgroundColor: '#F1F5F9', borderRadius: 18, paddingHorizontal: 12, paddingVertical: 6, marginRight: 8, borderWidth: 1, borderColor: C.border },
+  pillActive:   { backgroundColor: C.primary, borderColor: C.primary },
+  pillTxt:      { color: C.textMed, fontSize: 13, fontWeight: '600' },
+  pillTxtActive:{ color: '#fff' },
+  addBtn:       { borderStyle: 'dashed', borderWidth: 1.5, borderColor: C.primary, borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
+  addBtnTxt:    { color: C.primary, fontWeight: '700', fontSize: 13 },
+  cancelBtn:    { marginTop: 8, padding: 8, alignItems: 'center' },
+  cancelBtnTxt: { color: C.textMed, fontSize: 13 },
 });

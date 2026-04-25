@@ -92,6 +92,42 @@ export default function SuperAdminHomeScreen({ navigation }) {
             <Text style={styles.navCardArrow}>›</Text>
           </LinearGradient>
         </Pressable>
+
+        <Pressable
+          style={({ pressed }) => [styles.navCard, pressed && { opacity: 0.85 }]}
+          onPress={() => navigation.navigate('SuperAdminTeachers')}
+        >
+          <LinearGradient
+            colors={['#065F46', '#047857', '#10B981']}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+            style={styles.navCardGrad}
+          >
+            <Text style={styles.navCardIcon}>👨‍🏫</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.navCardTitle}>Teachers</Text>
+              <Text style={styles.navCardSub}>Add, edit, delete teachers · reset passwords</Text>
+            </View>
+            <Text style={styles.navCardArrow}>›</Text>
+          </LinearGradient>
+        </Pressable>
+
+        <Pressable
+          style={({ pressed }) => [styles.navCard, pressed && { opacity: 0.85 }]}
+          onPress={() => navigation.navigate('SuperAdminStudents')}
+        >
+          <LinearGradient
+            colors={['#7C2D12', '#B45309', '#F59E0B']}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+            style={styles.navCardGrad}
+          >
+            <Text style={styles.navCardIcon}>🎒</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.navCardTitle}>Students</Text>
+              <Text style={styles.navCardSub}>Add, edit, delete students · reset portal passwords</Text>
+            </View>
+            <Text style={styles.navCardArrow}>›</Text>
+          </LinearGradient>
+        </Pressable>
       </Animated.View>
     </ScrollView>
   );

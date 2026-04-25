@@ -63,3 +63,47 @@ exports.getAssignedClasses = async (req, res) => {
     return res.status(500).json({ message: 'Server error' });
   }
 };
+
+// ── GET /api/teachers/leaves ──────────────────────────────────
+// Returns leave applications for students in teacher's assigned classes
+exports.getClassLeaves = async (req, res) => {
+  const teacherId = req.teacher.id;
+  try {
+    const [assignments] = await db.query(
+      'SELECT class_id, section_id FROM teacher_classes WHERE teacher_id = ?',
+      [teacherId]
+    );
+    if (assignments.length === 0) return res.json([]);
+    const conditions = assignments.map(() => '(s.class_id = ? AND s.section_id = ?)').join(' OR ');
+    const params = assignments.flatMap(a => [a.class_id, a.section_id]);
+    const [rows] = await db.query(
+      `SELECT la.id, la.student_id, la.date, la.reason, la.status, la.applied_at,
+              s.first_name, s.last_name, s.roll_no, c.class_name, sec.section_name
+       FROM   leave_applications la
+       JOIN   students  s   ON s.id   = la.student_id
+       JOIN   classes   c   ON c.id   = s.class_id
+       JOIN   sections  sec ON sec.id = s.section_id
+       WHERE  (${conditions})
+       ORDER  BY la.applied_at DESC`,
+      params
+    );
+    return res.json(rows);
+  } catch (err) {
+    console.error('Get class leaves error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ── PUT /api/teachers/leaves/:id ─────────────────────────────
+exports.updateLeaveStatus = async (req, res) => {
+  const { status } = req.body;
+  if (!['approved', 'rejected'].includes(status))
+    return res.status(400).json({ message: 'status must be approved or rejected' });
+  try {
+    await db.query('UPDATE leave_applications SET status = ? WHERE id = ?', [status, req.params.id]);
+    res.json({ message: 'Leave status updated' });
+  } catch (err) {
+    console.error('Update leave status error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};

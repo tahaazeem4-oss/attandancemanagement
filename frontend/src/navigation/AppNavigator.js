@@ -12,6 +12,7 @@ import ClassSelectionScreen    from '../screens/ClassSelectionScreen';
 import StudentAttendanceScreen from '../screens/StudentAttendanceScreen';
 import AddStudentScreen        from '../screens/AddStudentScreen';
 import ReportScreen            from '../screens/ReportScreen';
+import TeacherLeavesScreen     from '../screens/TeacherLeavesScreen';
 
 // Admin screens
 import AdminHomeScreen        from '../screens/admin/AdminHomeScreen';
@@ -23,7 +24,9 @@ import AdminLeavesScreen      from '../screens/admin/AdminLeavesScreen';
 
 // Super admin screens
 import SuperAdminHomeScreen    from '../screens/superadmin/SuperAdminHomeScreen';
-import SuperAdminSchoolsScreen from '../screens/superadmin/SuperAdminSchoolsScreen';
+import SuperAdminSchoolsScreen  from '../screens/superadmin/SuperAdminSchoolsScreen';
+import SuperAdminTeachersScreen from '../screens/superadmin/SuperAdminTeachersScreen';
+import SuperAdminStudentsScreen from '../screens/superadmin/SuperAdminStudentsScreen';
 
 // Student / Parent screens
 import StudentHomeScreen      from '../screens/student/StudentHomeScreen';
@@ -52,8 +55,10 @@ export default function AppNavigator() {
       ) : user.role === 'super_admin' ? (
         // ── Super Admin flow ─────────────────────────────────
         <>
-          <Stack.Screen name="SuperAdminHome"    component={SuperAdminHomeScreen}    options={{ headerShown: false }} />
-          <Stack.Screen name="SuperAdminSchools" component={SuperAdminSchoolsScreen} options={{ title: 'Manage Schools' }} />
+          <Stack.Screen name="SuperAdminHome"     component={SuperAdminHomeScreen}    options={{ headerShown: false }} />
+          <Stack.Screen name="SuperAdminSchools"  component={SuperAdminSchoolsScreen} options={{ title: 'Manage Schools' }} />
+          <Stack.Screen name="SuperAdminTeachers" component={SuperAdminTeachersScreen} options={{ title: 'Manage Teachers' }} />
+          <Stack.Screen name="SuperAdminStudents" component={SuperAdminStudentsScreen} options={{ title: 'Manage Students' }} />
         </>
       ) : user.role === 'admin' ? (
         // ── Admin flow ───────────────────────────────────────
@@ -79,6 +84,7 @@ export default function AppNavigator() {
           <Stack.Screen name="ClassSelection"    component={ClassSelectionScreen}    options={{ title: 'Select Class' }} />
           <Stack.Screen name="StudentAttendance" component={StudentAttendanceScreen} options={{ title: 'Mark Attendance' }} />
           <Stack.Screen name="AddStudent"        component={AddStudentScreen}        options={{ title: 'Add Student' }} />
+          <Stack.Screen name="TeacherLeaves"     component={TeacherLeavesScreen}     options={{ title: 'Leave Requests', headerShown: false }} />
           <Stack.Screen name="Report"            component={ReportScreen}            options={{ title: 'Attendance Report' }} />
         </>
       )}

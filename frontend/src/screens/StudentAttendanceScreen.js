@@ -29,10 +29,8 @@ export default function StudentAttendanceScreen({ navigation, route }) {
     api.get('/students', { params: { class_id, section_id } })
       .then(({ data }) => {
         setStudents(data);
-        // Default all to 'present'
-        const defaults = {};
-        data.forEach(s => { defaults[s.id] = 'present'; });
-        setAttendance(defaults);
+        // No default — teacher must select each student's status
+        setAttendance({});
         // Check if attendance already submitted for today
         return api.get('/attendance/report', { params: { class_id, section_id, date: today } })
           .then(({ data: report }) => {
@@ -58,9 +56,11 @@ export default function StudentAttendanceScreen({ navigation, route }) {
 
   const handleSubmit = async () => {
     if (students.length === 0) return Alert.alert('No students', 'No students found for this class/section.');
+    const unmarked = students.filter(s => !attendance[s.id]);
+    if (unmarked.length > 0) return Alert.alert('Incomplete', `${unmarked.length} student(s) not marked yet. Please mark all students before submitting.`);
     setSaving(true);
     try {
-      const records = students.map(s => ({ student_id: s.id, status: attendance[s.id] || 'present' }));
+      const records = students.map(s => ({ student_id: s.id, status: attendance[s.id] }));
       const today   = new Date().toISOString().slice(0, 10);
       await api.post('/attendance/mark', { date: today, records });
       Alert.alert('Saved!', 'Attendance has been submitted successfully.', [
@@ -73,6 +73,7 @@ export default function StudentAttendanceScreen({ navigation, route }) {
     }
   };
 
+  const unmarkedCount = students.filter(s => !attendance[s.id]).length;
   const counts = {
     present: students.filter(s => attendance[s.id] === 'present').length,
     absent:  students.filter(s => attendance[s.id] === 'absent').length,
@@ -103,6 +104,12 @@ export default function StudentAttendanceScreen({ navigation, route }) {
             <Text style={[styles.summaryLabel, { color: STATUS_COLOR[key] }]}>{key.toUpperCase()}</Text>
           </View>
         ))}
+        {unmarkedCount > 0 && (
+          <View style={[styles.summaryItem, { backgroundColor: '#F1F5F9' }]}>
+            <Text style={[styles.summaryNum, { color: '#94A3B8' }]}>{unmarkedCount}</Text>
+            <Text style={[styles.summaryLabel, { color: '#94A3B8' }]}>PENDING</Text>
+          </View>
+        )}
       </View>
 
       {/* Student list */}

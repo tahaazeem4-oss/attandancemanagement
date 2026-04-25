@@ -15,8 +15,10 @@ const STATUS_LABEL = { present: 'Present', absent: 'Absent', leave: 'On Leave', 
 export default function ReportScreen({ route }) {
   const { class_id, section_id, class_name, section_name } = route.params;
 
+  const today = new Date().toISOString().slice(0, 10);
+
   const [records,  setRecords]  = useState([]);
-  const [date,     setDate]     = useState(new Date().toISOString().slice(0, 10));
+  const [date,     setDate]     = useState(today);
   const [loading,  setLoading]  = useState(false);
   // Summary card entrance animations
   const s1o = useRef(new Animated.Value(0)).current, s1y = useRef(new Animated.Value(20)).current;

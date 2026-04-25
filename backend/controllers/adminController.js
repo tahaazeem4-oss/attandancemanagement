@@ -18,16 +18,31 @@ exports.getStats = async (req, res) => {
 exports.listTeachers = async (req, res) => {
   const sid = req.user.school_id;
   try {
-    const [rows] = await db.query(
+    const [teachers] = await db.query(
       'SELECT id, first_name, last_name, email, phone, created_at FROM teachers WHERE school_id=? ORDER BY last_name, first_name',
       [sid]
     );
+    if (teachers.length === 0) return res.json([]);
+    const ids = teachers.map(t => t.id);
+    const [assignments] = await db.query(
+      `SELECT tc.teacher_id, tc.class_id, tc.section_id, c.class_name, s.section_name
+       FROM teacher_classes tc
+       JOIN classes  c ON c.id = tc.class_id
+       JOIN sections s ON s.id = tc.section_id
+       WHERE tc.teacher_id IN (?)`,
+      [ids]
+    );
+    const rows = teachers.map(t => {
+      const ta = assignments.filter(a => a.teacher_id === t.id);
+      const teacher_role = ta.length === 0 ? 'subject_teacher' : ta.length === 1 ? 'class_teacher' : 'floor_incharge';
+      return { ...t, assignments: ta, teacher_role };
+    });
     res.json(rows);
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
 };
 
 exports.addTeacher = async (req, res) => {
-  const { first_name, last_name, email, password, phone } = req.body;
+  const { first_name, last_name, email, password, phone, assignments } = req.body;
   const sid = req.user.school_id;
   if (!first_name || !last_name || !email || !password)
     return res.status(400).json({ message: 'first_name, last_name, email, password required' });
@@ -39,12 +54,18 @@ exports.addTeacher = async (req, res) => {
       'INSERT INTO teachers (school_id, first_name, last_name, email, password, phone) VALUES (?,?,?,?,?,?)',
       [sid, first_name, last_name, email, hashed, phone || null]
     );
+    if (Array.isArray(assignments)) {
+      for (const { class_id, section_id } of assignments) {
+        if (class_id && section_id)
+          await db.query('INSERT IGNORE INTO teacher_classes (teacher_id, class_id, section_id) VALUES (?,?,?)', [r.insertId, class_id, section_id]);
+      }
+    }
     res.status(201).json({ message: 'Teacher added', id: r.insertId });
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
 };
 
 exports.updateTeacher = async (req, res) => {
-  const { first_name, last_name, email, phone } = req.body;
+  const { first_name, last_name, email, phone, assignments } = req.body;
   try {
     const [ex] = await db.query('SELECT id FROM teachers WHERE email = ? AND id != ?', [email, req.params.id]);
     if (ex.length > 0) return res.status(409).json({ message: 'Email already in use' });
@@ -52,6 +73,13 @@ exports.updateTeacher = async (req, res) => {
       'UPDATE teachers SET first_name=?, last_name=?, email=?, phone=? WHERE id=?',
       [first_name, last_name, email, phone || null, req.params.id]
     );
+    if (Array.isArray(assignments)) {
+      await db.query('DELETE FROM teacher_classes WHERE teacher_id = ?', [req.params.id]);
+      for (const { class_id, section_id } of assignments) {
+        if (class_id && section_id)
+          await db.query('INSERT IGNORE INTO teacher_classes (teacher_id, class_id, section_id) VALUES (?,?,?)', [req.params.id, class_id, section_id]);
+      }
+    }
     res.json({ message: 'Teacher updated' });
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
 };
