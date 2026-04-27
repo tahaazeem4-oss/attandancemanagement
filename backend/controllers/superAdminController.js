@@ -1,6 +1,20 @@
 const bcrypt = require('bcryptjs');
 const db     = require('../config/db');
 
+// ── Logo URL helpers ─────────────────────────────────────────
+// Store only the relative path in DB so the URL survives IP changes.
+function normalizeLogo(logoUrl) {
+  if (!logoUrl) return null;
+  const match = logoUrl.match(/(\/uploads\/.+)/);
+  return match ? match[1] : null;
+}
+// Build the full URL from a relative path using the current request host.
+function expandLogo(req, logoPath) {
+  if (!logoPath) return null;
+  if (logoPath.startsWith('http')) return logoPath; // already absolute (shouldn't happen)
+  return `${req.protocol}://${req.get('host')}${logoPath}`;
+}
+
 // ── GET /api/super-admin/schools ─────────────────────────────
 exports.listSchools = async (req, res) => {
   try {
@@ -11,7 +25,8 @@ exports.listSchools = async (req, res) => {
         (SELECT COUNT(*) FROM students st WHERE st.school_id = s.id) AS student_count
        FROM schools s ORDER BY s.name`
     );
-    res.json(rows);
+    const expanded = rows.map(r => ({ ...r, logo_url: expandLogo(req, r.logo_url) }));
+    res.json(expanded);
   } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
 };
 
@@ -23,7 +38,7 @@ exports.addSchool = async (req, res) => {
   try {
     const [r] = await db.query(
       'INSERT INTO schools (name, tagline, initials, logo_url, primary_color, accent_color) VALUES (?,?,?,?,?,?) RETURNING id',
-      [name.trim(), tagline || 'Attendance Management System', initials || name.trim().slice(0,2).toUpperCase(), logo_url || null, primary_color || '#2563EB', accent_color || '#1D4ED8']
+      [name.trim(), tagline || 'Attendance Management System', initials || name.trim().slice(0,2).toUpperCase(), normalizeLogo(logo_url), primary_color || '#2563EB', accent_color || '#1D4ED8']
     );
     res.status(201).json({ message: 'School added', id: r[0].id });
   } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
@@ -37,7 +52,7 @@ exports.updateSchool = async (req, res) => {
   try {
     await db.query(
       'UPDATE schools SET name=?, tagline=?, initials=?, logo_url=?, primary_color=?, accent_color=? WHERE id=?',
-      [name.trim(), tagline || null, initials || null, logo_url || null, primary_color || '#2563EB', accent_color || '#1D4ED8', req.params.id]
+      [name.trim(), tagline || null, initials || null, normalizeLogo(logo_url), primary_color || '#2563EB', accent_color || '#1D4ED8', req.params.id]
     );
     res.json({ message: 'School updated' });
   } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }

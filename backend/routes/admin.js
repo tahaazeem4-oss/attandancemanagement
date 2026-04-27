@@ -37,7 +37,8 @@ router.post('/assignments',                 ...adminOnly, ctrl.addAssignment);
 router.delete('/assignments/:id',           ...adminOnly, ctrl.deleteAssignment);
 
 // Leave Applications
-router.get('/leaves',                       ...adminOnly, ctrl.listLeaves);
-router.put('/leaves/:id/status',            ...adminOnly, ctrl.updateLeaveStatus);
+router.get('/leaves',                             ...adminOnly, ctrl.listLeaves);
+router.put('/leaves/group/:group_id/status',       ...adminOnly, ctrl.updateLeaveGroupStatus);
+router.put('/leaves/:id/status',                   ...adminOnly, ctrl.updateLeaveStatus);
 
 module.exports = router;

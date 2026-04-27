@@ -68,7 +68,7 @@ export default function AppNavigator() {
           <Stack.Screen name="AdminStudents"    component={AdminStudentsScreen}    options={{ title: 'Manage Students'  }} />
           <Stack.Screen name="AdminClasses"     component={AdminClassesScreen}     options={{ title: 'Classes & Sections' }} />
           <Stack.Screen name="AdminAssignments" component={AdminAssignmentsScreen} options={{ title: 'Teacher Assignments' }} />
-          <Stack.Screen name="AdminLeaves"      component={AdminLeavesScreen}      options={{ title: 'Leave Requests'   }} />
+          <Stack.Screen name="AdminLeaves"      component={AdminLeavesScreen}      options={{ title: 'Leave Requests', headerShown: false }} />
         </>
       ) : user.role === 'student' ? (
         // ── Student / Parent flow ────────────────────────────

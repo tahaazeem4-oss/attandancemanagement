@@ -23,10 +23,11 @@ function greet() {
 
 export default function HomeScreen({ navigation }) {
   const { teacher, school, logout } = useAuth();
-  const [todayStatus,   setTodayStatus]   = useState(null);
-  const [loadingStatus, setLoadingStatus] = useState(true);
-  const [marking,       setMarking]       = useState(false);
-  const [assignments,   setAssignments]   = useState(null);
+  const [todayStatus,      setTodayStatus]      = useState(null);
+  const [loadingStatus,    setLoadingStatus]    = useState(true);
+  const [marking,          setMarking]          = useState(false);
+  const [assignments,      setAssignments]      = useState(null);
+  const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
 
   const teacherRole = assignments === null ? null
     : assignments.length === 0 ? 'subject_teacher'
@@ -48,6 +49,11 @@ export default function HomeScreen({ navigation }) {
   useEffect(() => {
     fetchTodayStatus();
     api.get('/teachers/classes').then(({ data }) => setAssignments(data)).catch(() => setAssignments([]));
+    api.get('/teachers/leaves').then(({ data }) => {
+      const pendingLeaves     = data.filter(l => l.status === 'pending' && !l.withdrawal_status).length;
+      const pendingWithdrawals = data.filter(l => l.withdrawal_status === 'pending').length;
+      setPendingLeaveCount(pendingLeaves + pendingWithdrawals);
+    }).catch(() => {});
     Animated.stagger(100, aO.map((o, i) =>
       Animated.parallel([
         Animated.timing(o, { toValue: 1, duration: 380, useNativeDriver: true }),
@@ -217,6 +223,7 @@ export default function HomeScreen({ navigation }) {
           sub:   teacherRole === 'subject_teacher' ? 'Not available for Subject Teachers' : 'Review and approve student leaves',
           grad:  ['#FFF1F2', '#FFE4E6'],
           locked: teacherRole === 'subject_teacher',
+          badge: pendingLeaveCount,
           onPress: () => navigation.navigate('TeacherLeaves'),
         },
         {
@@ -228,7 +235,7 @@ export default function HomeScreen({ navigation }) {
           locked: false,
           onPress: () => navigation.navigate('ClassSelection', { mode: 'report' }),
         },
-      ].map(({ i, emoji, title, sub, grad, locked, onPress }) => (
+      ].map(({ i, emoji, title, sub, grad, locked, badge, onPress }) => (
         <Animated.View key={i} style={{ opacity: aO[i], transform: [{ translateY: aY[i] }, { scale: sc[i] }] }}>
           {locked ? (
             <View style={[styles.actionCard, styles.actionLocked]}>
@@ -254,6 +261,11 @@ export default function HomeScreen({ navigation }) {
                 <Text style={styles.actionTitle}>{title}</Text>
                 <Text style={styles.actionSub}>{sub}</Text>
               </View>
+              {badge > 0 && (
+                <View style={styles.notifBadge}>
+                  <Text style={styles.notifBadgeTxt}>{badge}</Text>
+                </View>
+              )}
               <Text style={styles.chevron}>›</Text>
             </Pressable>
           )}
@@ -375,4 +387,6 @@ const styles = StyleSheet.create({
   actionTitle: { fontSize: 15, fontWeight: '700', color: C.textDark },
   actionSub:   { fontSize: 12, color: C.textLight, marginTop: 2 },
   chevron:     { fontSize: 26, color: '#CBD5E1', fontWeight: '300' },
+  notifBadge:  { backgroundColor: '#EF4444', borderRadius: 11, minWidth: 22, height: 22, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 5, marginRight: 4 },
+  notifBadgeTxt: { color: '#fff', fontSize: 11, fontWeight: '900' },
 });

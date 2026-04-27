@@ -1,4 +1,4 @@
-﻿const bcrypt  = require('bcryptjs');
+const bcrypt  = require('bcryptjs');
 const jwt     = require('jsonwebtoken');
 const db      = require('../config/db');
 
@@ -7,14 +7,19 @@ const signToken = (payload) =>
     expiresIn: process.env.JWT_EXPIRES_IN || '7d'
   });
 
-// Helper: fetch school branding by id
-const getSchool = async (school_id) => {
+// Helper: fetch school branding by id, expanding logo_url to a full URL
+const getSchool = async (school_id, req) => {
   if (!school_id) return null;
   const [rows] = await db.query(
     'SELECT id, name, tagline, initials, logo_url, primary_color, accent_color FROM schools WHERE id=?',
     [school_id]
   );
-  return rows[0] || null;
+  const school = rows[0];
+  if (!school) return null;
+  if (school.logo_url && !school.logo_url.startsWith('http')) {
+    school.logo_url = `${req.protocol}://${req.get('host')}${school.logo_url}`;
+  }
+  return school;
 };
 
 // -- POST /api/auth/login
@@ -44,7 +49,7 @@ exports.login = async (req, res) => {
       const admin = admins[0];
       if (!await bcrypt.compare(password, admin.password))
         return res.status(401).json({ message: 'Invalid credentials' });
-      const school = await getSchool(admin.school_id);
+      const school = await getSchool(admin.school_id, req);
       const user   = { id: admin.id, first_name: admin.first_name, last_name: admin.last_name, email: admin.email, role: 'admin', school_id: admin.school_id };
       const token  = signToken(user);
       return res.json({ token, role: 'admin', user, school });
@@ -56,7 +61,7 @@ exports.login = async (req, res) => {
       const t = teachers[0];
       if (!await bcrypt.compare(password, t.password))
         return res.status(401).json({ message: 'Invalid credentials' });
-      const school = await getSchool(t.school_id);
+      const school = await getSchool(t.school_id, req);
       const user   = { id: t.id, first_name: t.first_name, last_name: t.last_name, email: t.email, phone: t.phone, role: 'teacher', school_id: t.school_id };
       const token  = signToken(user);
       return res.json({ token, role: 'teacher', user, school, teacher: user });
@@ -78,7 +83,7 @@ exports.login = async (req, res) => {
       const a = accs[0];
       if (!await bcrypt.compare(password, a.password))
         return res.status(401).json({ message: 'Invalid credentials' });
-      const school = await getSchool(a.school_id);
+      const school = await getSchool(a.school_id, req);
       const user   = {
         id: a.id, student_id: a.student_id,
         first_name: a.first_name, last_name: a.last_name,
@@ -128,7 +133,7 @@ exports.signup = async (req, res) => {
       );
       const newId = result[0].id;
 
-      const school = await getSchool(student.school_id);
+      const school = await getSchool(student.school_id, req);
       const user   = {
         id: newId, student_id: student.id,
         first_name: student.first_name, last_name: student.last_name,
@@ -167,7 +172,7 @@ exports.signup = async (req, res) => {
     );
     const newId = result[0].id;
 
-    const school = await getSchool(school_id);
+    const school = await getSchool(school_id, req);
     const user   = { id: newId, first_name, last_name, email: email.trim().toLowerCase(), phone: phone || null, role: 'teacher', school_id };
     const token  = signToken(user);
     return res.status(201).json({ token, role: 'teacher', user, school, teacher: user });
@@ -192,7 +197,7 @@ exports.getMe = async (req, res) => {
     if (u.role === 'admin') {
       const [rows] = await db.query('SELECT id, school_id, first_name, last_name, email FROM admins WHERE id = ?', [u.id]);
       if (!rows.length) return res.status(404).json({ message: 'Admin not found' });
-      const school = await getSchool(rows[0].school_id);
+      const school = await getSchool(rows[0].school_id, req);
       return res.json({ ...rows[0], role: 'admin', school });
     }
 
@@ -206,7 +211,7 @@ exports.getMe = async (req, res) => {
          JOIN   sections  sec ON sec.id = s.section_id
          WHERE  sa.id = ?`, [u.id]);
       if (!rows.length) return res.status(404).json({ message: 'Student not found' });
-      const school = await getSchool(rows[0].school_id);
+      const school = await getSchool(rows[0].school_id, req);
       return res.json({ ...rows[0], role: 'student', school });
     }
 
@@ -215,7 +220,7 @@ exports.getMe = async (req, res) => {
       [u.id]
     );
     if (!rows.length) return res.status(404).json({ message: 'Teacher not found' });
-    const school = await getSchool(rows[0].school_id);
+    const school = await getSchool(rows[0].school_id, req);
     return res.json({ ...rows[0], role: 'teacher', school });
   } catch (err) {
     console.error('GetMe error:', err);

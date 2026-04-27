@@ -88,15 +88,22 @@ export default function AdminHomeScreen({ navigation }) {
       <View style={styles.grid}>
         {CARDS.map((card, i) => (
           <Animated.View key={card.key} style={{ opacity: fadeAnims[i], transform: [{ translateY: slideAnims[i] }], width: '47%' }}>
-            <Pressable
-              style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]}
-              onPress={() => navigation.navigate(card.key)}
-            >
-              <LinearGradient colors={card.color} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.cardGrad}>
-                <Text style={styles.cardIcon}>{card.icon}</Text>
-                <Text style={styles.cardLabel}>{card.label}</Text>
-              </LinearGradient>
-            </Pressable>
+            <View style={{ position: 'relative' }}>
+              <Pressable
+                style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]}
+                onPress={() => navigation.navigate(card.key)}
+              >
+                <LinearGradient colors={card.color} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.cardGrad}>
+                  <Text style={styles.cardIcon}>{card.icon}</Text>
+                  <Text style={styles.cardLabel}>{card.label}</Text>
+                </LinearGradient>
+              </Pressable>
+              {card.key === 'AdminLeaves' && (stats?.pending_leaves ?? 0) > 0 && (
+                <View style={styles.notifBadge}>
+                  <Text style={styles.notifBadgeTxt}>{stats.pending_leaves}</Text>
+                </View>
+              )}
+            </View>
           </Animated.View>
         ))}
       </View>
@@ -126,4 +133,6 @@ const styles = StyleSheet.create({
   cardGrad:        { paddingVertical: 28, paddingHorizontal: 20, alignItems: 'center', minWidth: 140 },
   cardIcon:        { fontSize: 34, marginBottom: 8 },
   cardLabel:       { color: '#fff', fontSize: 14, fontWeight: '800', letterSpacing: 0.2 },
+  notifBadge:      { position: 'absolute', top: -7, right: -7, backgroundColor: '#EF4444', borderRadius: 12, minWidth: 22, height: 22, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 5, borderWidth: 2, borderColor: '#fff', zIndex: 10 },
+  notifBadgeTxt:   { color: '#fff', fontSize: 11, fontWeight: '900' },
 });

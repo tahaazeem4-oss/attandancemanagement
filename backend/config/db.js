@@ -3,6 +3,9 @@ const { Pool, types } = require('pg');
 
 // Parse PostgreSQL bigint (OID 20) as JS number instead of string
 types.setTypeParser(20, (val) => parseInt(val, 10));
+// Parse PostgreSQL date (OID 1082) as plain "YYYY-MM-DD" string instead of a Date object
+// (prevents timezone-shift when pg serialises the Date to UTC in JSON responses)
+types.setTypeParser(1082, (val) => val);
 
 const connectionString = process.env.DATABASE_URL;
 

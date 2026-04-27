@@ -15,57 +15,73 @@ const STATUS_BG      = { present: C.presentBg, absent: C.absentBg, leave: C.leav
 export default function StudentAttendanceScreen({ navigation, route }) {
   const { class_id, section_id, class_name, section_name } = route.params;
 
-  const [students,   setStudents]   = useState([]);
-  const [attendance, setAttendance] = useState({}); // { [student_id]: 'present'|'absent'|'leave' }
-  const [loading,    setLoading]    = useState(true);
-  const [saving,     setSaving]     = useState(false);
-  const [frozen,     setFrozen]     = useState(false); // true when today's attendance already submitted
+  const [students,       setStudents]       = useState([]);
+  const [attendance,     setAttendance]     = useState({});
+  const [lockedStudents, setLockedStudents] = useState({});
+  const [loading,        setLoading]        = useState(true);
+  const [saving,         setSaving]         = useState(false);
+  const [frozen,         setFrozen]         = useState(false);
+  const [toast,          setToast]          = useState(false); // success toast
+  const toastAnim = useRef(new Animated.Value(0)).current;
   const submitS = useRef(new Animated.Value(1)).current;
   const pIn  = () => Animated.spring(submitS, { toValue: 0.97, useNativeDriver: true, speed: 50 }).start();
   const pOut = () => Animated.spring(submitS, { toValue: 1,    useNativeDriver: true, speed: 20 }).start();
 
+  const showToastAndNavigate = () => {
+    setToast(true);
+    Animated.sequence([
+      Animated.timing(toastAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+      Animated.delay(1600),
+      Animated.timing(toastAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]).start(() => navigation.navigate('Home'));
+  };
+
   useEffect(() => {
     const today = new Date().toISOString().slice(0, 10);
+    let loadedStudents = [];
     api.get('/students', { params: { class_id, section_id } })
       .then(({ data }) => {
+        loadedStudents = data;
         setStudents(data);
-        // No default — teacher must select each student's status
-        setAttendance({});
-        // Check if attendance already submitted for today
-        return api.get('/attendance/report', { params: { class_id, section_id, date: today } })
-          .then(({ data: report }) => {
-            const alreadyMarked = report.records.length > 0 &&
-              report.records.some(r => r.status !== 'not_marked');
-            if (alreadyMarked) {
-              const existing = {};
-              report.records.forEach(r => { existing[r.id] = r.status; });
-              setAttendance(existing);
-              setFrozen(true);
-            }
-          })
-          .catch(() => {}); // silently ignore check failure
+        return api.get('/attendance/report', { params: { class_id, section_id, date: today } });
       })
-      .catch(() => Alert.alert('Error', 'Could not load students'))
+      .then(({ data: report }) => {
+        const locked = {};
+        const existing = {};
+        let anyNonLockedMarked = false;
+        for (const r of report.records) {
+          if (r.leave_locked) {
+            locked[r.id] = true;
+            existing[r.id] = 'leave'; // always leave
+          } else if (r.status !== 'not_marked') {
+            existing[r.id] = r.status;
+            anyNonLockedMarked = true;
+          }
+        }
+        setLockedStudents(locked);
+        setAttendance(existing);
+        if (anyNonLockedMarked) setFrozen(true);
+      })
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
   const toggle = (studentId, status) => {
-    if (frozen) return;
+    if (frozen || lockedStudents[studentId]) return;
     setAttendance(prev => ({ ...prev, [studentId]: status }));
   };
 
   const handleSubmit = async () => {
-    if (students.length === 0) return Alert.alert('No students', 'No students found for this class/section.');
-    const unmarked = students.filter(s => !attendance[s.id]);
-    if (unmarked.length > 0) return Alert.alert('Incomplete', `${unmarked.length} student(s) not marked yet. Please mark all students before submitting.`);
+    const nonLocked = students.filter(s => !lockedStudents[s.id]);
+    if (nonLocked.length === 0) return Alert.alert('Info', 'All students have approved leave for today.');
+    const unmarked = nonLocked.filter(s => !attendance[s.id]);
+    if (unmarked.length > 0) return Alert.alert('Incomplete', `${unmarked.length} student(s) not marked yet.`);
     setSaving(true);
     try {
-      const records = students.map(s => ({ student_id: s.id, status: attendance[s.id] }));
+      const records = nonLocked.map(s => ({ student_id: s.id, status: attendance[s.id] }));
       const today   = new Date().toISOString().slice(0, 10);
       await api.post('/attendance/mark', { date: today, records });
-      Alert.alert('Saved!', 'Attendance has been submitted successfully.', [
-        { text: 'OK', onPress: () => navigation.navigate('Home') }
-      ]);
+      showToastAndNavigate();
     } catch (err) {
       Alert.alert('Error', err?.response?.data?.message || 'Failed to save attendance');
     } finally {
@@ -73,7 +89,8 @@ export default function StudentAttendanceScreen({ navigation, route }) {
     }
   };
 
-  const unmarkedCount = students.filter(s => !attendance[s.id]).length;
+  const nonLockedStudents = students.filter(s => !lockedStudents[s.id]);
+  const unmarkedCount = nonLockedStudents.filter(s => !attendance[s.id]).length;
   const counts = {
     present: students.filter(s => attendance[s.id] === 'present').length,
     absent:  students.filter(s => attendance[s.id] === 'absent').length,
@@ -117,15 +134,23 @@ export default function StudentAttendanceScreen({ navigation, route }) {
         data={students}
         keyExtractor={item => String(item.id)}
         contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 120, paddingTop: 8 }}
-        renderItem={({ item, index }) => (
-          <View style={styles.studentRow}>
-            <View style={styles.avatar}>
+        renderItem={({ item }) => {
+          const isLocked = !!lockedStudents[item.id];
+          return (
+          <View style={[styles.studentRow, isLocked && styles.lockedRow]}>
+            <View style={[styles.avatar, isLocked && { backgroundColor: '#A7F3D0' }]}>
               <Text style={styles.avatarText}>{item.first_name[0]}{item.last_name[0]}</Text>
             </View>
             <View style={styles.studentInfo}>
               <Text style={styles.studentName}>{item.first_name} {item.last_name}</Text>
               {item.roll_no && <Text style={styles.rollNo}>#{item.roll_no}</Text>}
             </View>
+            {isLocked ? (
+              <View style={styles.leaveLockBadge}>
+                <Text style={styles.leaveLockIcon}>🔒</Text>
+                <Text style={styles.leaveLockText}>LEAVE</Text>
+              </View>
+            ) : (
             <View style={styles.toggles}>
               {STATUS_OPTIONS.map(s => (
                 <Pressable
@@ -148,8 +173,10 @@ export default function StudentAttendanceScreen({ navigation, route }) {
                 </Pressable>
               ))}
             </View>
+            )}
           </View>
-        )}
+          );
+        }}
       />
 
       {/* Submit footer */}
@@ -175,12 +202,21 @@ export default function StudentAttendanceScreen({ navigation, route }) {
           </Animated.View>
         )}
       </View>
+
+      {/* ── Success Toast ── */}
+      {toast && (
+        <Animated.View style={[styles.toast, { opacity: toastAnim, transform: [{ translateY: toastAnim.interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) }] }]}>
+          <Text style={styles.toastText}>✅  Attendance submitted!</Text>
+        </Animated.View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container:    { flex: 1, backgroundColor: C.bg },
+  toast:        { position: 'absolute', bottom: 100, alignSelf: 'center', backgroundColor: '#059669', borderRadius: 14, paddingHorizontal: 24, paddingVertical: 14, elevation: 10, shadowColor: '#059669', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
+  toastText:    { color: '#fff', fontSize: 15, fontWeight: '800' },
 
   infoBar:      {
     paddingHorizontal: 20, paddingVertical: 18, overflow: 'hidden',
@@ -208,6 +244,10 @@ const styles = StyleSheet.create({
     shadowColor: C.shadow, shadowOpacity: 0.05, shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 }, elevation: 2,
   },
+  lockedRow:    { backgroundColor: '#F0FDF4', borderLeftWidth: 3, borderLeftColor: '#059669' },
+  leaveLockBadge: { backgroundColor: '#D1FAE5', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, alignItems: 'center' },
+  leaveLockIcon:  { fontSize: 12 },
+  leaveLockText:  { fontSize: 11, fontWeight: '800', color: '#059669', marginTop: 2 },
   avatar:       {
     width: 40, height: 40, borderRadius: 12,
     justifyContent: 'center', alignItems: 'center', marginRight: 12,

@@ -278,19 +278,87 @@ exports.deleteAssignment = async (req, res) => {
 exports.listLeaves = async (req, res) => {
   const { status } = req.query;
   const sid = req.user.school_id;
-  let q = `SELECT la.*, s.first_name, s.last_name, s.roll_no, c.class_name, sec.section_name
+  let q = `SELECT la.id, la.group_id, la.date, la.reason, la.status, la.applied_at,
+                  s.id AS student_id, s.first_name, s.last_name, s.roll_no,
+                  c.class_name, sec.section_name
            FROM   leave_applications la
            JOIN   students  s   ON s.id   = la.student_id
            JOIN   classes   c   ON c.id   = s.class_id
            JOIN   sections  sec ON sec.id = s.section_id
            WHERE  s.school_id = ?`;
   const params = [sid];
-  if (status) { q += ' AND la.status = ?'; params.push(status); }
-  q += ' ORDER BY la.applied_at DESC';
+  if (status && status !== 'all') { q += ' AND la.status = ?'; params.push(status); }
+  q += ' ORDER BY la.applied_at DESC, la.date';
   try {
     const [rows] = await db.query(q, params);
-    res.json(rows);
+
+    // Group by group_id so multi-date requests appear as one card
+    const groupMap = {};
+    const STATUS_PRIORITY = { pending: 4, approved: 3, rejected: 2, cancelled: 1 };
+    for (const row of rows) {
+      const gid = row.group_id;
+      if (!groupMap[gid]) {
+        groupMap[gid] = {
+          group_id: gid,
+          student_id: row.student_id,
+          first_name: row.first_name,
+          last_name: row.last_name,
+          roll_no: row.roll_no,
+          class_name: row.class_name,
+          section_name: row.section_name,
+          reason: row.reason,
+          status: row.status,
+          applied_at: row.applied_at,
+          dates: [],
+          ids: [],
+        };
+      }
+      groupMap[gid].dates.push(row.date);
+      groupMap[gid].ids.push(row.id);
+      if ((STATUS_PRIORITY[row.status] || 0) > (STATUS_PRIORITY[groupMap[gid].status] || 0)) {
+        groupMap[gid].status = row.status;
+      }
+    }
+    res.json(Object.values(groupMap));
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
+};
+
+// ── PUT /admin/leaves/group/:group_id/status  (approve / reject whole group) ─
+exports.updateLeaveGroupStatus = async (req, res) => {
+  const { status } = req.body;
+  const { group_id } = req.params;
+  if (!['approved', 'rejected'].includes(status))
+    return res.status(400).json({ message: 'status must be approved or rejected' });
+  try {
+    // Find all pending leaves in this group
+    const [leaves] = await db.query(
+      `SELECT la.id, la.student_id, la.date
+       FROM leave_applications la
+       WHERE la.group_id = ? AND la.status = 'pending'`,
+      [group_id]
+    );
+    if (leaves.length === 0)
+      return res.status(404).json({ message: 'No pending leaves found for this group' });
+
+    // Update all to new status
+    await db.query(
+      `UPDATE leave_applications SET status=? WHERE group_id=? AND status='pending'`,
+      [status, group_id]
+    );
+
+    // Auto-mark attendance as 'leave' when approved
+    if (status === 'approved') {
+      for (const leave of leaves) {
+        await db.query(
+          `INSERT INTO student_attendance (student_id, teacher_id, date, status)
+           VALUES (?,NULL,?,'leave')
+           ON CONFLICT (student_id, date) DO UPDATE SET status = 'leave'`,
+          [leave.student_id, leave.date]
+        );
+      }
+    }
+    res.json({ message: `Leave ${status}`, count: leaves.length });
+  } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
 };
 
 exports.updateLeaveStatus = async (req, res) => {
@@ -298,7 +366,32 @@ exports.updateLeaveStatus = async (req, res) => {
   if (!['approved', 'rejected'].includes(status))
     return res.status(400).json({ message: 'status must be approved or rejected' });
   try {
-    await db.query('UPDATE leave_applications SET status=? WHERE id=?', [status, req.params.id]);
+    // Find the leave and its group to apply group-wide update
+    const [found] = await db.query(
+      'SELECT group_id, student_id, date FROM leave_applications WHERE id=?',
+      [req.params.id]
+    );
+    if (!found.length) return res.status(404).json({ message: 'Leave not found' });
+
+    const group_id = found[0].group_id;
+    const [leaves] = await db.query(
+      `SELECT id, student_id, date FROM leave_applications WHERE group_id=? AND status='pending'`,
+      [group_id]
+    );
+    await db.query(
+      `UPDATE leave_applications SET status=? WHERE group_id=? AND status='pending'`,
+      [status, group_id]
+    );
+    if (status === 'approved') {
+      for (const leave of leaves) {
+        await db.query(
+          `INSERT INTO student_attendance (student_id, teacher_id, date, status)
+           VALUES (?,NULL,?,'leave')
+           ON CONFLICT (student_id, date) DO UPDATE SET status = 'leave'`,
+          [leave.student_id, leave.date]
+        );
+      }
+    }
     res.json({ message: 'Leave status updated' });
-  } catch (err) { res.status(500).json({ message: 'Server error' }); }
+  } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
 };

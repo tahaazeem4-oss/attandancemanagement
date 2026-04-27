@@ -47,21 +47,30 @@ app.use('/api/upload',         uploadRoutes);
 // ── Public: list schools (used by signup screen) ─────────────
 app.get('/api/schools', async (req, res) => {
   try {
-    const [rows] = await db.query('SELECT id, name, initials, tagline, primary_color, accent_color FROM schools ORDER BY name');
-    res.json(rows);
+    const [rows] = await db.query('SELECT id, name, initials, tagline, logo_url, primary_color, accent_color FROM schools ORDER BY name');
+    const host = `${req.protocol}://${req.get('host')}`;
+    const expanded = rows.map(r => ({
+      ...r,
+      logo_url: r.logo_url
+        ? (r.logo_url.startsWith('http') ? r.logo_url : `${host}${r.logo_url}`)
+        : null,
+    }));
+    res.json(expanded);
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
 });
 // ── Health check ──────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'OK', time: new Date() }));
 
 // ── Start server ──────────────────────────────────────────────
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
-  // WhatsApp disabled — uncomment to enable when Chromium/puppeteer is available
-  // try {
-  //   whatsappService.init();
-  // } catch (err) {
-  //   console.warn('WhatsApp service failed to start (non-fatal):', err.message);
-  // }
+});
+
+server.on('error', (err) => {
+  console.error('[server error]', err.message);
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use. Kill the existing process and retry.`);
+    process.exit(1);
+  }
 });
 

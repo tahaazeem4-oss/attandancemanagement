@@ -46,9 +46,11 @@ router.post('/logo', protect, requireRole('super_admin'), (req, res, next) => {
     const file = req.files?.[0];
     if (!file) return res.status(400).json({ message: 'No file uploaded' });
 
-    const host    = `${req.protocol}://${req.get('host')}`;
-    const logoUrl = `${host}/uploads/logos/${file.filename}`;
-    res.json({ logo_url: logoUrl });
+    // Return full URL for immediate display; the frontend/backend will store
+    // a relative path so logos survive server IP changes.
+    const relativePath = `/uploads/logos/${file.filename}`;
+    const host         = `${req.protocol}://${req.get('host')}`;
+    res.json({ logo_url: `${host}${relativePath}` });
   });
 });
 
