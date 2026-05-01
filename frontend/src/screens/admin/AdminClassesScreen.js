@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
+import ImportExportBar from '../../components/ImportExportBar';
 
 export default function AdminClassesScreen() {
   const [classes,  setClasses]  = useState([]);
@@ -69,6 +70,14 @@ export default function AdminClassesScreen() {
 
   return (
     <View style={styles.container}>
+      <ImportExportBar
+        templatePath="/import-export/classes/template"
+        templateFilename="classes_template.xlsx"
+        importPath="/import-export/classes/import"
+        exportPath="/import-export/classes/export"
+        exportFilename="classes_export.xlsx"
+        onImportDone={load}
+      />
       {loading
         ? <ActivityIndicator color={C.primary} style={{ flex: 1 }} />
         : (

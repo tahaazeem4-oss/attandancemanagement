@@ -10,11 +10,15 @@ import { C } from '../../config/theme';
 import { HeaderBlobs } from '../../components/Deco';
 
 const CARDS = [
-  { key: 'AdminTeachers',    icon: '👨‍🏫', label: 'Teachers',     color: ['#4F46E5','#6366F1'] },
-  { key: 'AdminStudents',    icon: '🎒', label: 'Students',     color: ['#0891B2','#06B6D4'] },
-  { key: 'AdminClasses',     icon: '🏫', label: 'Classes',      color: ['#059669','#10B981'] },
-  { key: 'AdminAssignments', icon: '📋', label: 'Assignments',  color: ['#D97706','#F59E0B'] },
+  { key: 'AdminTeachers',    icon: '👨‍🏫', label: 'Teachers',       color: ['#4F46E5','#6366F1'] },
+  { key: 'AdminStudents',    icon: '🎒', label: 'Students',       color: ['#0891B2','#06B6D4'] },
+  { key: 'AdminClasses',     icon: '🏫', label: 'Classes',        color: ['#059669','#10B981'] },
+  { key: 'AdminAssignments', icon: '📋', label: 'Assignments',    color: ['#D97706','#F59E0B'] },
   { key: 'AdminLeaves',      icon: '📩', label: 'Leave Requests', color: ['#DC2626','#EF4444'] },
+  { key: 'SendNotification', icon: '🔔', label: 'Notifications',  color: ['#7C3AED','#8B5CF6'] },
+  { key: 'UploadLecture',    icon: '📤', label: 'Upload Lecture', color: ['#0F766E','#14B8A6'] },
+  { key: 'LectureList',      icon: '🎬', label: 'Lecture List',   color: ['#1D4ED8','#3B82F6'] },
+  { key: 'AdminSubjects',    icon: '📚', label: 'Subjects',       color: ['#7C3AED','#A78BFA'] },
 ];
 
 export default function AdminHomeScreen({ navigation }) {

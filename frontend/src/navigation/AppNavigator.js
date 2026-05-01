@@ -13,6 +13,9 @@ import StudentAttendanceScreen from '../screens/StudentAttendanceScreen';
 import AddStudentScreen        from '../screens/AddStudentScreen';
 import ReportScreen            from '../screens/ReportScreen';
 import TeacherLeavesScreen     from '../screens/TeacherLeavesScreen';
+import UploadLectureScreen     from '../screens/UploadLectureScreen';
+import LectureListScreen       from '../screens/LectureListScreen';
+import SendNotificationScreen  from '../screens/SendNotificationScreen';
 
 // Admin screens
 import AdminHomeScreen        from '../screens/admin/AdminHomeScreen';
@@ -21,6 +24,7 @@ import AdminStudentsScreen    from '../screens/admin/AdminStudentsScreen';
 import AdminClassesScreen     from '../screens/admin/AdminClassesScreen';
 import AdminAssignmentsScreen from '../screens/admin/AdminAssignmentsScreen';
 import AdminLeavesScreen      from '../screens/admin/AdminLeavesScreen';
+import AdminSubjectsScreen    from '../screens/admin/AdminSubjectsScreen';
 
 // Super admin screens
 import SuperAdminHomeScreen    from '../screens/superadmin/SuperAdminHomeScreen';
@@ -32,6 +36,8 @@ import SuperAdminStudentsScreen from '../screens/superadmin/SuperAdminStudentsSc
 import StudentHomeScreen      from '../screens/student/StudentHomeScreen';
 import StudentHistoryScreen   from '../screens/student/StudentHistoryScreen';
 import StudentLeaveScreen     from '../screens/student/StudentLeaveScreen';
+import StudentLecturesScreen  from '../screens/student/StudentLecturesScreen';
+import StudentNotificationsScreen from '../screens/student/StudentNotificationsScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -69,13 +75,19 @@ export default function AppNavigator() {
           <Stack.Screen name="AdminClasses"     component={AdminClassesScreen}     options={{ title: 'Classes & Sections' }} />
           <Stack.Screen name="AdminAssignments" component={AdminAssignmentsScreen} options={{ title: 'Teacher Assignments' }} />
           <Stack.Screen name="AdminLeaves"      component={AdminLeavesScreen}      options={{ title: 'Leave Requests', headerShown: false }} />
+          <Stack.Screen name="SendNotification" component={SendNotificationScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="UploadLecture"    component={UploadLectureScreen}    options={{ headerShown: false }} />
+          <Stack.Screen name="LectureList"      component={LectureListScreen}      options={{ headerShown: false }} />
+          <Stack.Screen name="AdminSubjects"    component={AdminSubjectsScreen}    options={{ headerShown: false }} />
         </>
       ) : user.role === 'student' ? (
         // ── Student / Parent flow ────────────────────────────
         <>
-          <Stack.Screen name="StudentHome"    component={StudentHomeScreen}    options={{ title: 'My Dashboard',   headerShown: false }} />
-          <Stack.Screen name="StudentHistory" component={StudentHistoryScreen} options={{ title: 'Attendance History' }} />
-          <Stack.Screen name="StudentLeaves"  component={StudentLeaveScreen}   options={{ title: 'Leave Applications' }} />
+          <Stack.Screen name="StudentHome"       component={StudentHomeScreen}    options={{ title: 'My Dashboard',   headerShown: false }} />
+          <Stack.Screen name="StudentHistory"    component={StudentHistoryScreen} options={{ title: 'Attendance History' }} />
+          <Stack.Screen name="StudentLeaves"     component={StudentLeaveScreen}   options={{ title: 'Leave Applications' }} />
+          <Stack.Screen name="StudentLectures"        component={StudentLecturesScreen}        options={{ headerShown: false }} />
+          <Stack.Screen name="StudentNotifications"    component={StudentNotificationsScreen}   options={{ headerShown: false }} />
         </>
       ) : (
         // ── Teacher flow (existing) ──────────────────────────
@@ -86,6 +98,9 @@ export default function AppNavigator() {
           <Stack.Screen name="AddStudent"        component={AddStudentScreen}        options={{ title: 'Add Student' }} />
           <Stack.Screen name="TeacherLeaves"     component={TeacherLeavesScreen}     options={{ title: 'Leave Requests', headerShown: false }} />
           <Stack.Screen name="Report"            component={ReportScreen}            options={{ title: 'Attendance Report' }} />
+          <Stack.Screen name="UploadLecture"     component={UploadLectureScreen}     options={{ headerShown: false }} />
+          <Stack.Screen name="LectureList"       component={LectureListScreen}       options={{ headerShown: false }} />
+          <Stack.Screen name="SendNotification"  component={SendNotificationScreen}  options={{ headerShown: false }} />
         </>
       )}
     </Stack.Navigator>

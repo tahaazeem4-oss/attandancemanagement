@@ -6,6 +6,7 @@ import {
 import { Picker } from '@react-native-picker/picker';
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
+import ImportExportBar from '../../components/ImportExportBar';
 
 const EMPTY_FORM = { first_name: '', last_name: '', age: '', class_id: '', section_id: '', roll_no: '' };
 
@@ -98,6 +99,14 @@ export default function AdminStudentsScreen() {
 
   return (
     <View style={styles.container}>
+      <ImportExportBar
+        templatePath="/import-export/students/template"
+        templateFilename="students_template.xlsx"
+        importPath="/import-export/students/import"
+        exportPath="/import-export/students/export"
+        exportFilename="students_export.xlsx"
+        onImportDone={load}
+      />
       {/* Filter bar */}
       <View style={styles.filterBar}>
         <View style={styles.pickerWrap}>

@@ -6,6 +6,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import api from '../../services/api';
 import { C } from '../../config/theme';
+import { exportFile } from '../../services/importExport';
 
 const STATUS_COLOR = { pending: '#D97706', approved: '#059669', rejected: '#DC2626', cancelled: '#64748B' };
 const STATUS_BG    = { pending: '#FFFBEB', approved: '#ECFDF5', rejected: '#FEF2F2', cancelled: '#F1F5F9' };
@@ -16,6 +17,7 @@ export default function AdminLeavesScreen({ navigation }) {
   const [filter,  setFilter]  = useState('pending');
   const [loading, setLoading] = useState(true);
   const [acting,  setActing]  = useState(null); // group_id being acted on
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,6 +63,13 @@ export default function AdminLeavesScreen({ navigation }) {
     return `${dates.slice(0, 2).join('  •  ')}  +${dates.length - 2} more`;
   };
 
+  const handleExport = async () => {
+    setExporting(true);
+    const params = filter !== 'all' ? { status: filter } : {};
+    await exportFile('/import-export/leaves/export', `leaves_${filter}.xlsx`, params);
+    setExporting(false);
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#4C1D95" />
@@ -73,6 +82,11 @@ export default function AdminLeavesScreen({ navigation }) {
           <Text style={styles.headerTitle}>Leave Requests 📩</Text>
           <Pressable style={styles.homeBtn} onPress={() => navigation.navigate('AdminHome')}>
             <Text style={styles.homeBtnTxt}>🏠</Text>
+          </Pressable>
+          <Pressable style={styles.exportBtn} onPress={handleExport} disabled={exporting}>
+            {exporting
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <Text style={styles.exportBtnTxt}>⬇ Export</Text>}
           </Pressable>
         </View>
       </LinearGradient>
@@ -168,6 +182,8 @@ const styles = StyleSheet.create({
   backBtnTxt:      { color: '#fff', fontSize: 13, fontWeight: '700' },
   headerTitle:     { color: '#EDE9FE', fontSize: 16, fontWeight: '800' },
   homeBtn:         { backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
+  exportBtn:       { backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
+  exportBtnTxt:    { color: '#fff', fontWeight: '700', fontSize: 12 },
   homeBtnTxt:      { fontSize: 16 },
   filterBar:       { flexDirection: 'row', backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.border, padding: 8, gap: 6 },
   filterBtn:       { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10, backgroundColor: C.bg },

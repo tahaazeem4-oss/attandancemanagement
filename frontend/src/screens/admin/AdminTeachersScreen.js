@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
+import ImportExportBar from '../../components/ImportExportBar';
 
 const EMPTY_FORM = { first_name: '', last_name: '', email: '', password: '', phone: '', assignments: [] };
 
@@ -165,7 +166,14 @@ export default function AdminTeachersScreen() {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" />
-
+      <ImportExportBar
+        templatePath="/import-export/teachers/template"
+        templateFilename="teachers_template.xlsx"
+        importPath="/import-export/teachers/import"
+        exportPath="/import-export/teachers/export"
+        exportFilename="teachers_export.xlsx"
+        onImportDone={load}
+      />
       {loading
         ? <ActivityIndicator color={C.primary} style={{ flex: 1 }} />
         : (

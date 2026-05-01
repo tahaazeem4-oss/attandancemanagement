@@ -19,6 +19,10 @@ export default function StudentHomeScreen({ navigation }) {
 
   const a1o = useRef(new Animated.Value(0)).current, a1y = useRef(new Animated.Value(30)).current;
   const a2o = useRef(new Animated.Value(0)).current, a2y = useRef(new Animated.Value(30)).current;
+  const a3o = useRef(new Animated.Value(0)).current, a3y = useRef(new Animated.Value(30)).current;
+  const a4o = useRef(new Animated.Value(0)).current, a4y = useRef(new Animated.Value(30)).current;
+
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     const now = new Date();
@@ -26,6 +30,10 @@ export default function StudentHomeScreen({ navigation }) {
       .then(({ data }) => setStats(data.stats))
       .catch(() => {})
       .finally(() => setLoading(false));
+
+    api.get('/notifications/me/unread-count')
+      .then(({ data }) => setUnreadCount(data.count || 0))
+      .catch(() => {});
 
     Animated.stagger(120, [
       Animated.parallel([
@@ -35,6 +43,14 @@ export default function StudentHomeScreen({ navigation }) {
       Animated.parallel([
         Animated.timing(a2o, { toValue: 1, duration: 350, useNativeDriver: true }),
         Animated.spring(a2y, { toValue: 0, tension: 55, friction: 9, useNativeDriver: true }),
+      ]),
+      Animated.parallel([
+        Animated.timing(a3o, { toValue: 1, duration: 350, useNativeDriver: true }),
+        Animated.spring(a3y, { toValue: 0, tension: 55, friction: 9, useNativeDriver: true }),
+      ]),
+      Animated.parallel([
+        Animated.timing(a4o, { toValue: 1, duration: 350, useNativeDriver: true }),
+        Animated.spring(a4y, { toValue: 0, tension: 55, friction: 9, useNativeDriver: true }),
       ]),
     ]).start();
   }, []);
@@ -118,6 +134,40 @@ export default function StudentHomeScreen({ navigation }) {
           </LinearGradient>
         </Pressable>
       </Animated.View>
+
+      <Animated.View style={{ opacity: a3o, transform: [{ translateY: a3y }] }}>
+        <Pressable style={({ pressed }) => [styles.actionCard, pressed && { opacity: 0.88 }]} onPress={() => navigation.navigate('StudentLectures')}>
+          <LinearGradient colors={['#312E81', '#4338CA']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.actionGrad}>
+            <Text style={styles.actionIcon}>📚</Text>
+            <View>
+              <Text style={styles.actionTitle}>Lectures & Notes</Text>
+              <Text style={styles.actionSub}>View classwork, homework & PDFs</Text>
+            </View>
+            <Text style={styles.actionArrow}>›</Text>
+          </LinearGradient>
+        </Pressable>
+      </Animated.View>
+
+      <Animated.View style={{ opacity: a4o, transform: [{ translateY: a4y }] }}>
+        <Pressable
+          style={({ pressed }) => [styles.actionCard, pressed && { opacity: 0.88 }]}
+          onPress={() => { setUnreadCount(0); navigation.navigate('StudentNotifications'); }}
+        >
+          <LinearGradient colors={['#064E3B', '#047857']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.actionGrad}>
+            <Text style={styles.actionIcon}>🔔</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.actionTitle}>Notifications</Text>
+              <Text style={styles.actionSub}>School, class & personal notices</Text>
+            </View>
+            {unreadCount > 0 && (
+              <View style={styles.notifBadge}>
+                <Text style={styles.notifBadgeTxt}>{unreadCount}</Text>
+              </View>
+            )}
+            <Text style={styles.actionArrow}>›</Text>
+          </LinearGradient>
+        </Pressable>
+      </Animated.View>
     </ScrollView>
   );
 }
@@ -147,5 +197,7 @@ const styles = StyleSheet.create({
   actionIcon:   { fontSize: 30 },
   actionTitle:  { color: '#fff', fontSize: 16, fontWeight: '800' },
   actionSub:    { color: 'rgba(255,255,255,0.75)', fontSize: 12, marginTop: 2 },
-  actionArrow:  { color: '#fff', fontSize: 26, marginLeft: 'auto', opacity: 0.7 },
+  actionArrow:  { color: '#fff', fontSize: 26, marginLeft: 8, opacity: 0.7 },
+  notifBadge:   { backgroundColor: '#EF4444', borderRadius: 12, minWidth: 22, height: 22, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6, marginRight: 4 },
+  notifBadgeTxt:{ color: '#fff', fontSize: 11, fontWeight: '900' },
 });

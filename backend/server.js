@@ -20,6 +20,10 @@ const adminRoutes         = require('./routes/admin');
 const studentPortalRoutes = require('./routes/studentPortal');
 const superAdminRoutes    = require('./routes/superAdmin');
 const uploadRoutes         = require('./routes/upload');
+const importExportRoutes   = require('./routes/importExport');
+const lectureRoutes        = require('./routes/lectures');
+const notificationRoutes   = require('./routes/notifications');
+const subjectRoutes        = require('./routes/subjects');
 const db                  = require('./config/db');
 const path                = require('path');
 
@@ -34,15 +38,22 @@ app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ── Routes ────────────────────────────────────────────────────
-app.use('/api/auth',           authRoutes);
-app.use('/api/teachers',       teacherRoutes);
-app.use('/api/classes',        classRoutes);
-app.use('/api/students',       studentRoutes);
-app.use('/api/attendance',     attendanceRoutes);
-app.use('/api/admin',          adminRoutes);
-app.use('/api/student-portal', studentPortalRoutes);
-app.use('/api/super-admin',    superAdminRoutes);
-app.use('/api/upload',         uploadRoutes);
+// Each module handles its own sub-path under /api/.
+// To add a new feature: create routes/myFeature.js, require it here,
+// and register it with app.use('/api/myFeature', myFeatureRoutes).
+app.use('/api/auth',           authRoutes);         // login, signup, /me
+app.use('/api/teachers',       teacherRoutes);       // teacher CRUD (admin)
+app.use('/api/classes',        classRoutes);         // classes + sections
+app.use('/api/students',       studentRoutes);       // student CRUD (admin)
+app.use('/api/attendance',     attendanceRoutes);    // mark / view attendance
+app.use('/api/admin',          adminRoutes);         // admin dashboard helpers
+app.use('/api/student-portal', studentPortalRoutes); // student home, leaves
+app.use('/api/super-admin',    superAdminRoutes);    // super-admin school mgmt
+app.use('/api/upload',         uploadRoutes);        // school logo upload
+app.use('/api/import-export',  importExportRoutes);  // bulk Excel import/export
+app.use('/api/lectures',       lectureRoutes);       // upload/list/delete PDFs
+app.use('/api/notifications',  notificationRoutes);  // push notifications (future)
+app.use('/api/subjects',       subjectRoutes);       // school subject master list
 
 // ── Public: list schools (used by signup screen) ─────────────
 app.get('/api/schools', async (req, res) => {

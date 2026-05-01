@@ -7,6 +7,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import api from '../services/api';
 import { C } from '../config/theme';
 import { HeaderBlobs } from '../components/Deco';
+import { exportFile } from '../services/importExport';
 
 const STATUS_COLOR = { present: C.present, absent: C.absent, leave: C.leave, not_marked: C.textLight };
 const STATUS_BG    = { present: C.presentBg, absent: C.absentBg, leave: C.leaveBg, not_marked: '#F1F5F9' };
@@ -20,6 +21,7 @@ export default function ReportScreen({ route }) {
   const [records,  setRecords]  = useState([]);
   const [date,     setDate]     = useState(today);
   const [loading,  setLoading]  = useState(false);
+  const [exporting, setExporting] = useState(false);
   // Summary card entrance animations
   const s1o = useRef(new Animated.Value(0)).current, s1y = useRef(new Animated.Value(20)).current;
   const s2o = useRef(new Animated.Value(0)).current, s2y = useRef(new Animated.Value(20)).current;
@@ -56,6 +58,16 @@ export default function ReportScreen({ route }) {
     if (next <= today) setDate(next);
   };
 
+  const handleExport = async () => {
+    setExporting(true);
+    await exportFile(
+      '/import-export/attendance/export',
+      `attendance_${class_name}_${section_name}_${date}.xlsx`,
+      { class_id, section_id, date }
+    );
+    setExporting(false);
+  };
+
   const counts = {
     present: records.filter(r => r.status === 'present').length,
     absent:  records.filter(r => r.status === 'absent').length,
@@ -79,7 +91,14 @@ export default function ReportScreen({ route }) {
         style={styles.header}
       >
         <HeaderBlobs />
-        <Text style={styles.headerTitle}>{class_name} — Section {section_name}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Text style={styles.headerTitle}>{class_name} — Section {section_name}</Text>
+          <Pressable onPress={handleExport} disabled={exporting} style={styles.exportBtn}>
+            {exporting
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <Text style={styles.exportBtnTxt}>⬇ Export</Text>}
+          </Pressable>
+        </View>
         {/* Date navigator */}
         <View style={styles.dateRow}>
           <Pressable onPress={() => changeDate(-1)} style={styles.dateArrow}>
@@ -153,7 +172,9 @@ const styles = StyleSheet.create({
   header:       {
     paddingHorizontal: 20, paddingVertical: 22, overflow: 'hidden',
   },
-  headerTitle:  { color: '#E0E7FF', fontSize: 17, fontWeight: '800' },
+  headerTitle:  { color: '#E0E7FF', fontSize: 17, fontWeight: '800', flex: 1 },
+  exportBtn:    { backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6 },
+  exportBtnTxt: { color: '#fff', fontWeight: '700', fontSize: 12 },
   headerDate:   { color: 'rgba(255,255,255,0.85)', fontSize: 14, fontWeight: '700' },
 
   dateRow:      {

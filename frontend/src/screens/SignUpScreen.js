@@ -1,7 +1,7 @@
 ﻿import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, Pressable, Animated,
-  StyleSheet, ScrollView, ActivityIndicator, StatusBar
+  StyleSheet, ScrollView, ActivityIndicator, StatusBar, KeyboardAvoidingView, Platform
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../context/AuthContext';
@@ -85,8 +85,8 @@ export default function SignUpScreen({ navigation }) {
   const isFocused = (k) => focus === k;
 
   return (
-    <ScrollView style={styles.wrapper} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-      <StatusBar barStyle="light-content" backgroundColor="#0F0C29" />
+    <KeyboardAvoidingView style={styles.wrapper} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">      <StatusBar barStyle="light-content" backgroundColor="#0F0C29" />
 
       <LinearGradient colors={['#0F0C29', '#1E1B4B', '#312E81']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
         <HeaderBlobs />
@@ -218,6 +218,7 @@ export default function SignUpScreen({ navigation }) {
         </Pressable>
       </Animated.View>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

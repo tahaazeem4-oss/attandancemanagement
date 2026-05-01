@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, Pressable, Animated,
-  StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, StatusBar
+  StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, StatusBar, ScrollView
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../context/AuthContext';
@@ -55,7 +55,7 @@ export default function LoginScreen({ navigation }) {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.wrapper} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={styles.wrapper} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'android' ? 0 : 0}>
       <StatusBar barStyle="light-content" backgroundColor="#0F0C29" />
 
       {/* ── Gradient hero with textured blobs ─────────────── */}
@@ -76,6 +76,7 @@ export default function LoginScreen({ navigation }) {
 
       {/* ── Animated sliding card ─────────────────────────── */}
       <Animated.View style={[styles.card, cardAnim]}>
+        <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <Text style={styles.cardTitle}>Welcome Back</Text>
         <Text style={styles.cardSub}>Sign in to your account</Text>
 
@@ -132,6 +133,7 @@ export default function LoginScreen({ navigation }) {
           <Text style={styles.linkText}>New teacher? </Text>
           <Text style={styles.linkAccent}>Create an account</Text>
         </Pressable>
+        </ScrollView>
       </Animated.View>
     </KeyboardAvoidingView>
   );

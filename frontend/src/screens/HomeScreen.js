@@ -35,9 +35,9 @@ export default function HomeScreen({ navigation }) {
     : 'floor_incharge';
 
   // Card entrance animations
-  const aY = [useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current];
-  const aO = [useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current];
-  const sc = [useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current];
+  const aY = [useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current];
+  const aO = [useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current];
+  const sc = [useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current];
   const pulse = useRef(new Animated.Value(1)).current;
   const pi = (i) => () => Animated.spring(sc[i], { toValue: 0.97, useNativeDriver: true, speed: 50 }).start();
   const po = (i) => () => Animated.spring(sc[i], { toValue: 1,    useNativeDriver: true, speed: 20 }).start();
@@ -234,6 +234,33 @@ export default function HomeScreen({ navigation }) {
           grad:  ['#FFF7ED', '#FEF3C7'],
           locked: false,
           onPress: () => navigation.navigate('ClassSelection', { mode: 'report' }),
+        },
+        {
+          i: 3,
+          emoji: '📚',
+          title: 'Upload Lecture',
+          sub:   'Share classwork, homework & notes',
+          grad:  ['#EEF2FF', '#E0E7FF'],
+          locked: false,
+          onPress: () => navigation.navigate('UploadLecture'),
+        },
+        {
+          i: 4,
+          emoji: '🗂',
+          title: 'Browse Lectures',
+          sub:   'View & manage all uploaded lectures',
+          grad:  ['#F0FDF4', '#DCFCE7'],
+          locked: false,
+          onPress: () => navigation.navigate('LectureList'),
+        },
+        {
+          i: 5,
+          emoji: '🔔',
+          title: 'Send Notification',
+          sub:   'Notify classes, sections or students',
+          grad:  ['#FFF7ED', '#FEF3C7'],
+          locked: false,
+          onPress: () => navigation.navigate('SendNotification'),
         },
       ].map(({ i, emoji, title, sub, grad, locked, badge, onPress }) => (
         <Animated.View key={i} style={{ opacity: aO[i], transform: [{ translateY: aY[i] }, { scale: sc[i] }] }}>

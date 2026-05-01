@@ -1,6 +1,11 @@
 const jwt = require('jsonwebtoken');
 
-// ── protect: verify JWT, set req.user (and req.teacher for compat) ──
+// ── protect ───────────────────────────────────────────────────
+// Express middleware that verifies the JWT in the Authorization header.
+// Sets req.user = decoded token payload (id, email, role, school_id, …)
+// and req.teacher = same value for backward compatibility with older controllers
+// that still read req.teacher.
+// Must be used on every protected route BEFORE requireRole.
 const protect = (req, res, next) => {
   const authHeader = req.headers.authorization;
 
@@ -20,7 +25,10 @@ const protect = (req, res, next) => {
   }
 };
 
-// ── requireRole: gate a route to specific roles ───────────────
+// ── requireRole ────────────────────────────────────────────────
+// Factory that returns a middleware function restricting access to the
+// listed roles. Use AFTER protect so req.user is already set.
+// Example: [protect, requireRole('admin', 'teacher')]
 const requireRole = (...roles) => (req, res, next) => {
   if (!req.user || !roles.includes(req.user.role)) {
     return res.status(403).json({ message: 'Access denied' });

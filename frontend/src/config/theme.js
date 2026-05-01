@@ -20,6 +20,7 @@ export const C = {
   headerSub:    '#818CF8',
 
   // Text
+  text:         '#1E293B',   // slate-800 (default body text)
   textDark:     '#0F172A',   // slate-900
   textMed:      '#475569',   // slate-600
   textLight:    '#94A3B8',   // slate-400

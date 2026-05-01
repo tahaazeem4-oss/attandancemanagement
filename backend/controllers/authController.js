@@ -2,12 +2,21 @@ const bcrypt  = require('bcryptjs');
 const jwt     = require('jsonwebtoken');
 const db      = require('../config/db');
 
+// ── signToken ─────────────────────────────────────────────────
+// Creates a signed JWT containing the user's identity fields.
+// Expiry defaults to 7 days (JWT_EXPIRES_IN env var can override).
+// IMPORTANT: any field used by middleware (role, school_id, class_id,
+// section_id) MUST be included here — the auth middleware does NOT
+// re-query the database; it reads directly from the token payload.
 const signToken = (payload) =>
   jwt.sign(payload, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d'
   });
 
-// Helper: fetch school branding by id, expanding logo_url to a full URL
+// ── getSchool ─────────────────────────────────────────────────
+// Fetches school branding (name, logo, colours) for a given school_id.
+// Expands relative logo_url to a full http URL using the current request host.
+// Returns null if school_id is falsy or not found.
 const getSchool = async (school_id, req) => {
   if (!school_id) return null;
   const [rows] = await db.query(
@@ -22,8 +31,12 @@ const getSchool = async (school_id, req) => {
   return school;
 };
 
-// -- POST /api/auth/login
-// Order: super_admin -> admin -> teacher -> student_accounts
+// ── POST /api/auth/login ──────────────────────────────────────
+// Tries each user table in priority order: super_admin → admin → teacher → student.
+// Returns { token, role, user, school } on success.
+// The JWT payload must include every field that controllers read from req.user
+// (role, school_id, class_id, section_id, etc.) because the auth middleware
+// does NOT hit the database — it only decodes the token.
 exports.login = async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password)
@@ -92,7 +105,7 @@ exports.login = async (req, res) => {
         class_id: a.class_id, section_id: a.section_id,
         roll_no: a.roll_no, class_name: a.class_name, section_name: a.section_name
       };
-      const token = signToken({ id: a.id, email: a.email, role: 'student', first_name: a.first_name, last_name: a.last_name, student_id: a.student_id, school_id: a.school_id });
+      const token = signToken({ id: a.id, email: a.email, role: 'student', first_name: a.first_name, last_name: a.last_name, student_id: a.student_id, school_id: a.school_id, class_id: a.class_id, section_id: a.section_id });
       return res.json({ token, role: 'student', user, school });
     }
 
@@ -103,8 +116,11 @@ exports.login = async (req, res) => {
   }
 };
 
-// -- POST /api/auth/signup
-// role: 'teacher' (default) or 'student'
+// ── POST /api/auth/signup ────────────────────────────────────
+// Handles two roles:
+//   role='student' — looks up roll_no in students table, creates student_account.
+//   role='teacher' (default) — creates a new teacher record.
+// Returns the same { token, role, user, school } shape as /login.
 exports.signup = async (req, res) => {
   const { role = 'teacher' } = req.body;
 
@@ -141,7 +157,10 @@ exports.signup = async (req, res) => {
         school_id: student.school_id,
         class_id: student.class_id, section_id: student.section_id, roll_no: student.roll_no
       };
-      const token = signToken({ id: newId, email: user.email, role: 'student', first_name: student.first_name, last_name: student.last_name, student_id: student.id, school_id: student.school_id });
+      // Include class_id + section_id in the token so controllers
+      // (e.g. getLectures, getFile) can filter by the student's class
+      // without an extra DB query on every request.
+      const token = signToken({ id: newId, email: user.email, role: 'student', first_name: student.first_name, last_name: student.last_name, student_id: student.id, school_id: student.school_id, class_id: student.class_id, section_id: student.section_id });
       return res.status(201).json({ token, role: 'student', user, school });
     } catch (err) {
       console.error('Student signup error:', err);
@@ -183,7 +202,9 @@ exports.signup = async (req, res) => {
 };
 
 
-// -- GET /api/auth/me
+// ── GET /api/auth/me ─────────────────────────────────────────
+// Returns fresh profile data for the currently logged-in user.
+// Used on app resume / token refresh to re-sync the UI with the DB.
 exports.getMe = async (req, res) => {
   try {
     const u = req.user;
