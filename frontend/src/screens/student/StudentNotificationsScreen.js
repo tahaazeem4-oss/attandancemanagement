@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, Pressable,
-  StyleSheet, Alert, ActivityIndicator, StatusBar,
+  StyleSheet, Alert, ActivityIndicator,
   Animated, LayoutAnimation, UIManager, Platform,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import api from '../../services/api';
 import { C } from '../../config/theme';
+import AppHeader from '../../components/AppHeader';
 
 // Enable LayoutAnimation on Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -164,37 +164,27 @@ export default function StudentNotificationsScreen({ navigation }) {
 
   return (
     <View style={styles.root}>
-      <StatusBar barStyle="light-content" backgroundColor="#064E3B" />
+      <AppHeader title="Notifications" navigation={navigation} />
 
-      {/* Header */}
-      <LinearGradient
-        colors={['#064E3B', '#065F46', '#047857']}
-        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={styles.header}
-      >
-        <View style={styles.headerRow}>
-          <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
-            <Text style={styles.backTxt}>← Back</Text>
+      {/* Mark all read row */}
+      {unreadCount > 0 && (
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.border }}>
+          <Text style={{ fontSize: 13, color: C.textMed, fontWeight: '600' }}>
+            {unreadCount} unread
+          </Text>
+          <Pressable
+            style={{ backgroundColor: C.primary, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}
+            onPress={markAll}
+            disabled={markingAll}
+          >
+            {markingAll
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Mark all read</Text>}
           </Pressable>
-          <View style={styles.titleWrap}>
-            <Text style={styles.headerTitle}>🔔 Notifications</Text>
-            {unreadCount > 0 && (
-              <View style={styles.badge}>
-                <Text style={styles.badgeTxt}>{unreadCount}</Text>
-              </View>
-            )}
-          </View>
-          {unreadCount > 0 && (
-            <Pressable style={styles.markAllBtn} onPress={markAll} disabled={markingAll}>
-              {markingAll
-                ? <ActivityIndicator size="small" color="#fff" />
-                : <Text style={styles.markAllTxt}>Mark all read</Text>}
-            </Pressable>
-          )}
         </View>
-      </LinearGradient>
+      )}
 
-      {/* Category filter tabs */}
+      {/* Category filter tabs */}}
       <View style={styles.filterBar}>
         <FlatList
           data={FILTER_CATEGORIES}

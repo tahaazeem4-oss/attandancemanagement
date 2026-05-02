@@ -1,5 +1,6 @@
 const { randomUUID } = require('crypto');
-const db = require('../config/db');
+const db   = require('../config/db');
+const push = require('../services/pushService');
 
 // ── GET /api/student-portal/profile ──────────────────────────
 exports.getProfile = async (req, res) => {
@@ -109,6 +110,18 @@ exports.applyLeave = async (req, res) => {
       inserted.push({ id: r[0].id, date: d });
     }
     res.status(201).json({ message: 'Leave application submitted', group_id, inserted });
+
+    // Notify class teachers and admins of this student's school (non-blocking)
+    const { class_id, section_id, school_id, first_name, last_name } = req.user;
+    const studentName = `${first_name} ${last_name}`;
+    const dateLabel   = dates.length === 1 ? dates[0] : `${dates[0]} + ${dates.length - 1} more day(s)`;
+    Promise.all([
+      push.tokensForClassTeachers(class_id, section_id),
+      push.tokensForSchoolAdmins(school_id),
+    ]).then(([teacherTokens, adminTokens]) => {
+      const allTokens = [...new Set([...teacherTokens, ...adminTokens])];
+      push.send(allTokens, 'New Leave Request', `${studentName} applied for leave on ${dateLabel}.`, { type: 'leave_request', group_id });
+    });
   } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
 };
 

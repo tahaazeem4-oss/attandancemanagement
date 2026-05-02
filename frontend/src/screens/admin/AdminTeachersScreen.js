@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, FlatList, Pressable, TextInput,
-  Modal, ScrollView, StyleSheet, Alert, ActivityIndicator, StatusBar
+  Modal, ScrollView, StyleSheet, Alert, ActivityIndicator
 } from 'react-native';
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
 import ImportExportBar from '../../components/ImportExportBar';
+import AppHeader from '../../components/AppHeader';
 
 const EMPTY_FORM = { first_name: '', last_name: '', email: '', password: '', phone: '', assignments: [] };
 
@@ -37,7 +38,7 @@ function MultiAssignmentPicker({ classes, assignments, onChange }) {
       <View style={{ gap: 6, marginBottom: 8 }}>
         {assignments.length === 0 && (
           <View style={mp.emptyTag}>
-            <Text style={mp.emptyTagTxt}>📚 No assignment — Subject Teacher</Text>
+            <Text style={mp.emptyTagTxt}>No assignment — Subject Teacher</Text>
           </View>
         )}
         {assignments.map((a, i) => (
@@ -88,7 +89,7 @@ function MultiAssignmentPicker({ classes, assignments, onChange }) {
   );
 }
 
-export default function AdminTeachersScreen() {
+export default function AdminTeachersScreen({ navigation }) {
   const [teachers,  setTeachers]  = useState([]);
   const [classes,   setClasses]   = useState([]);
   const [loading,   setLoading]   = useState(true);
@@ -165,7 +166,7 @@ export default function AdminTeachersScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+      <AppHeader title="Teachers" navigation={navigation} />
       <ImportExportBar
         templatePath="/import-export/teachers/template"
         templateFilename="teachers_template.xlsx"

@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { Platform } from 'react-native';
-import api from '../services/api';
+import { Platform, Alert } from 'react-native';
+import * as Notifications from 'expo-notifications';
+import api, { setUnauthorizedHandler } from '../services/api';
 
 // expo-secure-store has no web implementation — fall back to localStorage
 const storage = {
@@ -20,6 +21,32 @@ const storage = {
 };
 
 const AuthContext = createContext(null);
+
+// ── Push notification helper ──────────────────────────────────
+// Requests permission, gets the Expo push token, and saves it to the backend.
+// Silently ignores errors so it never breaks the login flow.
+async function registerPushToken() {
+  try {
+    if (Platform.OS === 'web') return;
+
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    let finalStatus = existing;
+
+    if (existing !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+
+    if (finalStatus !== 'granted') return;
+
+    const tokenData = await Notifications.getExpoPushTokenAsync();
+    const token     = tokenData.data;
+
+    if (token) {
+      await api.post('/push-token', { token });
+    }
+  } catch { /* silently ignore — never block login */ }
+}
 
 export function AuthProvider({ children }) {
   const [user,    setUser]    = useState(null); // { id, first_name, last_name, email, role, school_id, ... }
@@ -43,6 +70,7 @@ export function AuthProvider({ children }) {
           api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
           setUser(parsed);
           if (schoolJson) setSchool(JSON.parse(schoolJson));
+          registerPushToken(); // re-register token on app restart
         } else {
           // Migrate old 'teacher' storage key
           const oldJson = await storage.getItem('teacher');
@@ -53,6 +81,7 @@ export function AuthProvider({ children }) {
             setUser(parsed);
             await storage.setItem('user', JSON.stringify(parsed));
             await storage.removeItem('teacher');
+            registerPushToken();
           }
         }
       } catch { /* ignore */ } finally {
@@ -71,6 +100,7 @@ export function AuthProvider({ children }) {
     api.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
     setUser(u);
     setSchool(sc);
+    registerPushToken();
     return data;
   };
 
@@ -84,10 +114,13 @@ export function AuthProvider({ children }) {
     api.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
     setUser(u);
     setSchool(sc);
+    registerPushToken();
     return data;
   };
 
   const logout = async () => {
+    // Best-effort: remove push token from server before clearing session
+    try { await api.delete('/push-token'); } catch { /* ignore */ }
     await storage.removeItem('token');
     await storage.removeItem('user');
     await storage.removeItem('school');
@@ -95,6 +128,20 @@ export function AuthProvider({ children }) {
     setUser(null);
     setSchool(null);
   };
+
+  // Register the 401 → auto-logout handler so expired/invalid tokens
+  // are cleared immediately and the user is returned to the login screen.
+  useEffect(() => {
+    setUnauthorizedHandler(async () => {
+      await storage.removeItem('token');
+      await storage.removeItem('user');
+      await storage.removeItem('school');
+      delete api.defaults.headers.common['Authorization'];
+      setUser(null);
+      setSchool(null);
+      Alert.alert('Session Expired', 'Please log in again.');
+    });
+  }, []);
 
   return (
     <AuthContext.Provider value={{ user, teacher, school, loading, login, signup, logout }}>

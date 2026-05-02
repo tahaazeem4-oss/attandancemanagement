@@ -147,7 +147,7 @@ function MultiAssignmentPicker({ classes, assignments, onChange }) {
       <View style={{ gap: 6, marginBottom: 8 }}>
         {assignments.length === 0 && (
           <View style={map.emptyTag}>
-            <Text style={map.emptyTagTxt}>📚 No assignment — Subject Teacher</Text>
+            <Text style={map.emptyTagTxt}>No assignment — Subject Teacher</Text>
           </View>
         )}
         {assignments.map((a, i) => (
@@ -497,15 +497,15 @@ export default function SuperAdminTeachersScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0F172A" />
+      <StatusBar barStyle="light-content" backgroundColor="#1E3A8A" />
 
       {/* Header */}
-      <LinearGradient colors={['#0F172A', '#1E293B', '#334155']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
+      <LinearGradient colors={['#1E3A8A', '#2563EB']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
         <Text style={styles.headerTitle}>Manage Teachers</Text>
         <Text style={styles.headerSub}>School → Campus → Class → Section</Text>
 
         {schoolsLoading
-          ? <ActivityIndicator color="#94A3B8" style={{ marginTop: 14 }} />
+          ? <ActivityIndicator color="rgba(255,255,255,0.7)" style={{ marginTop: 14 }} />
           : (
             <DropdownBtn
               label="School"
@@ -737,8 +737,8 @@ export default function SuperAdminTeachersScreen() {
 const styles = StyleSheet.create({
   container:   { flex: 1, backgroundColor: C.bg },
   header:      { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 20 },
-  headerTitle: { color: '#F1F5F9', fontSize: 20, fontWeight: '800' },
-  headerSub:   { color: '#94A3B8', fontSize: 12, marginTop: 4, marginBottom: 14 },
+  headerTitle: { color: '#fff', fontSize: 20, fontWeight: '800' },
+  headerSub:   { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 4, marginBottom: 14 },
 
   toolbar:     { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.border },
   searchBox:   { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', borderRadius: 12, paddingHorizontal: 10, height: 40 },

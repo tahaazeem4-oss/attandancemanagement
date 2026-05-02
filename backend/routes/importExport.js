@@ -41,8 +41,10 @@ router.get('/classes/template',  ...adminOnly, ctrl.classTemplate);
 router.get('/classes/export',    ...adminOnly, ctrl.exportClasses);
 router.post('/classes/import',   ...adminOnly, upload.single('file'), ctrl.importClasses);
 
-// ── Attendance report export ───────────────────────────────────
-router.get('/attendance/export', ...adminOnly, ctrl.exportAttendance);
+// ── Attendance report export ─────────────────────────────────
+// Any authenticated user (admin / teacher / student-portal admin) may export.
+// The controller filters by school_id from the token so cross-school access is impossible.
+router.get('/attendance/export', protect, ctrl.exportAttendance);
 
 // ── Leave report export ────────────────────────────────────────
 router.get('/leaves/export',     ...adminOnly, ctrl.exportLeaves);

@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, Pressable, TextInput, Modal,
-  StyleSheet, Alert, ActivityIndicator, StatusBar, ScrollView
+  StyleSheet, Alert, ActivityIndicator, ScrollView
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
+import AppHeader from '../../components/AppHeader';
 
 const STATUS_COLOR = { pending: '#D97706', approved: '#059669', rejected: '#DC2626', cancelled: '#64748B' };
 const STATUS_BG    = { pending: '#FFFBEB', approved: '#ECFDF5', rejected: '#FEF2F2', cancelled: '#F1F5F9' };
@@ -77,7 +77,7 @@ function CalendarPicker({ selectedDates, onChange }) {
 }
 
 // ── Main Screen ───────────────────────────────────────────────
-export default function StudentLeaveScreen() {
+export default function StudentLeaveScreen({ navigation }) {
   const [groups,    setGroups]    = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [modal,     setModal]     = useState(false);
@@ -148,15 +148,10 @@ export default function StudentLeaveScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#064E3B" />
-
-      <LinearGradient colors={['#064E3B','#065F46','#047857']} start={{x:0,y:0}} end={{x:1,y:1}} style={styles.header}>
-        <Text style={styles.headerTitle}>Leave Applications 📩</Text>
-        <Text style={styles.headerSub}>Apply for leave or check your application status</Text>
-      </LinearGradient>
+      <AppHeader title="Leave Applications" navigation={navigation} />
 
       {loading
-        ? <ActivityIndicator color="#059669" style={{ flex: 1 }} />
+        ? <ActivityIndicator color={C.primary} style={{ flex: 1 }} />
         : (
           <FlatList
             data={groups}
@@ -167,7 +162,7 @@ export default function StudentLeaveScreen() {
               <View style={styles.card}>
                 <View style={styles.cardTop}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.dateText}>📅 {formatDates(item.dates)}</Text>
+                    <Text style={styles.dateText}>{formatDates(item.dates)}</Text>
                     {item.dates.length > 1 && (
                       <Text style={styles.dateCount}>{item.dates.length} days selected</Text>
                     )}

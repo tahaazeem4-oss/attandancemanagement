@@ -24,6 +24,7 @@ const importExportRoutes   = require('./routes/importExport');
 const lectureRoutes        = require('./routes/lectures');
 const notificationRoutes   = require('./routes/notifications');
 const subjectRoutes        = require('./routes/subjects');
+const pushTokenRoutes      = require('./routes/pushToken');
 const db                  = require('./config/db');
 const path                = require('path');
 
@@ -54,6 +55,7 @@ app.use('/api/import-export',  importExportRoutes);  // bulk Excel import/export
 app.use('/api/lectures',       lectureRoutes);       // upload/list/delete PDFs
 app.use('/api/notifications',  notificationRoutes);  // push notifications (future)
 app.use('/api/subjects',       subjectRoutes);       // school subject master list
+app.use('/api/push-token',     pushTokenRoutes);     // Expo push token registration
 
 // ── Public: list schools (used by signup screen) ─────────────
 app.get('/api/schools', async (req, res) => {
@@ -71,6 +73,15 @@ app.get('/api/schools', async (req, res) => {
 });
 // ── Health check ──────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'OK', time: new Date() }));
+
+// ── Global error handler (catches multer errors etc.) ───────────
+// Must be defined AFTER all routes. Returns JSON so the app can display it.
+app.use((err, req, res, next) => {
+  const status  = err.status || err.statusCode || 500;
+  const message = err.message || 'Server error';
+  console.error('[error handler]', message);
+  res.status(status).json({ message });
+});
 
 // ── Start server ──────────────────────────────────────────────
 const server = app.listen(PORT, () => {

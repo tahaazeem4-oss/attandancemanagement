@@ -6,7 +6,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import api from '../services/api';
 import { C, S } from '../config/theme';
-import { HeaderBlobs, useEntrance } from '../components/Deco';
+import { useEntrance } from '../components/Deco';
 import PickerField from '../components/PickerField';
 
 export default function AddStudentScreen({ navigation }) {
@@ -60,16 +60,15 @@ export default function AddStudentScreen({ navigation }) {
 
   return (
     <ScrollView style={styles.wrapper} contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
-      <StatusBar barStyle="light-content" backgroundColor="#0F0C29" />
+      <StatusBar barStyle="light-content" backgroundColor="#1E3A8A" />
 
       {/* Gradient Header */}
       <LinearGradient
-        colors={['#0F0C29', '#1E1B4B', '#312E81']}
+        colors={['#1E3A8A', '#2563EB']}
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
         style={styles.header}
       >
-        <HeaderBlobs />
-        <Text style={styles.headerTitle}>➕  Add New Student</Text>
+        <Text style={styles.headerTitle}>Add New Student</Text>
         <Text style={styles.headerSub}>Fill in the details to register a student</Text>
       </LinearGradient>
 
@@ -151,7 +150,7 @@ export default function AddStudentScreen({ navigation }) {
         <Animated.View style={{ marginTop: 18, transform: [{ scale: btnS }] }}>
           <Pressable onPress={handleAdd} disabled={loading} onPressIn={pIn} onPressOut={pOut}>
             <LinearGradient
-              colors={['#6366F1', '#4F46E5', '#3730A3']}
+              colors={['#2563EB', '#1D4ED8']}
               start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
               style={S.btn}
             >
@@ -188,8 +187,8 @@ const styles = StyleSheet.create({
   },
   pickerDisabled: { opacity: 0.45 },
   inputFocus:     {
-    borderColor: '#6366F1', backgroundColor: '#F5F3FF',
-    shadowColor: '#6366F1', shadowOpacity: 0.2, shadowRadius: 6,
+    borderColor: '#2563EB', backgroundColor: '#EFF6FF',
+    shadowColor: '#2563EB', shadowOpacity: 0.2, shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 }, elevation: 2,
   },
 });

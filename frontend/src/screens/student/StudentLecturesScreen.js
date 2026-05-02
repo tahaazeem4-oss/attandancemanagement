@@ -6,14 +6,13 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TextInput, FlatList, Pressable,
-  StyleSheet, Alert, ActivityIndicator, StatusBar,
+  StyleSheet, Alert, ActivityIndicator,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing    from 'expo-sharing';
-import { Picker } from '@react-native-picker/picker';
+import { Linking } from 'react-native';
 import api from '../../services/api';
 import { C } from '../../config/theme';
+import PickerField from '../../components/PickerField';
+import AppHeader from '../../components/AppHeader';
 
 const TYPE_COLOR = { classwork: '#4F46E5', homework: '#D97706' };
 const TYPE_BG    = { classwork: '#EEF2FF', homework: '#FFFBEB' };
@@ -35,7 +34,7 @@ export default function StudentLecturesScreen({ navigation }) {
   const [filterYear,    setFilterYear]    = useState('');
   const [filterType,    setFilterType]    = useState('');
   const [filterSubject, setFilterSubject] = useState('');
-  const [downloading,   setDownloading]   = useState(null);
+  const [downloading,   setDownloading]   = useState(null); // kept for UI indicator
 
   const subjects = useMemo(() =>
     ['', ...Array.from(new Set(lectures.map(l => l.subject_name).filter(Boolean))).sort()]
@@ -86,37 +85,15 @@ export default function StudentLecturesScreen({ navigation }) {
 
   useEffect(() => { load(); }, [load]);
 
-  // ── Download / View PDF ───────────────────────────────────────
+  // ── Open / View PDF ────────────────────────────────────────
   const openLecture = async (lecture) => {
-    setDownloading(lecture.id);
-    try {
-      const token    = api.defaults.headers.common['Authorization']?.replace('Bearer ', '');
-      const url      = `${BASE_URL}/lectures/${lecture.id}/file`;
-      const filename = `${lecture.lecture_name.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
-      const localUri = FileSystem.cacheDirectory + filename;
-
-      const { status } = await FileSystem.downloadAsync(url, localUri, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (status !== 200) {
-        Alert.alert('Error', 'Could not download the lecture file');
-        return;
-      }
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(localUri, {
-          mimeType: 'application/pdf',
-          dialogTitle: lecture.lecture_name,
-          UTI: 'com.adobe.pdf',
-        });
-      } else {
-        Alert.alert('Saved', `File saved to: ${localUri}`);
-      }
-    } catch (err) {
-      Alert.alert('Error', err.message || 'Could not open lecture');
-    } finally {
-      setDownloading(null);
+    const token = api.defaults.headers.common['Authorization']?.replace('Bearer ', '');
+    const url   = `${BASE_URL}/lectures/${lecture.id}/file?_token=${encodeURIComponent(token)}`;
+    const canOpen = await Linking.canOpenURL(url);
+    if (canOpen) {
+      await Linking.openURL(url);
+    } else {
+      Alert.alert('Error', 'Cannot open file on this device');
     }
   };
 
@@ -132,9 +109,7 @@ export default function StudentLecturesScreen({ navigation }) {
           </Text>
         </View>
         <View style={styles.downloadBtn}>
-          {downloading === item.id
-            ? <ActivityIndicator size="small" color="#4F46E5" />
-            : <Text style={styles.downloadIcon}>⬇</Text>}
+          <Text style={styles.downloadIcon}>⬇</Text>
         </View>
       </View>
       <Text style={styles.lectureName} numberOfLines={2}>{item.lecture_name}</Text>
@@ -166,48 +141,33 @@ export default function StudentLecturesScreen({ navigation }) {
 
       {/* Subject */}
       <Text style={styles.filterLabel}>Subject</Text>
-      <View style={styles.pickerBox}>
-        <Picker
-          selectedValue={filterSubject}
-          onValueChange={setFilterSubject}
-          style={styles.picker}
-          dropdownIconColor="#475569"
-        >
-          {subjects.map(s => (
-            <Picker.Item key={s} label={s === '' ? 'All Subjects' : s} value={s} color="#1E293B" />
-          ))}
-        </Picker>
-      </View>
+      <PickerField
+        label="Subject"
+        value={filterSubject}
+        onChange={setFilterSubject}
+        placeholder="All Subjects"
+        items={subjects.map(s => ({ label: s === '' ? 'All Subjects' : s, value: s }))}
+      />
 
       {/* Month */}
       <Text style={styles.filterLabel}>Month</Text>
-      <View style={styles.pickerBox}>
-        <Picker
-          selectedValue={filterMonth}
-          onValueChange={setFilterMonth}
-          style={styles.picker}
-          dropdownIconColor="#475569"
-        >
-          {availableMonths.map(m => (
-            <Picker.Item key={m.value} label={m.label} value={m.value} color="#1E293B" />
-          ))}
-        </Picker>
-      </View>
+      <PickerField
+        label="Month"
+        value={filterMonth}
+        onChange={setFilterMonth}
+        placeholder="Any Month"
+        items={availableMonths}
+      />
 
       {/* Year */}
       <Text style={styles.filterLabel}>Year</Text>
-      <View style={styles.pickerBox}>
-        <Picker
-          selectedValue={filterYear}
-          onValueChange={setFilterYear}
-          style={styles.picker}
-          dropdownIconColor="#475569"
-        >
-          {availableYears.map(y => (
-            <Picker.Item key={y.value} label={y.label} value={y.value} color="#1E293B" />
-          ))}
-        </Picker>
-      </View>
+      <PickerField
+        label="Year"
+        value={filterYear}
+        onChange={setFilterYear}
+        placeholder="Any Year"
+        items={availableYears}
+      />
 
       {/* Type chips */}
       <Text style={styles.filterLabel}>Type</Text>
@@ -239,20 +199,7 @@ export default function StudentLecturesScreen({ navigation }) {
 
   return (
     <View style={styles.root}>
-      <StatusBar barStyle="light-content" backgroundColor="#064E3B" />
-
-      {/* Header */}
-      <LinearGradient
-        colors={['#064E3B', '#065F46', '#047857']}
-        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={styles.header}
-      >
-        <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={styles.backTxt}>← Back</Text>
-        </Pressable>
-        <Text style={styles.headerTitle}>📚 Lectures</Text>
-        <Text style={styles.headerSub}>Browse notes, classwork & homework</Text>
-      </LinearGradient>
+      <AppHeader title="Lectures" navigation={navigation} />
 
       {loading ? (
         <ActivityIndicator color="#4F46E5" style={{ flex: 1, marginTop: 60 }} size="large" />
@@ -279,14 +226,12 @@ export default function StudentLecturesScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  root:   { flex: 1, backgroundColor: '#F0F4FF' },
+  root:   { flex: 1, backgroundColor: C.bg },
 
   // Header
   header:      { paddingTop: 52, paddingBottom: 20, paddingHorizontal: 20 },
-  backBtn:     { alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, marginBottom: 12 },
-  backTxt:     { color: '#fff', fontWeight: '700', fontSize: 13 },
-  headerTitle: { color: '#ECFDF5', fontSize: 22, fontWeight: '900' },
-  headerSub:   { color: '#A7F3D0', fontSize: 13, marginTop: 3 },
+  headerTitle: { color: '#EFF6FF', fontSize: 22, fontWeight: '900' },
+  headerSub:   { color: '#93C5FD', fontSize: 13, marginTop: 3 },
 
   // Filter card (inside FlatList header)
   filterCard:  {
@@ -322,7 +267,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: '#fff', borderRadius: 16,
     marginHorizontal: 14, marginBottom: 12, padding: 16,
-    elevation: 2, shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 6, shadowOffset: { width: 0, height: 2 },
+    elevation: 2, shadowColor: '#94A3B8', shadowOpacity: 0.10, shadowRadius: 8, shadowOffset: { width: 0, height: 2 },
   },
   cardTop:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   typePill:    { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },

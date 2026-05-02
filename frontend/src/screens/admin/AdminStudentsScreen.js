@@ -3,14 +3,16 @@ import {
   View, Text, FlatList, Pressable, TextInput,
   Modal, StyleSheet, Alert, ActivityIndicator
 } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
+import PickerField from '../../components/PickerField';
 import ImportExportBar from '../../components/ImportExportBar';
+import { Ionicons } from '@expo/vector-icons';
+import AppHeader from '../../components/AppHeader';
 
 const EMPTY_FORM = { first_name: '', last_name: '', age: '', class_id: '', section_id: '', roll_no: '' };
 
-export default function AdminStudentsScreen() {
+export default function AdminStudentsScreen({ navigation }) {
   const [students,  setStudents]  = useState([]);
   const [classes,   setClasses]   = useState([]);
   const [sections,  setSections]  = useState([]);
@@ -99,6 +101,7 @@ export default function AdminStudentsScreen() {
 
   return (
     <View style={styles.container}>
+      <AppHeader title="Students" navigation={navigation} />
       <ImportExportBar
         templatePath="/import-export/students/template"
         templateFilename="students_template.xlsx"
@@ -109,18 +112,21 @@ export default function AdminStudentsScreen() {
       />
       {/* Filter bar */}
       <View style={styles.filterBar}>
-        <View style={styles.pickerWrap}>
-          <Picker selectedValue={filter.class_id} onValueChange={v => setFilter({ class_id: v, section_id: '' })} style={styles.picker}>
-            <Picker.Item label="All Classes" value="" />
-            {classes.map(c => <Picker.Item key={c.id} label={c.class_name} value={String(c.id)} />)}
-          </Picker>
-        </View>
-        <View style={styles.pickerWrap}>
-          <Picker selectedValue={filter.section_id} onValueChange={v => setFilter(p => ({ ...p, section_id: v }))} style={styles.picker} enabled={!!filter.class_id}>
-            <Picker.Item label="All Sections" value="" />
-            {sections.map(s => <Picker.Item key={s.id} label={`Section ${s.section_name}`} value={String(s.id)} />)}
-          </Picker>
-        </View>
+        <PickerField
+          label="Class"
+          value={filter.class_id}
+          onChange={v => setFilter({ class_id: v, section_id: '' })}
+          placeholder="All Classes"
+          items={[{ label: 'All Classes', value: '' }, ...classes.map(c => ({ label: c.class_name, value: String(c.id) }))]}
+        />
+        <PickerField
+          label="Section"
+          value={filter.section_id}
+          onChange={v => setFilter(p => ({ ...p, section_id: v }))}
+          placeholder="All Sections"
+          disabled={!filter.class_id}
+          items={[{ label: 'All Sections', value: '' }, ...sections.map(s => ({ label: `Section ${s.section_name}`, value: String(s.id) }))]}
+        />
       </View>
 
       {loading
@@ -145,11 +151,11 @@ export default function AdminStudentsScreen() {
                   </Pressable>
                   {item.has_account > 0 && (
                     <Pressable style={[styles.btn, { backgroundColor: '#FFFBEB' }]} onPress={() => { setPwTarget(item); setNewPw(''); setPwModal(true); }}>
-                      <Text style={[styles.btnText, { color: '#D97706' }]}>🔑</Text>
+                      <Ionicons name="key-outline" size={14} color="#D97706" />
                     </Pressable>
                   )}
                   <Pressable style={[styles.btn, { backgroundColor: '#FEF2F2' }]} onPress={() => handleDelete(item)}>
-                    <Text style={[styles.btnText, { color: '#EF4444' }]}>🗑</Text>
+                    <Ionicons name="trash-outline" size={14} color="#EF4444" />
                   </Pressable>
                 </View>
               </View>
@@ -187,19 +193,22 @@ export default function AdminStudentsScreen() {
               </View>
             </View>
             <Text style={S.label}>Class *</Text>
-            <View style={styles.pickerWrap}>
-              <Picker selectedValue={form.class_id} onValueChange={v => F('class_id', v)} style={styles.picker}>
-                <Picker.Item label="Select class…" value="" />
-                {classes.map(c => <Picker.Item key={c.id} label={c.class_name} value={String(c.id)} />)}
-              </Picker>
-            </View>
+            <PickerField
+              label="Class"
+              value={form.class_id}
+              onChange={v => F('class_id', v)}
+              placeholder="Select class…"
+              items={[{ label: 'Select class…', value: '' }, ...classes.map(c => ({ label: c.class_name, value: String(c.id) }))]}
+            />
             <Text style={[S.label, { marginTop: 6 }]}>Section *</Text>
-            <View style={styles.pickerWrap}>
-              <Picker selectedValue={form.section_id} onValueChange={v => F('section_id', v)} style={styles.picker} enabled={!!form.class_id}>
-                <Picker.Item label="Select section…" value="" />
-                {modalSections.map(s => <Picker.Item key={s.id} label={`Section ${s.section_name}`} value={String(s.id)} />)}
-              </Picker>
-            </View>
+            <PickerField
+              label="Section"
+              value={form.section_id}
+              onChange={v => F('section_id', v)}
+              placeholder="Select section…"
+              disabled={!form.class_id}
+              items={[{ label: 'Select section…', value: '' }, ...modalSections.map(s => ({ label: `Section ${s.section_name}`, value: String(s.id) }))]}
+            />
             <View style={styles.modalBtns}>
               <Pressable style={[styles.modalBtn, styles.cancelBtn]} onPress={() => setModal(false)}>
                 <Text style={styles.cancelBtnText}>Cancel</Text>
@@ -241,8 +250,8 @@ const styles = StyleSheet.create({
   pickerWrap:  { flex: 1, borderWidth: 1.5, borderColor: C.border, borderRadius: 10, overflow: 'hidden', backgroundColor: C.cardAlt },
   picker:      { height: 44 },
   card:        { backgroundColor: C.card, borderRadius: 14, marginBottom: 10, padding: 14, flexDirection: 'row', alignItems: 'center', elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } },
-  avatar:      { width: 44, height: 44, borderRadius: 13, backgroundColor: '#ECFDF5', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  avatarText:  { color: '#059669', fontWeight: '800', fontSize: 14 },
+  avatar:      { width: 44, height: 44, borderRadius: 13, backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  avatarText:  { color: C.primary, fontWeight: '800', fontSize: 14 },
   name:        { fontSize: 15, fontWeight: '700', color: C.textDark },
   sub:         { fontSize: 12, color: C.textLight, marginTop: 1 },
   accountBadge:{ fontSize: 10, color: '#059669', fontWeight: '700', marginTop: 2 },
@@ -250,7 +259,7 @@ const styles = StyleSheet.create({
   btn:         { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   btnText:     { fontSize: 12, fontWeight: '700' },
   empty:       { textAlign: 'center', color: C.textLight, marginTop: 40, fontSize: 15 },
-  fab:         { position: 'absolute', bottom: 24, right: 20, backgroundColor: '#059669', borderRadius: 14, paddingHorizontal: 20, paddingVertical: 14, elevation: 6, shadowColor: '#059669', shadowOpacity: 0.4, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
+  fab:         { position: 'absolute', bottom: 24, right: 20, backgroundColor: C.primary, borderRadius: 14, paddingHorizontal: 20, paddingVertical: 14, elevation: 6, shadowColor: C.primary, shadowOpacity: 0.4, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
   fabText:     { color: '#fff', fontWeight: '800', fontSize: 14 },
   overlay:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
   modalCard:   { backgroundColor: C.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 },

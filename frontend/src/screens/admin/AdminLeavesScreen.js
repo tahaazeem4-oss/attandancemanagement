@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, Pressable,
-  StyleSheet, Alert, ActivityIndicator, StatusBar
+  StyleSheet, Alert, ActivityIndicator
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import api from '../../services/api';
 import { C } from '../../config/theme';
 import { exportFile } from '../../services/importExport';
+import AppHeader from '../../components/AppHeader';
 
 const STATUS_COLOR = { pending: '#D97706', approved: '#059669', rejected: '#DC2626', cancelled: '#64748B' };
 const STATUS_BG    = { pending: '#FFFBEB', approved: '#ECFDF5', rejected: '#FEF2F2', cancelled: '#F1F5F9' };
@@ -72,24 +72,7 @@ export default function AdminLeavesScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#4C1D95" />
-      {/* Header */}
-      <LinearGradient colors={['#4C1D95', '#5B21B6', '#6D28D9']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
-        <View style={styles.headerRow}>
-          <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
-            <Text style={styles.backBtnTxt}>← Back</Text>
-          </Pressable>
-          <Text style={styles.headerTitle}>Leave Requests 📩</Text>
-          <Pressable style={styles.homeBtn} onPress={() => navigation.navigate('AdminHome')}>
-            <Text style={styles.homeBtnTxt}>🏠</Text>
-          </Pressable>
-          <Pressable style={styles.exportBtn} onPress={handleExport} disabled={exporting}>
-            {exporting
-              ? <ActivityIndicator size="small" color="#fff" />
-              : <Text style={styles.exportBtnTxt}>⬇ Export</Text>}
-          </Pressable>
-        </View>
-      </LinearGradient>
+      <AppHeader title="Leave Requests" navigation={navigation} />
       {/* Filter bar */}
       <View style={styles.filterBar}>
         {FILTERS.map(f => (
@@ -103,6 +86,15 @@ export default function AdminLeavesScreen({ navigation }) {
             </Text>
           </Pressable>
         ))}
+        <Pressable
+          style={{ backgroundColor: C.primary, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}
+          onPress={handleExport}
+          disabled={exporting}
+        >
+          {exporting
+            ? <ActivityIndicator size="small" color="#fff" />
+            : <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>⬇ Export</Text>}
+        </Pressable>
       </View>
 
       {loading
@@ -131,7 +123,7 @@ export default function AdminLeavesScreen({ navigation }) {
 
                 {/* Dates */}
                 <View style={styles.datesBox}>
-                  <Text style={styles.datesLabel}>📅 {item.dates?.length} day{item.dates?.length > 1 ? 's' : ''}</Text>
+                  <Text style={styles.datesLabel}>{item.dates?.length} day{item.dates?.length > 1 ? 's' : ''}</Text>
                   <Text style={styles.datesText}>{formatDates(item.dates)}</Text>
                 </View>
 
@@ -177,14 +169,11 @@ export default function AdminLeavesScreen({ navigation }) {
 const styles = StyleSheet.create({
   container:       { flex: 1, backgroundColor: C.bg },
   header:          { paddingHorizontal: 16, paddingTop: 50, paddingBottom: 14 },
-  headerRow:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  backBtn:         { backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
-  backBtnTxt:      { color: '#fff', fontSize: 13, fontWeight: '700' },
-  headerTitle:     { color: '#EDE9FE', fontSize: 16, fontWeight: '800' },
-  homeBtn:         { backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
+  headerRow:       { flexDirection: 'row', alignItems: 'center' },
+  headerTitle:     { color: '#E0E7FF', fontSize: 20, fontWeight: '800', marginBottom: 4 },
+  headerSub:       { fontSize: 13, color: 'rgba(224,231,255,0.6)' },
   exportBtn:       { backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
   exportBtnTxt:    { color: '#fff', fontWeight: '700', fontSize: 12 },
-  homeBtnTxt:      { fontSize: 16 },
   filterBar:       { flexDirection: 'row', backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.border, padding: 8, gap: 6 },
   filterBtn:       { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10, backgroundColor: C.bg },
   filterBtnActive: { backgroundColor: C.primary },

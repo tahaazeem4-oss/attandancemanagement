@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, TextInput, Pressable, ScrollView,
-  StyleSheet, Alert, ActivityIndicator, StatusBar,
+  StyleSheet, Alert, ActivityIndicator,
   KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as DocumentPicker from 'expo-document-picker';
-import { Picker } from '@react-native-picker/picker';
 import api from '../services/api';
 import { C } from '../config/theme';
+import PickerField from '../components/PickerField';
+import AppHeader from '../components/AppHeader';
 
 const TYPES = [
   { label: '📖  Class Work', value: 'classwork' },
@@ -140,7 +140,7 @@ export default function UploadLectureScreen({ navigation }) {
       formData.append('section_id',   form.section_id || '');
 
       await api.post('/lectures', formData, {
-        headers: { 'Content-Type': undefined },  // let axios set multipart/form-data + boundary automatically
+        headers: { 'Content-Type': 'multipart/form-data' }, // RN XHR adds boundary automatically
       });
 
       if (!subjects.includes(subject_name)) setSubjects(prev => [...prev, subject_name].sort());
@@ -188,21 +188,8 @@ export default function UploadLectureScreen({ navigation }) {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <StatusBar barStyle="light-content" backgroundColor="#1E1B4B" />
+      <AppHeader title="Upload Lecture" navigation={navigation} />
       <ScrollView style={styles.root} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 60 }}>
-
-        {/* ── Header ── */}
-        <LinearGradient
-          colors={['#1E1B4B', '#312E81', '#4338CA']}
-          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-          style={styles.header}
-        >
-          <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
-            <Text style={styles.backTxt}>← Back</Text>
-          </Pressable>
-          <Text style={styles.headerTitle}>📚 Upload Lecture</Text>
-          <Text style={styles.headerSub}>Share notes, classwork or homework PDFs</Text>
-        </LinearGradient>
 
         <View style={styles.body}>
 
@@ -219,17 +206,17 @@ export default function UploadLectureScreen({ navigation }) {
           {/* Subject */}
           <Text style={styles.label}>Subject *</Text>
           {!addingSubject ? (
-            <View style={styles.pickerWrap}>
-              <Picker
-                selectedValue={form.subject_name}
-                onValueChange={v => { if (v === '__new__') { setAddingSubject(true); } else { F('subject_name', v); } }}
-                style={styles.picker}
-              >
-                <Picker.Item label="— Select Subject —" value="" />
-                {subjects.map(s => <Picker.Item key={s} label={s} value={s} />)}
-                <Picker.Item label="➕  Add New Subject…" value="__new__" />
-              </Picker>
-            </View>
+            <PickerField
+              label="Subject"
+              value={form.subject_name}
+              onChange={v => { if (v === '__new__') { setAddingSubject(true); } else { F('subject_name', v); } }}
+              placeholder="— Select Subject —"
+              items={[
+                { label: '— Select Subject —', value: '' },
+                ...subjects.map(s => ({ label: s, value: s })),
+                { label: '➕  Add New Subject…', value: '__new__' },
+              ]}
+            />
           ) : (
             <View style={styles.newSubjectRow}>
               <TextInput
@@ -272,44 +259,34 @@ export default function UploadLectureScreen({ navigation }) {
 
           {/* Date */}
           <Text style={styles.label}>Date *</Text>
-          <View style={styles.pickerWrap}>
-            <Picker selectedValue={form.date} onValueChange={v => F('date', v)} style={styles.picker}>
-              {DATE_OPTIONS.map(d => (
-                <Picker.Item key={d.value} label={d.label} value={d.value} />
-              ))}
-            </Picker>
-          </View>
+          <PickerField
+            label="Date"
+            value={form.date}
+            onChange={v => F('date', v)}
+            placeholder="Select date"
+            items={DATE_OPTIONS}
+          />
 
           {/* Class */}
           <Text style={styles.label}>Class *</Text>
-          <View style={styles.pickerWrap}>
-            <Picker
-              selectedValue={String(form.class_id)}
-              onValueChange={v => F('class_id', v)}
-              style={styles.picker}
-            >
-              <Picker.Item label="— Select Class —" value="" />
-              {classes.map(c => (
-                <Picker.Item key={c.id} label={c.class_name} value={String(c.id)} />
-              ))}
-            </Picker>
-          </View>
+          <PickerField
+            label="Class"
+            value={String(form.class_id)}
+            onChange={v => F('class_id', v)}
+            placeholder="— Select Class —"
+            items={[{ label: '— Select Class —', value: '' }, ...classes.map(c => ({ label: c.class_name, value: String(c.id) }))]}
+          />
 
           {/* Section */}
           <Text style={styles.label}>Section</Text>
-          <View style={styles.pickerWrap}>
-            <Picker
-              selectedValue={String(form.section_id)}
-              onValueChange={v => F('section_id', v)}
-              style={styles.picker}
-              enabled={!!form.class_id}
-            >
-              <Picker.Item label="📢  All Sections" value="" />
-              {sections.map(s => (
-                <Picker.Item key={s.id} label={`Section ${s.section_name}`} value={String(s.id)} />
-              ))}
-            </Picker>
-          </View>
+          <PickerField
+            label="Section"
+            value={String(form.section_id)}
+            onChange={v => F('section_id', v)}
+            placeholder="📢  All Sections"
+            disabled={!form.class_id}
+            items={[{ label: '📢  All Sections', value: '' }, ...sections.map(s => ({ label: `Section ${s.section_name}`, value: String(s.id) }))]}
+          />
           {form.class_id && !form.section_id && (
             <Text style={styles.hint}>
               📢 "All Sections" makes this lecture visible to every section of {selectedClassName}.

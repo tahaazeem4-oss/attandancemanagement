@@ -6,8 +6,10 @@ import {
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
 import ImportExportBar from '../../components/ImportExportBar';
+import { Ionicons } from '@expo/vector-icons';
+import AppHeader from '../../components/AppHeader';
 
-export default function AdminClassesScreen() {
+export default function AdminClassesScreen({ navigation }) {
   const [classes,  setClasses]  = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [modal,    setModal]    = useState(null); // 'class' | 'section' | 'editClass'
@@ -70,6 +72,7 @@ export default function AdminClassesScreen() {
 
   return (
     <View style={styles.container}>
+      <AppHeader title="Classes & Sections" navigation={navigation} />
       <ImportExportBar
         templatePath="/import-export/classes/template"
         templateFilename="classes_template.xlsx"
@@ -89,7 +92,7 @@ export default function AdminClassesScreen() {
             renderItem={({ item: cls }) => (
               <View style={styles.classCard}>
                 <View style={styles.classHeader}>
-                  <View style={styles.classIconWrap}><Text style={styles.classIcon}>🏫</Text></View>
+                  <View style={styles.classIconWrap}><Ionicons name="school-outline" size={18} color={C.primary} /></View>
                   <Text style={styles.className}>{cls.class_name}</Text>
                   <View style={{ flexDirection: 'row', gap: 6 }}>
                     <Pressable style={[styles.smBtn, { backgroundColor: '#EEF2FF' }]} onPress={() => { setTarget(cls); setName(cls.class_name); setModal('editClass'); }}>
@@ -99,7 +102,7 @@ export default function AdminClassesScreen() {
                       <Text style={[styles.smBtnText, { color: '#059669' }]}>+ Sec</Text>
                     </Pressable>
                     <Pressable style={[styles.smBtn, { backgroundColor: '#FEF2F2' }]} onPress={() => handleDeleteClass(cls)}>
-                      <Text style={[styles.smBtnText, { color: '#EF4444' }]}>🗑</Text>
+                      <Ionicons name="trash-outline" size={14} color="#EF4444" />
                     </Pressable>
                   </View>
                 </View>

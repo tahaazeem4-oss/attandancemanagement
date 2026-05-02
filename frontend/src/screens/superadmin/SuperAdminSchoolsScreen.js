@@ -5,7 +5,6 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system/legacy';
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
 
@@ -77,21 +76,16 @@ function SchoolFormModal({ visible, school, onClose, onSaved }) {
         data = await res.json();
         if (!res.ok) throw new Error(data.message || 'Upload failed');
       } else {
-        // On native (iOS/Android): use FileSystem.uploadAsync for reliable multipart
-        const result = await FileSystem.uploadAsync(
-          `${api.defaults.baseURL}/upload/logo`,
-          asset.uri,
-          {
-            httpMethod: 'POST',
-            uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-            fieldName: 'logo',
-            mimeType: mime,
-            headers: { Authorization: token },
-          }
-        );
-        data = JSON.parse(result.body);
-        if (result.status < 200 || result.status >= 300)
-          throw new Error(data.message || 'Upload failed');
+        // On native (iOS/Android): use fetch with FormData
+        const fd = new FormData();
+        fd.append('logo', { uri: asset.uri, name: `logo.${ext}`, type: mime });
+        const res = await fetch(`${api.defaults.baseURL}/upload/logo`, {
+          method: 'POST',
+          headers: { Authorization: token },
+          body: fd,
+        });
+        data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Upload failed');
       }
 
       setF('logo_url', data.logo_url);

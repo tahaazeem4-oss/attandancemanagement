@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, Pressable, StyleSheet,
-  ActivityIndicator, Alert, ScrollView, StatusBar, Animated
+  ActivityIndicator, Alert, ScrollView, Animated
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import api from '../services/api';
 import { C, S } from '../config/theme';
-import { HeaderBlobs, useEntrance } from '../components/Deco';
+import { useEntrance } from '../components/Deco';
 import PickerField from '../components/PickerField';
+import AppHeader from '../components/AppHeader';
 
 export default function ClassSelectionScreen({ navigation, route }) {
   const mode = route?.params?.mode || 'attendance';  // 'attendance' | 'report'
@@ -89,24 +90,12 @@ export default function ClassSelectionScreen({ navigation, route }) {
   );
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ flexGrow: 1 }}>
-      <StatusBar barStyle="light-content" backgroundColor="#0F0C29" />
-
-      {/* Gradient Header */}
-      <LinearGradient
-        colors={['#0F0C29', '#1E1B4B', '#312E81']}
-        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={styles.header}
-      >
-        <HeaderBlobs />
-        <Text style={styles.headerTitle}>
-          {mode === 'report' ? '📊  Select Class for Report' : '📋  Select Class & Section'}
-        </Text>
-        <Text style={styles.headerSub}>
-          {mode === 'report' ? 'Choose a class to view its attendance report' : 'Choose a class and section to mark attendance'}
-        </Text>
-      </LinearGradient>
-
+    <View style={styles.container}>
+      <AppHeader
+        title={mode === 'report' ? 'Select Class for Report' : 'Select Class & Section'}
+        navigation={navigation}
+      />
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
       <Animated.View style={[styles.formCard, cardAnim]}>
         <Text style={S.label}>Class</Text>
         <PickerField
@@ -130,7 +119,7 @@ export default function ClassSelectionScreen({ navigation, route }) {
         <Animated.View style={{ marginTop: 16, transform: [{ scale: btnS }] }}>
           <Pressable onPress={handleProceed} onPressIn={pIn} onPressOut={pOut}>
             <LinearGradient
-              colors={['#6366F1', '#4F46E5', '#3730A3']}
+              colors={['#2563EB', '#1D4ED8']}
               start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
               style={S.btn}
             >
@@ -141,17 +130,13 @@ export default function ClassSelectionScreen({ navigation, route }) {
           </Pressable>
         </Animated.View>
       </Animated.View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container:      { flex: 1, backgroundColor: C.bg },
-  header:         {
-    paddingHorizontal: 24, paddingTop: 50, paddingBottom: 30, overflow: 'hidden',
-  },
-  headerTitle:    { fontSize: 20, fontWeight: '800', color: '#E0E7FF', marginBottom: 6 },
-  headerSub:      { fontSize: 13, color: C.headerSub, lineHeight: 18 },
   formCard:       {
     margin: 16, marginTop: 20,
     backgroundColor: C.card, borderRadius: 20, padding: 22,

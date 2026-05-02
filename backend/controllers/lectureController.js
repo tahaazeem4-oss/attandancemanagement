@@ -1,6 +1,7 @@
 const path = require('path');
 const fs   = require('fs');
 const db   = require('../config/db');
+const push = require('../services/pushService');
 
 // Absolute path to the directory where lecture PDFs are stored on disk.
 // Created automatically on first run.
@@ -75,6 +76,16 @@ exports.uploadLecture = async (req, res) => {
     );
 
     res.status(201).json(rows[0]);
+
+    // Notify relevant students (non-blocking)
+    push.tokensForClassStudents(school_id, class_id, secId || null).then(tokens =>
+      push.send(
+        tokens,
+        `New ${type === 'homework' ? 'Homework' : 'Lecture'} Uploaded`,
+        `${subject_name}: ${lecture_name} has been uploaded by ${first_name} ${last_name}.`,
+        { type: 'lecture', lecture_id: rows[0].id, lecture_type: type }
+      )
+    );
   } catch (err) {
     console.error('[uploadLecture]', err);
     if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);

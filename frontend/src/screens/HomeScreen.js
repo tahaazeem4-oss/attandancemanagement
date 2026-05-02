@@ -1,17 +1,19 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, Pressable, Animated, StyleSheet,
   Alert, ActivityIndicator, ScrollView, Image, StatusBar
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import { C } from '../config/theme';
 
 const ROLE_CFG = {
-  class_teacher:   { label: 'Class Teacher',   emoji: '🏫', bg: '#DCFCE7', color: '#166534' },
-  floor_incharge:  { label: 'Floor Incharge',  emoji: '🏢', bg: '#EDE9FE', color: '#5B21B6' },
-  subject_teacher: { label: 'Subject Teacher', emoji: '📚', bg: '#FEF9C3', color: '#854D0E' },
+  class_teacher:   { label: 'Class Teacher',   bg: '#EFF6FF', color: '#1D4ED8' },
+  floor_incharge:  { label: 'Floor Incharge',  bg: '#F5F3FF', color: '#6D28D9' },
+  subject_teacher: { label: 'Subject Teacher', bg: '#FFF7ED', color: '#C2410C' },
 };
 
 function greet() {
@@ -28,6 +30,7 @@ export default function HomeScreen({ navigation }) {
   const [marking,          setMarking]          = useState(false);
   const [assignments,      setAssignments]      = useState(null);
   const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
+  const [notifUnread,      setNotifUnread]      = useState(0);
 
   const teacherRole = assignments === null ? null
     : assignments.length === 0 ? 'subject_teacher'
@@ -35,9 +38,9 @@ export default function HomeScreen({ navigation }) {
     : 'floor_incharge';
 
   // Card entrance animations
-  const aY = [useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current];
-  const aO = [useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current];
-  const sc = [useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current];
+  const aY = [useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current];
+  const aO = [useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current];
+  const sc = [useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current];
   const pulse = useRef(new Animated.Value(1)).current;
   const pi = (i) => () => Animated.spring(sc[i], { toValue: 0.97, useNativeDriver: true, speed: 50 }).start();
   const po = (i) => () => Animated.spring(sc[i], { toValue: 1,    useNativeDriver: true, speed: 20 }).start();
@@ -54,6 +57,9 @@ export default function HomeScreen({ navigation }) {
       const pendingWithdrawals = data.filter(l => l.withdrawal_status === 'pending').length;
       setPendingLeaveCount(pendingLeaves + pendingWithdrawals);
     }).catch(() => {});
+    api.get('/notifications/inbox/unread-count')
+      .then(({ data }) => setNotifUnread(data.count || 0))
+      .catch(() => {});
     Animated.stagger(100, aO.map((o, i) =>
       Animated.parallel([
         Animated.timing(o, { toValue: 1, duration: 380, useNativeDriver: true }),
@@ -61,6 +67,15 @@ export default function HomeScreen({ navigation }) {
       ])
     )).start();
   }, []);
+
+  // Re-fetch unread count whenever this screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      api.get('/notifications/inbox/unread-count')
+        .then(({ data }) => setNotifUnread(data.count || 0))
+        .catch(() => {});
+    }, [])
+  );
 
   const fetchTodayStatus = async () => {
     try {
@@ -97,21 +112,20 @@ export default function HomeScreen({ navigation }) {
   const schoolName = school?.name || 'EduTrack';
   const schoolSub  = school?.tagline || 'Attendance Management System';
   const initials   = school?.initials || schoolName.slice(0, 2).toUpperCase();
+  const isLocked   = teacherRole === 'subject_teacher';
 
   return (
     <ScrollView style={styles.root} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }}>
-      <StatusBar barStyle="light-content" backgroundColor="#1E1B4B" />
+      <StatusBar barStyle="light-content" backgroundColor="#1E40AF" />
 
       {/* ══ HEADER ══════════════════════════════════════════════ */}
       <LinearGradient
-        colors={['#1E1B4B', '#312E81', '#4338CA']}
+        colors={['#1E3A8A', '#2563EB']}
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
         style={styles.header}
       >
-        {/* Decorative circles */}
-        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-          <View style={deco.c1} /><View style={deco.c2} /><View style={deco.c3} />
-        </View>
+        {/* Subtle decorative circle */}
+        <View style={styles.headerDeco} pointerEvents="none" />
 
         {/* ── Row 1: School info + Sign Out ── */}
         <View style={styles.schoolRow}>
@@ -147,7 +161,6 @@ export default function HomeScreen({ navigation }) {
           </View>
           {teacherRole && ROLE_CFG[teacherRole] && (
             <View style={[styles.rolePill, { backgroundColor: ROLE_CFG[teacherRole].bg }]}>
-              <Text style={styles.roleEmoji}>{ROLE_CFG[teacherRole].emoji}</Text>
               <Text style={[styles.roleTxt, { color: ROLE_CFG[teacherRole].color }]}>
                 {ROLE_CFG[teacherRole].label}
               </Text>
@@ -204,120 +217,84 @@ export default function HomeScreen({ navigation }) {
       </View>
 
       {/* ══ QUICK ACTIONS ════════════════════════════════════════ */}
+
       <Text style={styles.sectionLabel2}>QUICK ACTIONS</Text>
 
-      {[
-        {
-          i: 0,
-          emoji: teacherRole === 'subject_teacher' ? '🔒' : '📋',
-          title: 'Mark Student Attendance',
-          sub:   teacherRole === 'subject_teacher' ? 'Not available for Subject Teachers' : 'Select class & section to begin',
-          grad:  ['#EEF2FF', '#E0E7FF'],
-          locked: teacherRole === 'subject_teacher',
-          onPress: () => navigation.navigate('ClassSelection'),
-        },
-        {
-          i: 1,
-          emoji: teacherRole === 'subject_teacher' ? '🔒' : '📝',
-          title: 'Leave Requests',
-          sub:   teacherRole === 'subject_teacher' ? 'Not available for Subject Teachers' : 'Review and approve student leaves',
-          grad:  ['#FFF1F2', '#FFE4E6'],
-          locked: teacherRole === 'subject_teacher',
-          badge: pendingLeaveCount,
-          onPress: () => navigation.navigate('TeacherLeaves'),
-        },
-        {
-          i: 2,
-          emoji: '📊',
-          title: 'View & Send Report',
-          sub:   'View attendance records by date',
-          grad:  ['#FFF7ED', '#FEF3C7'],
-          locked: false,
-          onPress: () => navigation.navigate('ClassSelection', { mode: 'report' }),
-        },
-        {
-          i: 3,
-          emoji: '📚',
-          title: 'Upload Lecture',
-          sub:   'Share classwork, homework & notes',
-          grad:  ['#EEF2FF', '#E0E7FF'],
-          locked: false,
-          onPress: () => navigation.navigate('UploadLecture'),
-        },
-        {
-          i: 4,
-          emoji: '🗂',
-          title: 'Browse Lectures',
-          sub:   'View & manage all uploaded lectures',
-          grad:  ['#F0FDF4', '#DCFCE7'],
-          locked: false,
-          onPress: () => navigation.navigate('LectureList'),
-        },
-        {
-          i: 5,
-          emoji: '🔔',
-          title: 'Send Notification',
-          sub:   'Notify classes, sections or students',
-          grad:  ['#FFF7ED', '#FEF3C7'],
-          locked: false,
-          onPress: () => navigation.navigate('SendNotification'),
-        },
-      ].map(({ i, emoji, title, sub, grad, locked, badge, onPress }) => (
-        <Animated.View key={i} style={{ opacity: aO[i], transform: [{ translateY: aY[i] }, { scale: sc[i] }] }}>
-          {locked ? (
-            <View style={[styles.actionCard, styles.actionLocked]}>
-              <LinearGradient colors={['#F1F5F9', '#E2E8F0']} style={styles.actionIcon}>
-                <Text style={styles.actionEmoji}>🔒</Text>
-              </LinearGradient>
-              <View style={styles.actionBody}>
-                <Text style={[styles.actionTitle, { color: C.textMed }]}>{title}</Text>
-                <Text style={styles.actionSub}>{sub}</Text>
-              </View>
-            </View>
-          ) : (
+      <View style={styles.grid}>
+        {[
+          {
+            i: 0, icon: 'clipboard-outline', label: 'Mark Attendance',
+            tint: isLocked ? '#94A3B8' : '#2563EB', bg: isLocked ? '#F1F5F9' : '#EFF6FF',
+            locked: isLocked, badge: 0, onPress: () => navigation.navigate('ClassSelection'),
+          },
+          {
+            i: 1, icon: 'mail-open-outline', label: 'Leave Requests',
+            tint: isLocked ? '#94A3B8' : '#EF4444', bg: isLocked ? '#F1F5F9' : '#FEF2F2',
+            locked: isLocked, badge: pendingLeaveCount, onPress: () => navigation.navigate('TeacherLeaves'),
+          },
+          {
+            i: 2, icon: 'bar-chart-outline', label: 'Attendance Report',
+            tint: '#F59E0B', bg: '#FFFBEB',
+            locked: false, badge: 0, onPress: () => navigation.navigate('ClassSelection', { mode: 'report' }),
+          },
+          {
+            i: 3, icon: 'cloud-upload-outline', label: 'Upload Lecture',
+            tint: '#7C3AED', bg: '#F5F3FF',
+            locked: false, badge: 0, onPress: () => navigation.navigate('UploadLecture'),
+          },
+          {
+            i: 4, icon: 'videocam-outline', label: 'Browse Lectures',
+            tint: '#10B981', bg: '#ECFDF5',
+            locked: false, badge: 0, onPress: () => navigation.navigate('LectureList'),
+          },
+          {
+            i: 5, icon: 'notifications-outline', label: 'Send Notification',
+            tint: '#0EA5E9', bg: '#F0F9FF',
+            locked: false, badge: 0, onPress: () => navigation.navigate('SendNotification'),
+          },
+          {
+            i: 6, icon: 'notifications', label: 'My Inbox',
+            tint: '#8B5CF6', bg: '#F5F3FF',
+            locked: false, badge: notifUnread, onPress: () => navigation.navigate('StaffNotifications'),
+          },
+        ].map(({ i, icon, label, tint, bg, locked, badge, onPress }) => (
+          <Animated.View key={i} style={[styles.cardWrap, { opacity: aO[i], transform: [{ translateY: aY[i] }, { scale: sc[i] }] }]}>
             <Pressable
-              style={({ pressed }) => [styles.actionCard, pressed && { backgroundColor: '#F5F3FF' }]}
-              onPress={onPress}
-              onPressIn={pi(i)}
-              onPressOut={po(i)}
+              style={({ pressed }) => [styles.navCard, locked && styles.navCardLocked, pressed && !locked && styles.navCardPressed]}
+              onPress={locked ? null : onPress}
+              disabled={locked}
+              onPressIn={!locked ? pi(i) : undefined}
+              onPressOut={!locked ? po(i) : undefined}
             >
-              <LinearGradient colors={grad} style={styles.actionIcon}>
-                <Text style={styles.actionEmoji}>{emoji}</Text>
-              </LinearGradient>
-              <View style={styles.actionBody}>
-                <Text style={styles.actionTitle}>{title}</Text>
-                <Text style={styles.actionSub}>{sub}</Text>
+              <View style={[styles.iconBox, { backgroundColor: bg }]}>
+                <Ionicons name={icon} size={24} color={tint} />
               </View>
+              <Text style={[styles.navLabel, locked && { color: C.textMed }]}>{label}</Text>
               {badge > 0 && (
                 <View style={styles.notifBadge}>
                   <Text style={styles.notifBadgeTxt}>{badge}</Text>
                 </View>
               )}
-              <Text style={styles.chevron}>›</Text>
             </Pressable>
-          )}
-        </Animated.View>
-      ))}
+          </Animated.View>
+        ))}
+      </View>
     </ScrollView>
   );
 }
 
-// ── Decorative blobs ────────────────────────────────────────────
-const deco = StyleSheet.create({
-  c1: { position: 'absolute', width: 180, height: 180, borderRadius: 90,  backgroundColor: 'rgba(255,255,255,0.05)', top: -60, right: -50 },
-  c2: { position: 'absolute', width: 100, height: 100, borderRadius: 50,  backgroundColor: 'rgba(255,255,255,0.04)', bottom: 0,  left: 20  },
-  c3: { position: 'absolute', width: 60,  height: 60,  borderRadius: 30,  borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.1)', top: 30, right: 120 },
-});
+
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F0F4FF' },
+  root: { flex: 1, backgroundColor: C.bg },
 
-  // ── Header ──────────────────────────────────────────────────
+  // ── Header ──────────────────────────────────────────────
   header: {
     paddingTop: 52, paddingBottom: 24,
     paddingHorizontal: 20,
     overflow: 'hidden',
   },
+  headerDeco: { position: 'absolute', width: 200, height: 200, borderRadius: 100, backgroundColor: 'rgba(255,255,255,0.05)', top: -70, right: -50 },
 
   // School row
   schoolRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -329,14 +306,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
   },
   schoolLogoText: { color: '#fff', fontSize: 15, fontWeight: '900', letterSpacing: 0.5 },
-  schoolName: { color: '#E0E7FF', fontSize: 15, fontWeight: '800', letterSpacing: 0.2 },
-  schoolSub:  { color: 'rgba(165,180,252,0.8)', fontSize: 11, marginTop: 1 },
+  schoolName: { color: '#BFDBFE', fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
+  schoolSub:  { color: 'rgba(191,219,254,0.7)', fontSize: 11, marginTop: 1 },
   signOutBtn: {
     paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)',
   },
-  signOutTxt: { color: '#C7D2FE', fontSize: 12, fontWeight: '600' },
+  signOutTxt: { color: '#BFDBFE', fontSize: 12, fontWeight: '600' },
 
   // Divider
   headerDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginVertical: 16 },
@@ -350,14 +327,13 @@ const styles = StyleSheet.create({
     borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.25)',
   },
   teacherAvatarTxt: { color: '#fff', fontSize: 16, fontWeight: '900' },
-  greetTxt:    { color: 'rgba(165,180,252,0.9)', fontSize: 12, fontWeight: '500' },
+  greetTxt:    { color: 'rgba(191,219,254,0.9)', fontSize: 12, fontWeight: '500' },
   teacherName: { color: '#fff', fontSize: 18, fontWeight: '800', marginTop: 1 },
-  dateTxt:     { color: 'rgba(224,231,255,0.5)', fontSize: 11, marginTop: 2 },
+  dateTxt:     { color: 'rgba(191,219,254,0.5)', fontSize: 11, marginTop: 2 },
   rolePill: {
-    borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6,
-    alignItems: 'center', gap: 3,
+    borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6,
+    alignItems: 'center',
   },
-  roleEmoji: { fontSize: 16 },
   roleTxt: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
 
   // ── Section labels ───────────────────────────────────────────
@@ -374,9 +350,9 @@ const styles = StyleSheet.create({
 
   // ── Attendance card ──────────────────────────────────────────
   attCard: {
-    backgroundColor: '#fff', borderRadius: 20, padding: 18,
-    shadowColor: '#4F46E5', shadowOpacity: 0.08, shadowRadius: 16,
-    shadowOffset: { width: 0, height: 4 }, elevation: 5,
+    backgroundColor: '#fff', borderRadius: 16, padding: 18,
+    shadowColor: '#94A3B8', shadowOpacity: 0.10, shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 }, elevation: 3,
   },
   attPrompt: { color: C.textMed, fontSize: 13, marginBottom: 14, fontWeight: '500' },
   attBtns: { flexDirection: 'row', gap: 8 },
@@ -396,24 +372,27 @@ const styles = StyleSheet.create({
   markedStatus: { fontSize: 18, fontWeight: '800' },
   markedSub:    { fontSize: 12, color: C.textMed, marginTop: 2 },
 
-  // ── Action cards ─────────────────────────────────────────────
-  actionCard: {
-    marginHorizontal: 16, marginBottom: 10,
-    backgroundColor: '#fff', borderRadius: 18,
-    padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14,
-    shadowColor: '#4F46E5', shadowOpacity: 0.07, shadowRadius: 12,
-    shadowOffset: { width: 0, height: 3 }, elevation: 4,
+  // ── Grid ─────────────────────────────────────────────────────────
+  grid:     { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 14, gap: 12 },
+  cardWrap: { width: '30%', flexGrow: 1 },
+  navCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    alignItems: 'center',
+    shadowColor: '#94A3B8',
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
+    position: 'relative',
+    height: 110,
+    justifyContent: 'center',
   },
-  actionLocked: { opacity: 0.5 },
-  actionIcon: {
-    width: 52, height: 52, borderRadius: 14,
-    justifyContent: 'center', alignItems: 'center',
-  },
-  actionEmoji: { fontSize: 24 },
-  actionBody:  { flex: 1 },
-  actionTitle: { fontSize: 15, fontWeight: '700', color: C.textDark },
-  actionSub:   { fontSize: 12, color: C.textLight, marginTop: 2 },
-  chevron:     { fontSize: 26, color: '#CBD5E1', fontWeight: '300' },
-  notifBadge:  { backgroundColor: '#EF4444', borderRadius: 11, minWidth: 22, height: 22, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 5, marginRight: 4 },
-  notifBadgeTxt: { color: '#fff', fontSize: 11, fontWeight: '900' },
+  navCardLocked:  { opacity: 0.5 },
+  navCardPressed: { opacity: 0.75 },
+  iconBox:  { width: 52, height: 52, borderRadius: 14, justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
+  navLabel: { color: C.textDark, fontSize: 12, fontWeight: '700', textAlign: 'center', lineHeight: 16 },
+  notifBadge:    { position: 'absolute', top: -5, right: -5, backgroundColor: '#EF4444', borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4, borderWidth: 2, borderColor: '#fff' },
+  notifBadgeTxt: { color: '#fff', fontSize: 10, fontWeight: '900' },
 });

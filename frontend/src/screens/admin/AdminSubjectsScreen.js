@@ -3,9 +3,9 @@ import {
   View, Text, FlatList, TextInput, Pressable,
   Alert, ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import api from '../../services/api';
 import { C } from '../../config/theme';
+import AppHeader from '../../components/AppHeader';
 
 export default function AdminSubjectsScreen({ navigation }) {
   const [subjects, setSubjects] = useState([]);
@@ -88,18 +88,9 @@ export default function AdminSubjectsScreen({ navigation }) {
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      {/* Header */}
-      <LinearGradient colors={['#1E1B4B', '#3730A3']} style={styles.header}>
-        <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={styles.backTxt}>← Back</Text>
-        </Pressable>
-        <Text style={styles.headerTitle}>📚 Subjects</Text>
-        <Text style={styles.headerSub}>
-          Subjects defined here appear in every teacher's upload picker
-        </Text>
-      </LinearGradient>
+      <AppHeader title="Subjects" navigation={navigation} />
 
-      {/* Add new subject row */}
+      {/* Add new subject row */}}
       <View style={styles.addRow}>
         <TextInput
           style={styles.input}
@@ -156,12 +147,6 @@ const styles = StyleSheet.create({
   header: {
     paddingTop: 52, paddingBottom: 24, paddingHorizontal: 20,
   },
-  backBtn: {
-    alignSelf: 'flex-start', marginBottom: 14,
-    backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 10,
-    paddingHorizontal: 14, paddingVertical: 6,
-  },
-  backTxt:     { color: '#fff', fontWeight: '700', fontSize: 13 },
   headerTitle: { color: '#E0E7FF', fontSize: 22, fontWeight: '900' },
   headerSub:   { color: '#A5B4FC', fontSize: 13, marginTop: 4, lineHeight: 18 },
 

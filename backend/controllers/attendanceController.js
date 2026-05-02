@@ -1,4 +1,5 @@
-const db = require('../config/db');
+const db   = require('../config/db');
+const push = require('../services/pushService');
 
 // ── POST /api/attendance/mark ─────────────────────────────────
 // Body: { date, records: [{ student_id, status }] }
@@ -13,6 +14,7 @@ exports.markAttendance = async (req, res) => {
 
   try {
     let locked = 0;
+    const savedIds = [];
     for (const r of records) {
       // Never overwrite an approved leave
       const [approvedLeave] = await db.query(
@@ -27,9 +29,17 @@ exports.markAttendance = async (req, res) => {
          ON CONFLICT (student_id, date) DO UPDATE SET status = EXCLUDED.status, teacher_id = EXCLUDED.teacher_id`,
         [r.student_id, teacherId, date, r.status]
       );
+      savedIds.push(r.student_id);
     }
 
-    return res.json({ message: 'Attendance saved successfully', count: records.length - locked, locked });
+    res.json({ message: 'Attendance saved successfully', count: savedIds.length, locked });
+
+    // Fire push to each marked student (non-blocking)
+    if (savedIds.length) {
+      push.tokensForStudents(savedIds).then(tokens =>
+        push.send(tokens, 'Attendance Marked', `Your attendance has been recorded for ${date}.`, { type: 'attendance', date })
+      );
+    }
   } catch (err) {
     console.error('Mark attendance error:', err);
     return res.status(500).json({ message: 'Server error' });

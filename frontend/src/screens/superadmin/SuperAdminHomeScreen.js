@@ -1,21 +1,27 @@
-import React, { useEffect, useState, useRef } from 'react';
+﻿import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, ScrollView, Pressable,
   StyleSheet, ActivityIndicator, StatusBar, Animated
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import { C } from '../../config/theme';
-import { HeaderBlobs } from '../../components/Deco';
+
+const ACTIONS = [
+  { key: 'SuperAdminSchools',  icon: 'business-outline', label: 'Schools',  sub: 'Add, edit and manage schools · assign admins',       tint: '#2563EB', bg: '#EFF6FF' },
+  { key: 'SuperAdminTeachers', icon: 'people-outline',   label: 'Teachers', sub: 'Add, edit, delete teachers · reset passwords',        tint: '#10B981', bg: '#ECFDF5' },
+  { key: 'SuperAdminStudents', icon: 'school-outline',   label: 'Students', sub: 'Add, edit, delete students · reset portal passwords', tint: '#F59E0B', bg: '#FFFBEB' },
+];
 
 export default function SuperAdminHomeScreen({ navigation }) {
   const { user, logout } = useAuth();
   const [stats,   setStats]   = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const fadeAnim  = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(30)).current;
+  const fadeAnims  = useRef(ACTIONS.map(() => new Animated.Value(0))).current;
+  const slideAnims = useRef(ACTIONS.map(() => new Animated.Value(20))).current;
 
   useEffect(() => {
     api.get('/super-admin/stats')
@@ -23,136 +29,124 @@ export default function SuperAdminHomeScreen({ navigation }) {
       .catch(() => {})
       .finally(() => setLoading(false));
 
-    Animated.parallel([
-      Animated.timing(fadeAnim,  { toValue: 1, duration: 400, useNativeDriver: true }),
-      Animated.spring(slideAnim, { toValue: 0, tension: 55, friction: 9, useNativeDriver: true }),
-    ]).start();
+    Animated.stagger(80, ACTIONS.map((_, i) =>
+      Animated.parallel([
+        Animated.timing(fadeAnims[i],  { toValue: 1, duration: 280, useNativeDriver: true }),
+        Animated.spring(slideAnims[i], { toValue: 0, tension: 70, friction: 10, useNativeDriver: true }),
+      ])
+    )).start();
   }, []);
 
-  const StatCard = ({ label, value, color, icon }) => (
-    <View style={[styles.statCard, { borderColor: color }]}>
-      <Text style={styles.statIcon}>{icon}</Text>
-      <Text style={[styles.statNum, { color }]}>{value ?? '—'}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
-      <StatusBar barStyle="light-content" backgroundColor="#0F172A" />
+    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 48 }} showsVerticalScrollIndicator={false}>
+      <StatusBar barStyle="light-content" backgroundColor="#1E40AF" />
 
+      {/* ── Header ──────────────────────────────────────────────── */}
       <LinearGradient
-        colors={['#0F172A', '#1E293B', '#334155']}
+        colors={['#1E3A8A', '#2563EB']}
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
         style={styles.header}
       >
-        <HeaderBlobs />
+        <View style={styles.headerDeco} pointerEvents="none" />
+
         <View style={styles.headerRow}>
-          <View>
+          <View style={{ flex: 1 }}>
             <View style={styles.superBadge}>
               <Text style={styles.superBadgeText}>SUPER ADMIN</Text>
             </View>
             <Text style={styles.name}>{user?.first_name} {user?.last_name}</Text>
             <Text style={styles.subtitle}>{user?.email}</Text>
           </View>
-          <Pressable onPress={logout} style={styles.logoutBtn}>
+          <Pressable onPress={logout} style={({ pressed }) => [styles.logoutBtn, pressed && { opacity: 0.7 }]}>
             <Text style={styles.logoutText}>Sign Out</Text>
           </Pressable>
         </View>
 
-        {loading
-          ? <ActivityIndicator color="#94A3B8" style={{ marginTop: 20 }} />
-          : (
-            <View style={styles.statsRow}>
-              <StatCard label="Schools"  value={stats?.schools}  color="#38BDF8" icon="🏫" />
-              <StatCard label="Admins"   value={stats?.admins}   color="#A78BFA" icon="🛡️" />
-              <StatCard label="Teachers" value={stats?.teachers} color="#34D399" icon="👨‍🏫" />
-              <StatCard label="Students" value={stats?.students} color="#FB923C" icon="🎒" />
-            </View>
-          )}
+        {/* ── Stats row ── */}
+        <View style={styles.statsRow}>
+          {loading
+            ? <ActivityIndicator color="rgba(255,255,255,0.6)" />
+            : [
+                { label: 'Schools',  value: stats?.schools,  color: '#93C5FD' },
+                { label: 'Admins',   value: stats?.admins,   color: '#C4B5FD' },
+                { label: 'Teachers', value: stats?.teachers, color: '#6EE7B7' },
+                { label: 'Students', value: stats?.students, color: '#FDE68A' },
+              ].map(s => (
+                <View key={s.label} style={styles.statItem}>
+                  <Text style={[styles.statNum, { color: s.color }]}>{s.value ?? '—'}</Text>
+                  <Text style={styles.statLabel}>{s.label}</Text>
+                </View>
+              ))
+          }
+        </View>
       </LinearGradient>
 
+      {/* ── Navigation ─────────────────────────────────────────── */}
       <Text style={styles.sectionTitle}>Platform Management</Text>
 
-      <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
-        <Pressable
-          style={({ pressed }) => [styles.navCard, pressed && { opacity: 0.85 }]}
-          onPress={() => navigation.navigate('SuperAdminSchools')}
-        >
-          <LinearGradient
-            colors={['#0369A1', '#0284C7', '#0EA5E9']}
-            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={styles.navCardGrad}
+      <View style={styles.grid}>
+        {ACTIONS.map(({ key, icon, label, tint, bg }, i) => (
+          <Animated.View
+            key={key}
+            style={[styles.cardWrap, { opacity: fadeAnims[i], transform: [{ translateY: slideAnims[i] }] }]}
           >
-            <Text style={styles.navCardIcon}>🏫</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.navCardTitle}>Schools</Text>
-              <Text style={styles.navCardSub}>Add, edit and manage schools · assign admins</Text>
-            </View>
-            <Text style={styles.navCardArrow}>›</Text>
-          </LinearGradient>
-        </Pressable>
-
-        <Pressable
-          style={({ pressed }) => [styles.navCard, pressed && { opacity: 0.85 }]}
-          onPress={() => navigation.navigate('SuperAdminTeachers')}
-        >
-          <LinearGradient
-            colors={['#065F46', '#047857', '#10B981']}
-            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={styles.navCardGrad}
-          >
-            <Text style={styles.navCardIcon}>👨‍🏫</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.navCardTitle}>Teachers</Text>
-              <Text style={styles.navCardSub}>Add, edit, delete teachers · reset passwords</Text>
-            </View>
-            <Text style={styles.navCardArrow}>›</Text>
-          </LinearGradient>
-        </Pressable>
-
-        <Pressable
-          style={({ pressed }) => [styles.navCard, pressed && { opacity: 0.85 }]}
-          onPress={() => navigation.navigate('SuperAdminStudents')}
-        >
-          <LinearGradient
-            colors={['#7C2D12', '#B45309', '#F59E0B']}
-            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={styles.navCardGrad}
-          >
-            <Text style={styles.navCardIcon}>🎒</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.navCardTitle}>Students</Text>
-              <Text style={styles.navCardSub}>Add, edit, delete students · reset portal passwords</Text>
-            </View>
-            <Text style={styles.navCardArrow}>›</Text>
-          </LinearGradient>
-        </Pressable>
-      </Animated.View>
+            <Pressable
+              style={({ pressed }) => [styles.navCard, pressed && styles.navCardPressed]}
+              onPress={() => navigation.navigate(key)}
+            >
+              <View style={[styles.iconBox, { backgroundColor: bg }]}>
+                <Ionicons name={icon} size={24} color={tint} />
+              </View>
+              <Text style={styles.navLabel}>{label}</Text>
+            </Pressable>
+          </Animated.View>
+        ))}
+      </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container:      { flex: 1, backgroundColor: C.bg },
-  header:         { paddingHorizontal: 20, paddingTop: 52, paddingBottom: 28, overflow: 'hidden' },
-  headerRow:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  superBadge:     { alignSelf: 'flex-start', backgroundColor: 'rgba(56,189,248,0.2)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, marginBottom: 6, borderWidth: 1, borderColor: 'rgba(56,189,248,0.4)' },
-  superBadgeText: { color: '#38BDF8', fontSize: 10, fontWeight: '800', letterSpacing: 1 },
-  name:           { color: '#F1F5F9', fontSize: 22, fontWeight: '800' },
-  subtitle:       { color: '#94A3B8', fontSize: 12, marginTop: 2 },
-  logoutBtn:      { backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 7 },
-  logoutText:     { color: '#CBD5E1', fontSize: 13, fontWeight: '600' },
-  statsRow:       { flexDirection: 'row', gap: 10, marginTop: 24, flexWrap: 'wrap' },
-  statCard:       { flex: 1, minWidth: 70, alignItems: 'center', borderRadius: 14, borderWidth: 1.5, paddingVertical: 12, paddingHorizontal: 8, backgroundColor: 'rgba(255,255,255,0.05)' },
-  statIcon:       { fontSize: 22, marginBottom: 4 },
-  statNum:        { fontSize: 22, fontWeight: '800' },
-  statLabel:      { fontSize: 10, color: '#94A3B8', fontWeight: '600', marginTop: 2 },
-  sectionTitle:   { fontSize: 13, fontWeight: '800', color: C.textMed, marginHorizontal: 20, marginTop: 28, marginBottom: 14, textTransform: 'uppercase', letterSpacing: 0.6 },
-  navCard:        { marginHorizontal: 16, marginBottom: 12, borderRadius: 18, overflow: 'hidden', elevation: 4, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
-  navCardGrad:    { flexDirection: 'row', alignItems: 'center', padding: 22, gap: 16 },
-  navCardIcon:    { fontSize: 32 },
-  navCardTitle:   { color: '#fff', fontSize: 17, fontWeight: '800' },
-  navCardSub:     { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 3 },
-  navCardArrow:   { color: '#fff', fontSize: 30, opacity: 0.6, marginLeft: 'auto' },
+  container: { flex: 1, backgroundColor: C.bg },
+
+  // ── Header ──
+  header:      { paddingHorizontal: 20, paddingTop: 52, paddingBottom: 28, overflow: 'hidden' },
+  headerDeco:  { position: 'absolute', width: 220, height: 220, borderRadius: 110, backgroundColor: 'rgba(255,255,255,0.05)', top: -80, right: -60 },
+  headerRow:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  superBadge:     { alignSelf: 'flex-start', backgroundColor: 'rgba(147,197,253,0.2)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, marginBottom: 6, borderWidth: 1, borderColor: 'rgba(147,197,253,0.4)' },
+  superBadgeText: { color: '#93C5FD', fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+  name:        { color: '#fff', fontSize: 22, fontWeight: '800' },
+  subtitle:    { color: '#BFDBFE', fontSize: 12, marginTop: 2 },
+  logoutBtn:   { backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 },
+  logoutText:  { color: '#fff', fontSize: 13, fontWeight: '600' },
+
+  // ── Stats ──
+  statsRow:  { flexDirection: 'row', marginTop: 24, paddingTop: 20, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.12)' },
+  statItem:  { flex: 1, alignItems: 'center' },
+  statNum:   { fontSize: 24, fontWeight: '800' },
+  statLabel: { color: 'rgba(255,255,255,0.55)', fontSize: 10, fontWeight: '600', marginTop: 3, textTransform: 'uppercase', letterSpacing: 0.4 },
+
+  // ── Section ──
+  sectionTitle: { fontSize: 11, fontWeight: '700', color: C.textLight, marginHorizontal: 20, marginTop: 28, marginBottom: 14, textTransform: 'uppercase', letterSpacing: 1 },
+
+  // ── Grid ──
+  grid:     { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 14, gap: 12 },
+  cardWrap: { width: '30%', flexGrow: 1 },
+  navCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    alignItems: 'center',
+    shadowColor: '#94A3B8',
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
+    position: 'relative',
+    minHeight: 100,
+    justifyContent: 'center',
+  },
+  navCardPressed: { opacity: 0.75 },
+  iconBox:  { width: 52, height: 52, borderRadius: 14, justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
+  navLabel: { color: C.textDark, fontSize: 12, fontWeight: '700', textAlign: 'center', lineHeight: 16 },
 });

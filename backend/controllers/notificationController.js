@@ -1,4 +1,5 @@
-const db = require('../config/db');
+const db   = require('../config/db');
+const push = require('../services/pushService');
 
 // ─────────────────────────────────────────────────────────────
 //  Helpers
@@ -50,6 +51,49 @@ exports.send = async (req, res) => {
     );
 
     res.status(201).json(rows[0]);
+
+    // Fire push notification to all relevant users (non-blocking)
+    const notifTitle   = title.trim();
+    const notifMessage = message.trim();
+    const senderName   = `${first_name} ${last_name}`;
+    const pushData     = { type: 'notification', sender: senderName };
+
+    if (target_type === 'student' && student_id) {
+      push.tokensForStudents([student_id]).then(tokens =>
+        push.send(tokens, notifTitle, notifMessage, pushData)
+      );
+    } else if (target_type === 'section' && class_id && section_id) {
+      // Students + teachers of that section
+      Promise.all([
+        push.tokensForClassStudents(school_id, class_id, section_id),
+        push.tokensForClassTeachers(class_id, section_id),
+      ]).then(([stuTokens, tchTokens]) =>
+        push.send([...new Set([...stuTokens, ...tchTokens])], notifTitle, notifMessage, pushData)
+      );
+    } else if (target_type === 'class' && class_id) {
+      // Students of that class + school admins
+      Promise.all([
+        push.tokensForClassStudents(school_id, class_id, null),
+        push.tokensForSchoolAdmins(school_id),
+      ]).then(([stuTokens, admTokens]) =>
+        push.send([...new Set([...stuTokens, ...admTokens])], notifTitle, notifMessage, pushData)
+      );
+    } else if (target_type === 'school') {
+      // Everyone: students + all teachers + all admins
+      Promise.all([
+        push.tokensForSchoolStudents(school_id),
+        push.tokensForSchoolAdmins(school_id),
+        // All teachers for this school
+        db.query(
+          `SELECT pt.token FROM push_tokens pt
+           JOIN teachers t ON t.id = pt.user_id
+           WHERE pt.user_role='teacher' AND t.school_id=$1`,
+          [school_id]
+        ).then(([rows]) => rows.map(r => r.token).filter(t => t)),
+      ]).then(([stuTokens, admTokens, tchTokens]) =>
+        push.send([...new Set([...stuTokens, ...admTokens, ...tchTokens])], notifTitle, notifMessage, pushData)
+      );
+    }
   } catch (err) {
     console.error('[notifications.send]', err);
     res.status(500).json({ message: 'Server error' });
@@ -240,6 +284,104 @@ exports.markRead = async (req, res) => {
     res.json({ message: 'Marked as read' });
   } catch (err) {
     console.error('[notifications.markRead]', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+//  STAFF INBOX  (admin + teacher)
+// ─────────────────────────────────────────────────────────────
+
+// GET /api/notifications/inbox  — staff notification inbox
+// Admin and teacher only see school-wide (target_type='school') notifications.
+// Class/section/student notifications are for students only.
+exports.getStaffInbox = async (req, res) => {
+  try {
+    const { id: user_id, role, school_id } = req.user;
+
+    const q = `SELECT n.*,
+                  (snr.user_id IS NOT NULL) AS is_read,
+                  snr.read_at
+           FROM notifications n
+           LEFT JOIN staff_notification_reads snr
+                  ON snr.notification_id = n.id AND snr.user_id = $1 AND snr.user_role = $2
+           WHERE n.school_id = $3
+             AND n.target_type = 'school'
+           ORDER BY n.created_at DESC`;
+
+    const [rows] = await db.query(q, [user_id, role, school_id]);
+    res.json(rows);
+  } catch (err) {
+    console.error('[notifications.getStaffInbox]', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// GET /api/notifications/inbox/unread-count
+exports.getStaffUnreadCount = async (req, res) => {
+  try {
+    const { id: user_id, role, school_id } = req.user;
+
+    const q = `SELECT COUNT(*) AS count FROM notifications n
+         WHERE n.school_id = $1
+           AND n.target_type = 'school'
+           AND NOT EXISTS (
+             SELECT 1 FROM staff_notification_reads snr
+             WHERE snr.notification_id = n.id AND snr.user_id = $2 AND snr.user_role = $3
+           )`;
+
+    const [[{ count }]] = await db.query(q, [school_id, user_id, role]);
+    res.json({ count: Number(count) });
+  } catch (err) {
+    console.error('[notifications.getStaffUnreadCount]', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// POST /api/notifications/inbox/:id/read
+exports.markStaffRead = async (req, res) => {
+  try {
+    const { id: user_id, role } = req.user;
+    await db.query(
+      `INSERT INTO staff_notification_reads (notification_id, user_id, user_role)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (notification_id, user_id, user_role) DO NOTHING`,
+      [Number(req.params.id), user_id, role]
+    );
+    res.json({ message: 'Marked as read' });
+  } catch (err) {
+    console.error('[notifications.markStaffRead]', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// POST /api/notifications/inbox/read-all
+exports.markStaffAllRead = async (req, res) => {
+  try {
+    const { id: user_id, role, school_id } = req.user;
+
+    const [unread] = await db.query(
+      `SELECT id FROM notifications
+       WHERE school_id = $1
+         AND target_type = 'school'
+         AND NOT EXISTS (
+           SELECT 1 FROM staff_notification_reads snr
+           WHERE snr.notification_id = notifications.id AND snr.user_id = $2 AND snr.user_role = $3
+         )`,
+      [school_id, user_id, role]
+    );
+    if (unread.length > 0) {
+      const vals = unread.map((r, i) => `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`).join(', ');
+      const pms  = unread.flatMap(r => [r.id, user_id, role]);
+      await db.query(
+        `INSERT INTO staff_notification_reads (notification_id, user_id, user_role) VALUES ${vals}
+         ON CONFLICT DO NOTHING`,
+        pms
+      );
+    }
+    res.json({ message: 'All marked as read', count: unread.length });
+  } catch (err) {
+    console.error('[notifications.markStaffAllRead]', err);
     res.status(500).json({ message: 'Server error' });
   }
 };

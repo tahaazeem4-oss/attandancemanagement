@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { Alert } from 'react-native';
 
 // ⚠️  Change this to your machine's local IP when testing on a physical device
 //      (e.g. 'http://192.168.100.113:5000/api')
@@ -10,13 +9,19 @@ const api = axios.create({
   timeout: 15000,
 });
 
+// ── Logout callback ───────────────────────────────────────────
+// AuthContext registers this so api.js can trigger logout on 401
+// without creating a circular dependency.
+let _onUnauthorized = null;
+export const setUnauthorizedHandler = (fn) => { _onUnauthorized = fn; };
+
 // Log every outgoing request
 api.interceptors.request.use(config => {
   console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`, config.data || '');
   return config;
 });
 
-// Log every response; surface auth errors immediately
+// Log every response; clear session on 401
 api.interceptors.response.use(
   response => {
     console.log(`[API] ${response.status} ${response.config?.url}`, response.data);
@@ -26,8 +31,8 @@ api.interceptors.response.use(
     const status  = error?.response?.status;
     const message = error?.response?.data?.message || error?.message || 'Unknown error';
     console.error(`[API ERROR] ${status || 'NETWORK'} ${error?.config?.url}`, message);
-    if (status === 401) {
-      Alert.alert('Session Expired', 'Please log in again.');
+    if (status === 401 && _onUnauthorized) {
+      _onUnauthorized();
     }
     return Promise.reject(error);
   },

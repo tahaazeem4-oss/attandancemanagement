@@ -1,64 +1,59 @@
-/**
- * importExport.js  — Frontend service
- *
- * importFile(endpoint)  — picks an xlsx/csv file and POSTs it to the backend
- * exportFile(endpoint, filename, params) — GETs an xlsx from backend and saves/shares it
- */
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem      from 'expo-file-system/legacy';
-import * as Sharing         from 'expo-sharing';
-import { Alert, Platform }  from 'react-native';
+import * as FileSystem     from 'expo-file-system/legacy';
+import * as Sharing        from 'expo-sharing';
+import { Alert }           from 'react-native';
 import api from './api';
 
-const BASE = api.defaults.baseURL; // e.g. http://192.168.100.36:5000/api
+// Convert an ArrayBuffer to a base64 string (needed to write binary via FileSystem)
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
 
 // ── Export ────────────────────────────────────────────────────────────────
 /**
- * Download an Excel file from the backend and open the share sheet.
- * @param {string} path   - API path, e.g. '/import-export/teachers/export'
- * @param {string} filename - e.g. 'teachers.xlsx'
- * @param {object} params - query params object (optional)
+ * Downloads an Excel file via axios (uses the existing Authorization header),
+ * writes it to the app cache, then opens the native share sheet.
  */
 export async function exportFile(path, filename, params = {}) {
   try {
-    const token = api.defaults.headers.common['Authorization']?.replace('Bearer ', '');
-    const query = new URLSearchParams({ ...params, _token: token }).toString();
-    const url   = `${BASE}${path}?${query}`;
-
-    // Save to documentDirectory so it persists (not wiped by OS cache cleanup)
-    const localUri = FileSystem.documentDirectory + filename;
-    const dl = await FileSystem.downloadAsync(url, localUri, {
-      headers: { Authorization: `Bearer ${token}` },
+    // Use axios so the Authorization header is sent automatically
+    const response = await api.get(path, {
+      params,
+      responseType: 'arraybuffer',
+      timeout: 30000,
     });
 
-    if (dl.status !== 200) {
-      Alert.alert('Export Failed', 'Server returned an error.');
-      return false;
-    }
+    // Write binary to cache as base64
+    const base64 = arrayBufferToBase64(response.data);
+    const localUri = FileSystem.cacheDirectory + filename;
+    await FileSystem.writeAsStringAsync(localUri, base64, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
 
-    // Show confirmation — offer Share only as an optional action
-    Alert.alert(
-      '✅ Downloaded',
-      `${filename} saved successfully.`,
-      [
-        { text: 'OK', style: 'cancel' },
-        {
-          text: 'Share / Open',
-          onPress: async () => {
-            if (await Sharing.isAvailableAsync()) {
-              await Sharing.shareAsync(dl.uri, {
-                mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                UTI: 'com.microsoft.excel.xlsx',
-              });
-            }
-          },
-        },
-      ]
-    );
+    // Share / save via native sheet
+    const canShare = await Sharing.isAvailableAsync();
+    if (canShare) {
+      await Sharing.shareAsync(localUri, {
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        dialogTitle: 'Save or share the report',
+        UTI: 'com.microsoft.excel.xlsx',
+      });
+    } else {
+      Alert.alert('Saved', `File saved to: ${localUri}`);
+    }
     return true;
   } catch (err) {
-    console.error('[exportFile]', err);
-    Alert.alert('Export Failed', err.message || 'Unknown error');
+    const status = err?.response?.status;
+    const msg    = err?.response?.data
+      ? (() => { try { return JSON.parse(new TextDecoder().decode(err.response.data)).message; } catch { return null; } })()
+      : null;
+    console.error('[exportFile]', status, msg || err.message);
+    Alert.alert('Export Failed', msg || (status ? `Server error ${status}` : err.message) || 'Unknown error');
     return false;
   }
 }

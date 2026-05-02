@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const db     = require('../config/db');
+const push   = require('../services/pushService');
 
 // ── Stats overview ────────────────────────────────────────────
 exports.getStats = async (req, res) => {
@@ -358,9 +359,23 @@ exports.updateLeaveGroupStatus = async (req, res) => {
       }
     }
     res.json({ message: `Leave ${status}`, count: leaves.length });
+
+    // Notify student (non-blocking)
+    if (leaves.length) {
+      const studentId = leaves[0].student_id;
+      const dateLabel = leaves.map(l => l.date).join(', ');
+      push.tokensForStudents([studentId]).then(tokens =>
+        push.send(tokens,
+          status === 'approved' ? 'Leave Approved' : 'Leave Rejected',
+          `Your leave request for ${dateLabel} has been ${status} by the admin.`,
+          { type: 'leave_decision', status, group_id }
+        )
+      );
+    }
   } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
 };
 
+// ── PUT /admin/leaves/:id/status  (approve / reject single leave by id) ─
 exports.updateLeaveStatus = async (req, res) => {
   const { status } = req.body;
   if (!['approved', 'rejected'].includes(status))

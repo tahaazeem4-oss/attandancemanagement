@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, Pressable,
-  StyleSheet, Alert, ActivityIndicator, StatusBar,
+  StyleSheet, Alert, ActivityIndicator,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import api from '../services/api';
 import { C } from '../config/theme';
-import { HeaderBlobs } from '../components/Deco';
+import AppHeader from '../components/AppHeader';
 
 const STATUS_COLOR = {
   pending:  '#F59E0B', approved: '#10B981',
@@ -152,7 +151,7 @@ export default function TeacherLeavesScreen({ navigation }) {
               {item.roll_no ? ` · Roll #${item.roll_no}` : ''}
             </Text>
             <Text style={styles.date}>
-              📅 {formatDates(item.dates)}
+              {formatDates(item.dates)}
               {item.dates?.length > 1 ? ` (${item.dates.length} days)` : ''}
             </Text>
           </View>
@@ -223,31 +222,14 @@ export default function TeacherLeavesScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0F0C29" />
-
-      {/* Header */}
-      <LinearGradient
-        colors={['#0F0C29', '#1E1B4B', '#312E81']}
-        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={styles.header}
-      >
-        <HeaderBlobs />
-        <View style={styles.navRow}>
-          <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
-            <Text style={styles.backBtnTxt}>← Back</Text>
-          </Pressable>
-          <Pressable style={styles.homeBtn} onPress={() => navigation.navigate('Home')}>
-            <Text style={styles.homeBtnTxt}>🏠 Home</Text>
-          </Pressable>
+      <AppHeader title="Leave Requests" navigation={navigation} />
+      {pendingWithdrawals.length > 0 && (
+        <View style={{ paddingHorizontal: 16, paddingVertical: 7, backgroundColor: '#FFFBEB', borderBottomWidth: 1, borderColor: '#FDE68A' }}>
+          <Text style={{ fontSize: 12, color: '#92400E', fontWeight: '600' }}>
+            ↩ {pendingWithdrawals.length} withdrawal{pendingWithdrawals.length > 1 ? 's' : ''} pending
+          </Text>
         </View>
-        <Text style={styles.headerTitle}>📝  Leave Requests</Text>
-        <Text style={styles.headerSub}>
-          Students from your assigned class
-          {pendingWithdrawals.length > 0
-            ? `  ·  ${pendingWithdrawals.length} withdrawal${pendingWithdrawals.length > 1 ? 's' : ''} pending`
-            : ''}
-        </Text>
-      </LinearGradient>
+      )}
 
       {/* Filter tabs */}
       <View style={styles.tabs}>
@@ -306,11 +288,6 @@ export default function TeacherLeavesScreen({ navigation }) {
 const styles = StyleSheet.create({
   container:    { flex: 1, backgroundColor: C.bg },
   header:       { paddingHorizontal: 24, paddingTop: 50, paddingBottom: 24, overflow: 'hidden' },
-  navRow:       { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 14 },
-  backBtn:      { backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
-  backBtnTxt:   { color: '#E0E7FF', fontSize: 13, fontWeight: '700' },
-  homeBtn:      { backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
-  homeBtnTxt:   { color: '#E0E7FF', fontSize: 13, fontWeight: '700' },
   headerTitle:  { fontSize: 20, fontWeight: '800', color: '#E0E7FF', marginBottom: 4 },
   headerSub:    { fontSize: 13, color: 'rgba(224,231,255,0.6)' },
 

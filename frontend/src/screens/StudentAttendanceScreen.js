@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, FlatList, Pressable,
-  StyleSheet, Alert, ActivityIndicator, StatusBar, Animated
+  StyleSheet, Alert, ActivityIndicator, Animated
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import api from '../services/api';
 import { C } from '../config/theme';
-import { HeaderBlobs } from '../components/Deco';
+import AppHeader from '../components/AppHeader';
 
 const STATUS_OPTIONS = ['present', 'absent', 'leave'];
 const STATUS_COLOR   = { present: C.present,  absent: C.absent,  leave: C.leave };
@@ -105,9 +105,9 @@ export default function StudentAttendanceScreen({ navigation, route }) {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={C.headerBg} />
+      <AppHeader title="Mark Attendance" navigation={navigation} />
 
-      {/* Class header */}
+      {/* Class info strip */}
       <View style={styles.infoBar}>
         <Text style={styles.infoText}>{class_name} — Section {section_name}</Text>
         <Text style={styles.infoSub}>{students.length} students</Text>
@@ -219,10 +219,11 @@ const styles = StyleSheet.create({
   toastText:    { color: '#fff', fontSize: 15, fontWeight: '800' },
 
   infoBar:      {
-    paddingHorizontal: 20, paddingVertical: 18, overflow: 'hidden',
+    paddingHorizontal: 20, paddingVertical: 10,
+    backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.border,
   },
-  infoText:     { color: '#E0E7FF', fontSize: 16, fontWeight: '800' },
-  infoSub:      { color: C.headerSub, fontSize: 12, marginTop: 2 },
+  infoText:     { color: C.textDark, fontSize: 15, fontWeight: '800' },
+  infoSub:      { color: C.textMed, fontSize: 12, marginTop: 2 },
 
   summary:      {
     flexDirection: 'row', justifyContent: 'space-around',

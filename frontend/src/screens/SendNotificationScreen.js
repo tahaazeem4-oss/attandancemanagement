@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TextInput, Pressable, ScrollView, FlatList,
-  StyleSheet, Alert, ActivityIndicator, StatusBar,
+  StyleSheet, Alert, ActivityIndicator,
   KeyboardAvoidingView, Platform, Modal,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Picker } from '@react-native-picker/picker';
 import api from '../services/api';
 import { C } from '../config/theme';
+import PickerField from '../components/PickerField';
+import AppHeader from '../components/AppHeader';
 
 // ── Constants ─────────────────────────────────────────────────
 const TARGETS = [
@@ -169,28 +169,26 @@ export default function SendNotificationScreen({ navigation }) {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <StatusBar barStyle="light-content" backgroundColor="#1E1B4B" />
+      <AppHeader title="Send Notification" navigation={navigation} />
       <ScrollView style={styles.root} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 60 }}>
 
-        {/* ── Header ── */}
-        <LinearGradient
-          colors={['#1E1B4B', '#312E81', '#4338CA']}
-          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-          style={styles.header}
-        >
-          <View style={styles.headerRow}>
-            <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
-              <Text style={styles.backTxt}>← Back</Text>
-            </Pressable>
-            <Pressable onPress={() => setShowHistory(v => !v)} style={styles.historyBtn}>
-              <Text style={styles.historyBtnTxt}>
-                {showHistory ? '✏️ Compose' : `📋 History (${sent.length})`}
-              </Text>
-            </Pressable>
-          </View>
-          <Text style={styles.headerTitle}>🔔 Send Notification</Text>
-          <Text style={styles.headerSub}>Notify students about holidays, exams, homework & more</Text>
-        </LinearGradient>
+        {/* ── Compose / History toggle ── */}
+        <View style={{ flexDirection: 'row', backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.border }}>
+          <Pressable
+            style={{ flex: 1, paddingVertical: 12, alignItems: 'center', borderBottomWidth: 2, borderColor: !showHistory ? C.primary : 'transparent' }}
+            onPress={() => setShowHistory(false)}
+          >
+            <Text style={{ fontSize: 13, fontWeight: '700', color: !showHistory ? C.primary : C.textMed }}>✏️ Compose</Text>
+          </Pressable>
+          <Pressable
+            style={{ flex: 1, paddingVertical: 12, alignItems: 'center', borderBottomWidth: 2, borderColor: showHistory ? C.primary : 'transparent' }}
+            onPress={() => setShowHistory(true)}
+          >
+            <Text style={{ fontSize: 13, fontWeight: '700', color: showHistory ? C.primary : C.textMed }}>
+              📋 History{sent.length > 0 ? ` (${sent.length})` : ''}
+            </Text>
+          </Pressable>
+        </View>
 
         {/* ════════════════════════════════════════════════════ */}
         {showHistory ? (
@@ -256,12 +254,13 @@ export default function SendNotificationScreen({ navigation }) {
                 {loadingCls
                   ? <ActivityIndicator color={C.primary} />
                   : (
-                    <View style={styles.pickerWrap}>
-                      <Picker selectedValue={String(classId)} onValueChange={setClassId} style={styles.picker}>
-                        <Picker.Item label="— Select Class —" value="" />
-                        {classes.map(c => <Picker.Item key={c.id} label={c.class_name} value={String(c.id)} />)}
-                      </Picker>
-                    </View>
+                    <PickerField
+                      label="Class"
+                      value={String(classId)}
+                      onChange={setClassId}
+                      placeholder="— Select Class —"
+                      items={[{ label: '— Select Class —', value: '' }, ...classes.map(c => ({ label: c.class_name, value: String(c.id) }))]}
+                    />
                   )
                 }
               </>
@@ -271,12 +270,13 @@ export default function SendNotificationScreen({ navigation }) {
             {(target === 'section' || target === 'student') && classId && (
               <>
                 <Text style={styles.label}>Section {target === 'section' ? '*' : ''}</Text>
-                <View style={styles.pickerWrap}>
-                  <Picker selectedValue={String(sectionId)} onValueChange={setSectionId} style={styles.picker}>
-                    <Picker.Item label={target === 'student' ? '— Any Section —' : '— Select Section —'} value="" />
-                    {sections.map(s => <Picker.Item key={s.id} label={`Section ${s.section_name}`} value={String(s.id)} />)}
-                  </Picker>
-                </View>
+                <PickerField
+                  label="Section"
+                  value={String(sectionId)}
+                  onChange={setSectionId}
+                  placeholder={target === 'student' ? '— Any Section —' : '— Select Section —'}
+                  items={[{ label: target === 'student' ? '— Any Section —' : '— Select Section —', value: '' }, ...sections.map(s => ({ label: `Section ${s.section_name}`, value: String(s.id) }))]}
+                />
               </>
             )}
 
@@ -289,26 +289,17 @@ export default function SendNotificationScreen({ navigation }) {
                   : students.length === 0
                     ? <Text style={styles.hint}>No students found. Select a class above.</Text>
                     : (
-                      <View style={styles.pickerWrap}>
-                        <Picker
-                          selectedValue={String(studentId)}
-                          onValueChange={(v, i) => {
-                            setStudentId(v);
-                            const s = students.find(st => String(st.id) === String(v));
-                            setStudentName(s ? `${s.first_name} ${s.last_name}` : '');
-                          }}
-                          style={styles.picker}
-                        >
-                          <Picker.Item label="— Select Student —" value="" />
-                          {students.map(s => (
-                            <Picker.Item
-                              key={s.id}
-                              label={`${s.roll_no ? `#${s.roll_no}  ` : ''}${s.first_name} ${s.last_name}`}
-                              value={String(s.id)}
-                            />
-                          ))}
-                        </Picker>
-                      </View>
+                      <PickerField
+                        label="Student"
+                        value={String(studentId)}
+                        onChange={(v) => {
+                          setStudentId(v);
+                          const s = students.find(st => String(st.id) === String(v));
+                          setStudentName(s ? `${s.first_name} ${s.last_name}` : '');
+                        }}
+                        placeholder="— Select Student —"
+                        items={[{ label: '— Select Student —', value: '' }, ...students.map(s => ({ label: `${s.roll_no ? `#${s.roll_no}  ` : ''}${s.first_name} ${s.last_name}`, value: String(s.id) }))]}
+                      />
                     )
                 }
               </>

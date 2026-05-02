@@ -4,18 +4,17 @@
 // after a single fetch, so pickers respond instantly without extra API calls.
 // Delete button is shown only to the user who uploaded the lecture.
 // Accessible from: AdminHomeScreen → Lectures card, TeacherHomeScreen → Lectures.
-import React, { useState, useEffect, useCallback, useMemo, useContext } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TextInput, FlatList, Pressable,
-  StyleSheet, Alert, ActivityIndicator, StatusBar,
+  StyleSheet, Alert, ActivityIndicator,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing    from 'expo-sharing';
-import { Picker } from '@react-native-picker/picker';
+import { Linking } from 'react-native';
 import api from '../services/api';
+import PickerField from '../components/PickerField';
 import { C } from '../config/theme';
-import { AuthContext } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
+import AppHeader from '../components/AppHeader';
 
 const TYPE_COLOR = { classwork: '#4F46E5', homework: '#D97706' };
 const TYPE_BG    = { classwork: '#EEF2FF', homework: '#FFFBEB' };
@@ -30,13 +29,12 @@ const MONTH_NAMES = {
 const BASE_URL = api.defaults.baseURL;
 
 export default function LectureListScreen({ navigation }) {
-  const { user } = useContext(AuthContext);
+  const { user } = useAuth();
 
   const [classes,     setClasses]     = useState([]);
   const [sections,    setSections]    = useState([]);
   const [lectures,    setLectures]    = useState([]);
   const [loading,     setLoading]     = useState(true);
-  const [downloading, setDownloading] = useState(null);
   const [deleting,    setDeleting]    = useState(null);
 
   const [search,        setSearch]        = useState('');
@@ -122,27 +120,13 @@ export default function LectureListScreen({ navigation }) {
   useEffect(() => { load(); }, [load]);
 
   const openLecture = async (lecture) => {
-    setDownloading(lecture.id);
-    try {
-      const token    = api.defaults.headers.common['Authorization']?.replace('Bearer ', '');
-      const url      = `${BASE_URL}/lectures/${lecture.id}/file`;
-      const filename = `${lecture.lecture_name.replace(/[^a-zA-Z0-9_\-]/g, '_')}.pdf`;
-      const localUri = FileSystem.cacheDirectory + filename;
-
-      const { status } = await FileSystem.downloadAsync(url, localUri, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (status !== 200) { Alert.alert('Error', 'Could not download file'); return; }
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(localUri, { mimeType: 'application/pdf', dialogTitle: lecture.lecture_name, UTI: 'com.adobe.pdf' });
-      } else {
-        Alert.alert('Saved', localUri);
-      }
-    } catch (err) {
-      Alert.alert('Error', err.message);
-    } finally {
-      setDownloading(null);
+    const token = api.defaults.headers.common['Authorization']?.replace('Bearer ', '');
+    const url   = `${BASE_URL}/lectures/${lecture.id}/file?_token=${encodeURIComponent(token)}`;
+    const canOpen = await Linking.canOpenURL(url);
+    if (canOpen) {
+      await Linking.openURL(url);
+    } else {
+      Alert.alert('Error', 'Cannot open file on this device');
     }
   };
 
@@ -184,10 +168,8 @@ export default function LectureListScreen({ navigation }) {
       </Text>
       {item.uploaded_by && <Text style={styles.uploader}>Uploaded by: {item.uploaded_by}</Text>}
       <View style={styles.cardActions}>
-        <Pressable style={styles.viewBtn} onPress={() => openLecture(item)} disabled={downloading === item.id}>
-          {downloading === item.id
-            ? <ActivityIndicator size="small" color={C.primary} />
-            : <Text style={styles.viewBtnTxt}>⬇ View / Download</Text>}
+        <Pressable style={styles.viewBtn} onPress={() => openLecture(item)}>
+          <Text style={styles.viewBtnTxt}>⬇ View / Download</Text>
         </Pressable>
         {(item.teacher_id === user?.id || (user?.role === 'admin' && item.teacher_id == null)) && (
           <Pressable style={styles.delBtn} onPress={() => confirmDelete(item)} disabled={deleting === item.id}>
@@ -202,6 +184,12 @@ export default function LectureListScreen({ navigation }) {
 
   const ListHeader = (
     <View style={styles.filterCard}>
+      <Pressable
+        style={{ backgroundColor: C.primary, borderRadius: 10, paddingVertical: 11, alignItems: 'center', marginBottom: 14 }}
+        onPress={() => navigation.navigate('UploadLecture')}
+      >
+        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>⬆ Upload Lecture</Text>
+      </Pressable>
       <Text style={styles.filterLabel}>Search</Text>
       <TextInput
         style={styles.searchInput}
@@ -213,42 +201,50 @@ export default function LectureListScreen({ navigation }) {
       />
 
       <Text style={styles.filterLabel}>Class</Text>
-      <View style={styles.pickerBox}>
-        <Picker selectedValue={filterCls} onValueChange={setFilterCls} style={styles.picker} dropdownIconColor={C.textMed}>
-          <Picker.Item label="All Classes" value="" color={C.text} />
-          {classes.map(c => <Picker.Item key={c.id} label={c.class_name} value={String(c.id)} color={C.text} />)}
-        </Picker>
-      </View>
+      <PickerField
+        label="Class"
+        value={filterCls}
+        onChange={setFilterCls}
+        placeholder="All Classes"
+        items={[{ label: 'All Classes', value: '' }, ...classes.map(c => ({ label: c.class_name, value: String(c.id) }))]}
+      />
 
       <Text style={styles.filterLabel}>Section</Text>
-      <View style={styles.pickerBox}>
-        <Picker selectedValue={filterSec} onValueChange={setFilterSec} style={styles.picker} dropdownIconColor={C.textMed} enabled={!!filterCls}>
-          <Picker.Item label="All Sections" value="" color={C.text} />
-          {sections.map(s => <Picker.Item key={s.id} label={`Sec ${s.section_name}`} value={String(s.id)} color={C.text} />)}
-        </Picker>
-      </View>
+      <PickerField
+        label="Section"
+        value={filterSec}
+        onChange={setFilterSec}
+        placeholder="All Sections"
+        disabled={!filterCls}
+        items={[{ label: 'All Sections', value: '' }, ...sections.map(s => ({ label: `Sec ${s.section_name}`, value: String(s.id) }))]}
+      />
 
       <Text style={styles.filterLabel}>Subject</Text>
-      <View style={styles.pickerBox}>
-        <Picker selectedValue={filterSubject} onValueChange={setFilterSubject} style={styles.picker} dropdownIconColor={C.textMed}>
-          <Picker.Item label="All Subjects" value="" color={C.text} />
-          {subjects.map(s => <Picker.Item key={s} label={s} value={s} color={C.text} />)}
-        </Picker>
-      </View>
+      <PickerField
+        label="Subject"
+        value={filterSubject}
+        onChange={setFilterSubject}
+        placeholder="All Subjects"
+        items={[{ label: 'All Subjects', value: '' }, ...subjects.map(s => ({ label: s, value: s }))]}
+      />
 
       <Text style={styles.filterLabel}>Year</Text>
-      <View style={styles.pickerBox}>
-        <Picker selectedValue={filterYear} onValueChange={setFilterYear} style={styles.picker} dropdownIconColor={C.textMed}>
-          {availableYears.map(y => <Picker.Item key={y.value} label={y.label} value={y.value} color={C.text} />)}
-        </Picker>
-      </View>
+      <PickerField
+        label="Year"
+        value={filterYear}
+        onChange={setFilterYear}
+        placeholder="Any Year"
+        items={availableYears}
+      />
 
       <Text style={styles.filterLabel}>Month</Text>
-      <View style={styles.pickerBox}>
-        <Picker selectedValue={filterMonth} onValueChange={setFilterMonth} style={styles.picker} dropdownIconColor={C.textMed}>
-          {availableMonths.map(m => <Picker.Item key={m.value} label={m.label} value={m.value} color={C.text} />)}
-        </Picker>
-      </View>
+      <PickerField
+        label="Month"
+        value={filterMonth}
+        onChange={setFilterMonth}
+        placeholder="Any Month"
+        items={availableMonths}
+      />
 
       <Text style={styles.filterLabel}>Type</Text>
       <View style={styles.chipRow}>
@@ -277,23 +273,7 @@ export default function LectureListScreen({ navigation }) {
 
   return (
     <View style={styles.root}>
-      <StatusBar barStyle="light-content" backgroundColor="#1E1B4B" />
-
-      <LinearGradient
-        colors={['#1E1B4B', '#312E81', '#4338CA']}
-        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={styles.header}
-      >
-        <View style={styles.headerRow}>
-          <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
-            <Text style={styles.backTxt}>← Back</Text>
-          </Pressable>
-          <Text style={styles.headerTitle}>📚 All Lectures</Text>
-          <Pressable style={styles.uploadBtn} onPress={() => navigation.navigate('UploadLecture')}>
-            <Text style={styles.uploadBtnTxt}>⬆ Upload</Text>
-          </Pressable>
-        </View>
-      </LinearGradient>
+      <AppHeader title="All Lectures" navigation={navigation} />
 
       {loading ? (
         <ActivityIndicator color={C.primary} style={{ flex: 1, marginTop: 40 }} size="large" />
@@ -324,11 +304,9 @@ const styles = StyleSheet.create({
 
   header:      { paddingTop: 52, paddingBottom: 20, paddingHorizontal: 20 },
   headerRow:   { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  backBtn:     { backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6 },
-  backTxt:     { color: '#fff', fontWeight: '700', fontSize: 13 },
   headerTitle: { flex: 1, color: '#E0E7FF', fontSize: 19, fontWeight: '900' },
-  uploadBtn:   { backgroundColor: '#4ADE80', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 7 },
-  uploadBtnTxt:{ color: '#064E3B', fontWeight: '800', fontSize: 13 },
+  uploadBtn:   { backgroundColor: '#2563EB', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 7, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.3)' },
+  uploadBtnTxt:{ color: '#fff', fontWeight: '700', fontSize: 13 },
 
   filterCard: {
     backgroundColor: C.card, marginHorizontal: 14, marginTop: 14, marginBottom: 8,
@@ -354,7 +332,7 @@ const styles = StyleSheet.create({
 
   card: {
     backgroundColor: C.card, borderRadius: 16, marginHorizontal: 14, marginBottom: 12, padding: 16,
-    elevation: 2, shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 6, shadowOffset: { width: 0, height: 2 },
+    elevation: 2, shadowColor: '#94A3B8', shadowOpacity: 0.10, shadowRadius: 8, shadowOffset: { width: 0, height: 2 },
   },
   cardTop:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   typePill:    { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 3 },

@@ -7,7 +7,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import { C, S } from '../config/theme';
-import { HeaderBlobs, useEntrance } from '../components/Deco';
+import { useEntrance } from '../components/Deco';
+import { LogoHero } from '../components/Logo';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -88,14 +89,12 @@ export default function SignUpScreen({ navigation }) {
     <KeyboardAvoidingView style={styles.wrapper} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
     <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">      <StatusBar barStyle="light-content" backgroundColor="#0F0C29" />
 
-      <LinearGradient colors={['#0F0C29', '#1E1B4B', '#312E81']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
-        <HeaderBlobs />
-        <View style={styles.logoMark}>
-          <Text style={styles.logoMarkText}>ET</Text>
-        </View>
-        <Text style={styles.heroTitle}>EduTrack</Text>
+      <View style={styles.header}>
+        <View style={styles.deco1} pointerEvents="none" />
+        <View style={styles.deco2} pointerEvents="none" />
+        <LogoHero markSize={60} />
         <Text style={styles.heroSub}>Create your account</Text>
-      </LinearGradient>
+      </View>
 
       <Animated.View style={[styles.card, cardAnim]}>
         {!!formError && (
@@ -206,7 +205,7 @@ export default function SignUpScreen({ navigation }) {
 
         <Pressable onPress={handleSignUp} onPressIn={pIn} onPressOut={pOut} disabled={loading}>
           <Animated.View style={{ transform: [{ scale: btnS }], marginTop: 20 }}>
-            <LinearGradient colors={['#6366F1', '#4F46E5', '#3730A3']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradBtn}>
+            <LinearGradient colors={['#2563EB', '#1D4ED8']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradBtn}>
               {loading ? <ActivityIndicator color="#fff" /> : <Text style={S.btnText}>Create Account  →</Text>}
             </LinearGradient>
           </Animated.View>
@@ -223,13 +222,12 @@ export default function SignUpScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  wrapper:          { flex: 1, backgroundColor: '#0F0C29' },
+  wrapper:          { flex: 1, backgroundColor: '#2563EB' },
   scrollContent:    { flexGrow: 1 },
-  header:           { paddingHorizontal: 28, paddingTop: 52, paddingBottom: 36, alignItems: 'center', overflow: 'hidden' },
-  logoMark:         { width: 72, height: 72, borderRadius: 22, backgroundColor: 'rgba(99,102,241,0.35)', borderWidth: 1.5, borderColor: 'rgba(165,180,252,0.5)', justifyContent: 'center', alignItems: 'center', marginBottom: 14, shadowColor: '#6366F1', shadowOpacity: 0.8, shadowRadius: 20, shadowOffset: { width: 0, height: 6 }, elevation: 14 },
-  logoMarkText:     { fontSize: 22, fontWeight: '900', color: '#E0E7FF', letterSpacing: 2 },
-  heroTitle:        { fontSize: 28, fontWeight: '900', color: '#E0E7FF', letterSpacing: 1 },
-  heroSub:          { fontSize: 13, color: '#A5B4FC', marginTop: 6 },
+  header:           { paddingHorizontal: 28, paddingTop: 52, paddingBottom: 36, alignItems: 'center', overflow: 'hidden', backgroundColor: '#2563EB' },
+  deco1:            { position: 'absolute', width: 260, height: 260, borderRadius: 130, backgroundColor: 'rgba(255,255,255,0.06)', top: -80, right: -60 },
+  deco2:            { position: 'absolute', width: 140, height: 140, borderRadius: 70, backgroundColor: 'rgba(255,255,255,0.05)', bottom: -30, left: -30 },
+  heroSub:          { fontSize: 13, color: 'rgba(255,255,255,0.60)', marginTop: 8, fontWeight: '500', letterSpacing: 0.3 },
   card:             { flex: 1, backgroundColor: C.card, borderTopLeftRadius: 36, borderTopRightRadius: 36, paddingHorizontal: 24, paddingTop: 28, paddingBottom: 40, shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 28, shadowOffset: { width: 0, height: -8 }, elevation: 20 },
   roleRow:          { flexDirection: 'row', gap: 12, marginBottom: 20 },
   roleBtn:          { flex: 1, alignItems: 'center', paddingVertical: 14, borderRadius: 14, borderWidth: 2, borderColor: C.border, backgroundColor: C.cardAlt },

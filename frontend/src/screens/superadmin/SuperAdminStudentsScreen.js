@@ -480,15 +480,15 @@ export default function SuperAdminStudentsScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0F172A" />
+      <StatusBar barStyle="light-content" backgroundColor="#1E3A8A" />
 
       {/* Header */}
-      <LinearGradient colors={['#0F172A', '#1E293B', '#334155']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
+      <LinearGradient colors={['#1E3A8A', '#2563EB']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
         <Text style={styles.headerTitle}>Manage Students</Text>
         <Text style={styles.headerSub}>School → Campus → Class → Section</Text>
 
         {schoolsLoading
-          ? <ActivityIndicator color="#94A3B8" style={{ marginTop: 14 }} />
+          ? <ActivityIndicator color="rgba(255,255,255,0.7)" style={{ marginTop: 14 }} />
           : (
             <DropdownBtn
               label="School"
@@ -600,7 +600,7 @@ export default function SuperAdminStudentsScreen() {
                 }
                 renderItem={({ item }) => (
                   <View style={styles.card}>
-                    <LinearGradient colors={['#FFF7ED', '#FFEDD5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.avatar}>
+                    <LinearGradient colors={['#EEF2FF', '#E0E7FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.avatar}>
                       <Text style={styles.avatarTxt}>{initials(item)}</Text>
                     </LinearGradient>
                     <View style={{ flex: 1 }}>
@@ -701,8 +701,8 @@ export default function SuperAdminStudentsScreen() {
 const styles = StyleSheet.create({
   container:    { flex: 1, backgroundColor: C.bg },
   header:       { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 18 },
-  headerTitle:  { color: '#F1F5F9', fontSize: 20, fontWeight: '800' },
-  headerSub:    { color: '#94A3B8', fontSize: 12, marginTop: 4 },
+  headerTitle:  { color: '#fff', fontSize: 20, fontWeight: '800' },
+  headerSub:    { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 4 },
   filterRow:    { flexDirection: 'row', marginTop: 0 },
   toolbar:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, gap: 8, backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.border },
   searchBox:    { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: C.bg, borderRadius: 10, paddingHorizontal: 10, height: 38, borderWidth: 1, borderColor: C.border },
@@ -792,9 +792,9 @@ const sp = StyleSheet.create({
 
 const dd = StyleSheet.create({
   btn:         { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, marginTop: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
-  label:       { fontSize: 10, fontWeight: '700', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 },
-  value:       { fontSize: 14, fontWeight: '600', color: '#F1F5F9' },
+  label:       { fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 },
+  value:       { fontSize: 14, fontWeight: '600', color: '#fff' },
   placeholder: { color: '#64748B' },
-  arrow:       { fontSize: 18, color: '#94A3B8', marginLeft: 8 },
+  arrow:       { fontSize: 18, color: 'rgba(255,255,255,0.6)', marginLeft: 8 },
 });
 

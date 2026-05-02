@@ -1,4 +1,5 @@
-const db = require('../config/db');
+const db   = require('../config/db');
+const push = require('../services/pushService');
 
 // ── POST /api/teachers/attendance ─────────────────────────────
 // Teacher marks their own daily attendance
@@ -158,10 +159,21 @@ exports.updateLeaveGroupStatus = async (req, res) => {
       }
     }
     res.json({ message: `Leave group ${status}`, count: rows.length });
+
+    // Notify the student whose leave was just approved/rejected (non-blocking)
+    if (rows.length) {
+      const studentId = rows[0].student_id;
+      const dateLabel = rows.map(r => r.date).join(', ');
+      push.tokensForStudents([studentId]).then(tokens =>
+        push.send(tokens,
+          status === 'approved' ? 'Leave Approved' : 'Leave Rejected',
+          `Your leave request for ${dateLabel} has been ${status}.`,
+          { type: 'leave_decision', status, group_id }
+        )
+      );
+    }
   } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
 };
-
-// ── PUT /api/teachers/leaves/group/:group_id/withdrawal ───────
 // Teacher approves or rejects a student's withdrawal request.
 exports.handleWithdrawalRequest = async (req, res) => {
   const { group_id } = req.params;

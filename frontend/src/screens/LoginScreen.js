@@ -1,38 +1,47 @@
-import React, { useState, useRef, useEffect } from 'react';
+﻿import React, { useState, useRef, useEffect } from 'react';
 import {
-  View, Text, TextInput, Pressable, Animated,
-  StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, StatusBar, ScrollView
+  View, Text, TextInput, Pressable, Animated, Alert,
+  StyleSheet, ActivityIndicator, KeyboardAvoidingView,
+  Platform, StatusBar, ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
-import { C, S } from '../config/theme';
-import { HeaderBlobs, useEntrance } from '../components/Deco';
+import { C } from '../config/theme';
+import { LogoHero } from '../components/Logo';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function LoginScreen({ navigation }) {
   const { login } = useAuth();
-  const [email,    setEmail]    = useState('');
-  const [password, setPassword] = useState('');
-  const [loading,  setLoading]  = useState(false);
-  const [errors,   setErrors]   = useState({});
+  const [email,     setEmail]     = useState('');
+  const [password,  setPassword]  = useState('');
+  const [loading,   setLoading]   = useState(false);
+  const [errors,    setErrors]    = useState({});
   const [formError, setFormError] = useState('');
   const [focus,     setFocus]     = useState('');
+  const [showPw,    setShowPw]    = useState(false);
 
-  // Entrance: card slides up + fades in
-  const cardAnim = useEntrance();
-  // Button press scale
-  const btnS = useRef(new Animated.Value(1)).current;
-  const pIn  = () => Animated.spring(btnS, { toValue: 0.96, useNativeDriver: true, speed: 50 }).start();
-  const pOut = () => Animated.spring(btnS, { toValue: 1,    useNativeDriver: true, speed: 20 }).start();
+  const cardY    = useRef(new Animated.Value(48)).current;
+  const cardFade = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(cardFade, { toValue: 1, duration: 360, useNativeDriver: true }),
+      Animated.spring(cardY,    { toValue: 0, tension: 55, friction: 10, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  const btnScale = useRef(new Animated.Value(1)).current;
+  const pIn  = () => Animated.spring(btnScale, { toValue: 0.97, useNativeDriver: true, speed: 50 }).start();
+  const pOut = () => Animated.spring(btnScale, { toValue: 1,    useNativeDriver: true, speed: 20 }).start();
 
   const validate = () => {
     const e = {};
-    if (!email.trim())                      e.email    = 'Email is required.';
-    else if (!EMAIL_REGEX.test(email.trim())) e.email    = 'Enter a valid email address.';
-    if (!password)                           e.password = 'Password is required.';
+    if (!email.trim())                        e.email    = 'Email is required.';
+    else if (!EMAIL_REGEX.test(email.trim())) e.email    = 'Enter a valid email.';
+    if (!password)                            e.password = 'Password is required.';
     setErrors(e);
-    return Object.keys(e).length === 0;
+    return !Object.keys(e).length;
   };
 
   const handleLogin = async () => {
@@ -43,152 +52,180 @@ export default function LoginScreen({ navigation }) {
       await login(email.trim().toLowerCase(), password);
     } catch (err) {
       const msg = err?.response?.data?.message || 'Invalid email or password.';
-      // surface server error on the relevant field when possible
-      if (err?.response?.status === 401) {
-        setErrors({ password: msg });
-      } else {
-        setFormError(msg);
-      }
+      if (err?.response?.status === 401) setErrors({ password: msg });
+      else setFormError(msg);
     } finally {
       setLoading(false);
     }
   };
 
+  const handleForgotPassword = () => {
+    Alert.alert(
+      'Reset Password',
+      'Please contact your school administrator to reset your password.',
+      [{ text: 'OK' }]
+    );
+  };
+
   return (
-    <KeyboardAvoidingView style={styles.wrapper} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'android' ? 0 : 0}>
-      <StatusBar barStyle="light-content" backgroundColor="#0F0C29" />
-
-      {/* ── Gradient hero with textured blobs ─────────────── */}
-      <LinearGradient
-        colors={['#0F0C29', '#1E1B4B', '#312E81']}
-        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={styles.topSection}
+    <KeyboardAvoidingView
+      style={styles.root}
+      behavior="padding"
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+    >
+      <ScrollView
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ flexGrow: 1 }}
       >
-        <HeaderBlobs />
-        <View style={{ alignItems: 'center' }}>
-          <View style={styles.logoMark}>
-            <Text style={styles.logoMarkText}>ET</Text>
+      <StatusBar barStyle="light-content" backgroundColor="#1E40AF" />
+
+      <View style={styles.hero}>
+        <View style={styles.deco1} pointerEvents="none" />
+        <View style={styles.deco2} pointerEvents="none" />
+        <LogoHero markSize={72} />
+      </View>
+
+      <Animated.View style={[styles.card, { opacity: cardFade, transform: [{ translateY: cardY }] }]}>
+        <View style={{ paddingBottom: 8 }}>
+          <Text style={styles.heading}>Welcome back</Text>
+          <Text style={styles.sub}>Sign in to your account</Text>
+
+          {!!formError && (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorBannerText}>{formError}</Text>
+            </View>
+          )}
+
+          <Text style={styles.label}>Email Address</Text>
+          <TextInput
+            style={[styles.input, errors.email && styles.inputErr, focus === 'email' && styles.inputFocus]}
+            placeholder="teacher@school.com"
+            placeholderTextColor="#94A3B8"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            returnKeyType="next"
+            value={email}
+            onFocus={() => setFocus('email')}
+            onBlur={() => setFocus('')}
+            onChangeText={v => { setEmail(v); setErrors(p => ({ ...p, email: '' })); }}
+          />
+          {!!errors.email && <Text style={styles.fieldErr}>{errors.email}</Text>}
+
+          <Text style={[styles.label, { marginTop: 16 }]}>Password</Text>
+          <View style={styles.pwWrap}>
+            <TextInput
+              style={[styles.input, styles.pwInput, errors.password && styles.inputErr, focus === 'password' && styles.inputFocus]}
+              placeholder="Enter your password"
+              placeholderTextColor="#94A3B8"
+              secureTextEntry={!showPw}
+              returnKeyType="done"
+              onSubmitEditing={handleLogin}
+              value={password}
+              onFocus={() => setFocus('password')}
+              onBlur={() => setFocus('')}
+              onChangeText={v => { setPassword(v); setErrors(p => ({ ...p, password: '' })); }}
+            />
+            <Pressable onPress={() => setShowPw(p => !p)} style={styles.eyeBtn} hitSlop={8}>
+              <Ionicons name={showPw ? 'eye-off-outline' : 'eye-outline'} size={20} color="#94A3B8" />
+            </Pressable>
           </View>
-          <Text style={styles.appName}>EduTrack</Text>
-          <Text style={styles.appTagline}>Smart Attendance, Every Day</Text>
+          {!!errors.password && <Text style={styles.fieldErr}>{errors.password}</Text>}
+
+          <Pressable onPress={handleForgotPassword} style={styles.forgotRow}>
+            <Text style={styles.forgotText}>Forgot password?</Text>
+          </Pressable>
+
+          <Pressable onPress={handleLogin} onPressIn={pIn} onPressOut={pOut} disabled={loading}>
+            <Animated.View style={{ transform: [{ scale: btnScale }] }}>
+              <LinearGradient
+                colors={['#2563EB', '#1D4ED8']}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                style={styles.btn}
+              >
+                {loading
+                  ? <ActivityIndicator color="#fff" />
+                  : <Text style={styles.btnText}>Sign In</Text>
+                }
+              </LinearGradient>
+            </Animated.View>
+          </Pressable>
+
+          <Pressable style={styles.signupRow} onPress={() => navigation.navigate('SignUp')}>
+            <Text style={styles.signupText}>New here? </Text>
+            <Text style={styles.signupLink}>Create an account</Text>
+          </Pressable>
         </View>
-      </LinearGradient>
-
-      {/* ── Animated sliding card ─────────────────────────── */}
-      <Animated.View style={[styles.card, cardAnim]}>
-        <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        <Text style={styles.cardTitle}>Welcome Back</Text>
-        <Text style={styles.cardSub}>Sign in to your account</Text>
-
-        {!!formError && (
-          <View style={styles.formErrorBox}>
-            <Text style={styles.formErrorText}>{formError}</Text>
-          </View>
-        )}
-
-        <Text style={S.label}>Email Address</Text>
-        <TextInput
-          style={[S.input, errors.email && S.inputError, focus === 'email' && styles.inputFocus]}
-          placeholder="teacher@school.com"
-          placeholderTextColor={C.textLight}
-          keyboardType="email-address"
-          autoCapitalize="none"
-          value={email}
-          onFocus={() => setFocus('email')}
-          onBlur={() => setFocus('')}
-          onChangeText={v => { setEmail(v); setErrors(p => ({ ...p, email: '' })); }}
-        />
-        {!!errors.email && <Text style={S.errorText}>{errors.email}</Text>}
-
-        <Text style={[S.label, { marginTop: 6 }]}>Password</Text>
-        <TextInput
-          style={[S.input, errors.password && S.inputError, focus === 'password' && styles.inputFocus]}
-          placeholder="Enter your password"
-          placeholderTextColor={C.textLight}
-          secureTextEntry
-          value={password}
-          onFocus={() => setFocus('password')}
-          onBlur={() => setFocus('')}
-          onChangeText={v => { setPassword(v); setErrors(p => ({ ...p, password: '' })); }}
-        />
-        {!!errors.password && <Text style={S.errorText}>{errors.password}</Text>}
-
-        {/* Gradient animated button */}
-        <Pressable onPress={handleLogin} onPressIn={pIn} onPressOut={pOut} disabled={loading}>
-          <Animated.View style={{ transform: [{ scale: btnS }], marginTop: 14 }}>
-            <LinearGradient
-              colors={['#6366F1', '#4F46E5', '#3730A3']}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-              style={styles.gradBtn}
-            >
-              {loading ? <ActivityIndicator color="#fff" /> : <Text style={S.btnText}>Sign In  →</Text>}
-            </LinearGradient>
-          </Animated.View>
-        </Pressable>
-
-        <Pressable
-          style={({ hovered }) => [styles.linkRow, hovered && { opacity: 0.65 }]}
-          onPress={() => navigation.navigate('SignUp')}
-        >
-          <Text style={styles.linkText}>New teacher? </Text>
-          <Text style={styles.linkAccent}>Create an account</Text>
-        </Pressable>
-        </ScrollView>
       </Animated.View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  wrapper:      { flex: 1, backgroundColor: '#0F0C29' },
+  root: { flex: 1, backgroundColor: '#2563EB' },
 
-  topSection:   {
-    flex: 0.42,
-    justifyContent: 'center', alignItems: 'center',
-    paddingHorizontal: 24, paddingTop: 20,
+  hero: {
+    flex: 0.40,
+    alignItems: 'center',
+    justifyContent: 'center',
     overflow: 'hidden',
   },
-  logoMark: {
-    width: 80, height: 80, borderRadius: 24,
-    backgroundColor: 'rgba(99,102,241,0.35)',
-    borderWidth: 1.5, borderColor: 'rgba(165,180,252,0.5)',
-    justifyContent: 'center', alignItems: 'center', marginBottom: 14,
-    shadowColor: '#6366F1', shadowOpacity: 0.8, shadowRadius: 24,
-    shadowOffset: { width: 0, height: 8 }, elevation: 16,
+  deco1: {
+    position: 'absolute', width: 280, height: 280, borderRadius: 140,
+    backgroundColor: 'rgba(255,255,255,0.06)', top: -100, right: -80,
   },
-  logoMarkText: { fontSize: 26, fontWeight: '900', color: '#E0E7FF', letterSpacing: 2 },
-  appName:      { fontSize: 32, fontWeight: '900', color: '#E0E7FF', letterSpacing: 1.5 },
-  appTagline:   { fontSize: 13, color: '#A5B4FC', marginTop: 6, letterSpacing: 0.5 },
+  deco2: {
+    position: 'absolute', width: 160, height: 160, borderRadius: 80,
+    backgroundColor: 'rgba(255,255,255,0.05)', bottom: -40, left: -40,
+  },
 
-  card:         {
-    flex: 0.58,
-    backgroundColor: C.card,
-    borderTopLeftRadius: 36, borderTopRightRadius: 36,
-    paddingHorizontal: 28, paddingTop: 30, paddingBottom: 24,
-    shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 28,
-    shadowOffset: { width: 0, height: -8 }, elevation: 20,
+  card: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    paddingHorizontal: 28, paddingTop: 32, paddingBottom: 20,
+    shadowColor: '#000', shadowOpacity: 0.16,
+    shadowRadius: 20, shadowOffset: { width: 0, height: -4 },
+    elevation: 14,
   },
-  cardTitle:    { fontSize: 24, fontWeight: '800', color: C.textDark, marginBottom: 4 },
-  cardSub:      { fontSize: 14, color: C.textLight, marginBottom: 22 },
+  heading: { fontSize: 22, fontWeight: '800', color: '#0F172A', marginBottom: 4 },
+  sub:     { fontSize: 14, color: '#64748B', marginBottom: 24 },
 
-  inputFocus:   {
-    borderColor: C.primary, borderWidth: 2,
-    shadowColor: C.primary, shadowOpacity: 0.2,
-    shadowRadius: 8, shadowOffset: { width: 0, height: 0 }, elevation: 4,
-    backgroundColor: '#F5F3FF',
+  errorBanner:     { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', borderRadius: 10, padding: 12, marginBottom: 16 },
+  errorBannerText: { color: '#DC2626', fontSize: 13, textAlign: 'center' },
+
+  label: {
+    fontSize: 12, fontWeight: '700', color: '#475569',
+    letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 7,
   },
-  gradBtn:      {
-    borderRadius: 14, paddingVertical: 16, alignItems: 'center',
-    shadowColor: '#4F46E5', shadowOpacity: 0.5, shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 }, elevation: 10,
+  input: {
+    backgroundColor: '#F8FAFC', borderWidth: 1.5, borderColor: '#E2E8F0',
+    borderRadius: 12, paddingHorizontal: 16, paddingVertical: 13,
+    fontSize: 15, color: '#0F172A',
   },
-  formErrorBox:  {
-    backgroundColor: C.errorBg, borderWidth: 1, borderColor: '#FECACA',
-    borderRadius: 10, padding: 12, marginBottom: 16,
+  inputErr:   { borderColor: '#FCA5A5', backgroundColor: '#FFF5F5' },
+  inputFocus: {
+    borderColor: '#2563EB', backgroundColor: '#EFF6FF',
+    shadowColor: '#2563EB', shadowOpacity: 0.12, shadowRadius: 6,
+    shadowOffset: { width: 0, height: 0 }, elevation: 2,
   },
-  formErrorText: { color: C.error, fontSize: 13, textAlign: 'center' },
-  linkRow:      { flexDirection: 'row', justifyContent: 'center', marginTop: 20 },
-  linkText:     { color: C.textMed, fontSize: 14 },
-  linkAccent:   { color: C.primary, fontSize: 14, fontWeight: '700' },
+  fieldErr: { color: '#EF4444', fontSize: 12, marginTop: 4, marginLeft: 2 },
+
+  pwWrap:  { position: 'relative', justifyContent: 'center' },
+  pwInput: { paddingRight: 46 },
+  eyeBtn:  { position: 'absolute', right: 14, height: '100%', justifyContent: 'center' },
+
+  forgotRow:  { alignItems: 'flex-end', marginTop: 10, marginBottom: 22 },
+  forgotText: { color: '#2563EB', fontSize: 13, fontWeight: '600' },
+
+  btn: {
+    borderRadius: 13, paddingVertical: 15, alignItems: 'center',
+    shadowColor: '#1D4ED8', shadowOpacity: 0.35, shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 }, elevation: 7,
+  },
+  btnText: { color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: 0.3 },
+
+  signupRow:  { flexDirection: 'row', justifyContent: 'center', marginTop: 22 },
+  signupText: { color: '#64748B', fontSize: 14 },
+  signupLink: { color: '#2563EB', fontSize: 14, fontWeight: '700' },
 });
-

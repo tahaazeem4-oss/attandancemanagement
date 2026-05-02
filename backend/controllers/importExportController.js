@@ -260,44 +260,124 @@ exports.importClasses = async (req, res) => {
 // ─── ATTENDANCE REPORT ─────────────────────────────────────────────────────
 
 /**
- * GET /api/import-export/attendance/export?class_id=&section_id=&date=
- * Exports the attendance report for a given class/section/date as Excel.
+ * GET /api/import-export/attendance/export?class_id=&section_id=&from=&to=
+ * Exports the attendance report as an Excel file.
+ * - Single date  : flat list (Roll No, Name, Status, Date)
+ * - Date range   : matrix — one column per date (P/A/L/–) + totals
+ * Legacy param   : ?date= is treated as both from and to.
+ * Max range      : 31 days.
  */
 exports.exportAttendance = async (req, res) => {
-  const { class_id, section_id, date } = req.query;
+  const { class_id, section_id, date, from, to } = req.query;
   const sid = req.user.school_id;
-  const reportDate = date || new Date().toISOString().slice(0, 10);
+
+  console.log('[exportAttendance] user:', req.user?.role, 'school:', sid, 'class:', class_id, 'section:', section_id);
 
   if (!class_id || !section_id)
     return res.status(400).json({ message: 'class_id and section_id are required' });
 
-  try {
-    const [rows] = await db.query(
-      `SELECT s.roll_no, s.first_name, s.last_name,
-              COALESCE(a.status, 'not_marked') AS status
-       FROM   students s
-       LEFT   JOIN student_attendance a ON a.student_id=s.id AND a.date=?
-       WHERE  s.class_id=? AND s.section_id=? AND s.school_id=?
-       ORDER  BY s.last_name, s.first_name`,
-      [reportDate, class_id, section_id, sid]
-    );
+  // Resolve date range
+  const fromDate = from || date || new Date().toISOString().slice(0, 10);
+  const toDate   = to   || from || date || new Date().toISOString().slice(0, 10);
 
+  // Build array of date strings in range
+  const dates = [];
+  const cur = new Date(fromDate);
+  const end = new Date(toDate);
+  while (cur <= end) {
+    dates.push(cur.toISOString().slice(0, 10));
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  if (dates.length > 31)
+    return res.status(400).json({ message: 'Date range cannot exceed 31 days' });
+
+  try {
+    // Get class/section names
     const [clsRows] = await db.query(
       `SELECT c.class_name, sec.section_name FROM classes c JOIN sections sec ON sec.id=? WHERE c.id=?`,
       [section_id, class_id]
     );
     const cls = clsRows[0] || {};
-    const filename = `attendance_${cls.class_name || class_id}_${cls.section_name || section_id}_${reportDate}.xlsx`;
 
-    const data = rows.map(r => ({
-      'Roll No':    r.roll_no || '',
-      'First Name': r.first_name,
-      'Last Name':  r.last_name,
-      'Status':     r.status,
-      'Date':       reportDate,
-    }));
+    // Get all students
+    const [students] = await db.query(
+      `SELECT id, roll_no, first_name, last_name
+       FROM   students
+       WHERE  class_id=? AND section_id=? AND school_id=?
+       ORDER  BY last_name, first_name`,
+      [class_id, section_id, sid]
+    );
 
-    sendXlsx(res, toXlsx(data, 'Attendance'), filename);
+    if (!students.length) {
+      return res.status(404).json({ message: 'No students found for this class/section' });
+    }
+
+    // Single-date: simple flat list
+    if (dates.length === 1) {
+      const d = dates[0];
+      const [rows] = await db.query(
+        `SELECT s.roll_no, s.first_name, s.last_name,
+                COALESCE(a.status, 'not_marked') AS status
+         FROM   students s
+         LEFT   JOIN student_attendance a ON a.student_id=s.id AND a.date=?
+         WHERE  s.class_id=? AND s.section_id=? AND s.school_id=?
+         ORDER  BY s.last_name, s.first_name`,
+        [d, class_id, section_id, sid]
+      );
+      const data = rows.map(r => ({
+        'Roll No':    r.roll_no || '',
+        'First Name': r.first_name,
+        'Last Name':  r.last_name,
+        'Status':     r.status === 'not_marked' ? 'Not Marked' : r.status.charAt(0).toUpperCase() + r.status.slice(1),
+        'Date':       d,
+      }));
+      const fn = `attendance_${cls.class_name||class_id}_${cls.section_name||section_id}_${d}.xlsx`;
+      return sendXlsx(res, toXlsx(data, 'Attendance'), fn);
+    }
+
+    // Multi-date: matrix format
+    const studentIds = students.map(s => s.id);
+    const placeholders = studentIds.map(() => '?').join(',');
+    const [attendance] = await db.query(
+      `SELECT student_id, date, status
+       FROM   student_attendance
+       WHERE  student_id IN (${placeholders})
+         AND  date >= ? AND date <= ?`,
+      [...studentIds, fromDate, toDate]
+    );
+
+    // Build lookup: { studentId: { 'YYYY-MM-DD': status } }
+    const lookup = {};
+    attendance.forEach(a => {
+      if (!lookup[a.student_id]) lookup[a.student_id] = {};
+      lookup[a.student_id][a.date] = a.status;
+    });
+
+    const ABBR = { present: 'P', absent: 'A', leave: 'L', not_marked: '–' };
+
+    const data = students.map(s => {
+      const row = {
+        'Roll No':    s.roll_no || '',
+        'First Name': s.first_name,
+        'Last Name':  s.last_name,
+      };
+      let present = 0, absent = 0, leave = 0;
+      dates.forEach(d => {
+        const status = lookup[s.id]?.[d] || 'not_marked';
+        row[d] = ABBR[status] || '–';
+        if (status === 'present')      present++;
+        else if (status === 'absent')  absent++;
+        else if (status === 'leave')   leave++;
+      });
+      row['Present'] = present;
+      row['Absent']  = absent;
+      row['Leave']   = leave;
+      return row;
+    });
+
+    const fn = `attendance_${cls.class_name||class_id}_${cls.section_name||section_id}_${fromDate}_to_${toDate}.xlsx`;
+    sendXlsx(res, toXlsx(data, 'Attendance'), fn);
   } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
 };
 
