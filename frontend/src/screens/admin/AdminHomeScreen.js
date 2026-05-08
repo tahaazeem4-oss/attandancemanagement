@@ -51,11 +51,14 @@ export default function AdminHomeScreen({ navigation }) {
     )).start();
   }, []);
 
-  // Re-fetch unread count when screen comes back into focus
+  // Re-fetch unread count and stats when screen comes back into focus
   useFocusEffect(
     useCallback(() => {
       api.get('/notifications/inbox/unread-count')
         .then(({ data }) => setNotifUnread(data.count || 0))
+        .catch(() => {});
+      api.get('/admin/stats')
+        .then(({ data }) => setStats(data))
         .catch(() => {});
     }, [])
   );

@@ -3,6 +3,7 @@ import {
   View, Text, FlatList, Pressable,
   StyleSheet, Alert, ActivityIndicator
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import api from '../../services/api';
 import { C } from '../../config/theme';
 import { exportFile } from '../../services/importExport';
@@ -30,6 +31,9 @@ export default function AdminLeavesScreen({ navigation }) {
   }, [filter]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Reload whenever screen comes into focus
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const updateStatus = async (group, status) => {
     setActing(group.group_id);

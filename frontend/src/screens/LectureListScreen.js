@@ -120,8 +120,11 @@ export default function LectureListScreen({ navigation }) {
   useEffect(() => { load(); }, [load]);
 
   const openLecture = async (lecture) => {
-    const token = api.defaults.headers.common['Authorization']?.replace('Bearer ', '');
-    const url   = `${BASE_URL}/lectures/${lecture.id}/file?_token=${encodeURIComponent(token)}`;
+    const url = lecture.file_url;
+    if (!url) {
+      Alert.alert('Error', 'No file URL available');
+      return;
+    }
     const canOpen = await Linking.canOpenURL(url);
     if (canOpen) {
       await Linking.openURL(url);

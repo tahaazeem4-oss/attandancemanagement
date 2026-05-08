@@ -68,12 +68,17 @@ export default function HomeScreen({ navigation }) {
     )).start();
   }, []);
 
-  // Re-fetch unread count whenever this screen comes into focus
+  // Re-fetch unread count and pending leave count whenever this screen comes into focus
   useFocusEffect(
     useCallback(() => {
       api.get('/notifications/inbox/unread-count')
         .then(({ data }) => setNotifUnread(data.count || 0))
         .catch(() => {});
+      api.get('/teachers/leaves').then(({ data }) => {
+        const pendingLeaves      = data.filter(l => l.status === 'pending' && !l.withdrawal_status).length;
+        const pendingWithdrawals = data.filter(l => l.withdrawal_status === 'pending').length;
+        setPendingLeaveCount(pendingLeaves + pendingWithdrawals);
+      }).catch(() => {});
     }, [])
   );
 

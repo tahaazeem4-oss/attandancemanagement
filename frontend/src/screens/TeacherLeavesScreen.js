@@ -3,6 +3,7 @@ import {
   View, Text, FlatList, Pressable,
   StyleSheet, Alert, ActivityIndicator,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import api from '../services/api';
 import { C } from '../config/theme';
 import AppHeader from '../components/AppHeader';
@@ -35,6 +36,9 @@ export default function TeacherLeavesScreen({ navigation }) {
   }, []);
 
   useEffect(() => { load(); }, []);
+
+  // Reload whenever screen comes into focus
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   // ── Actions ───────────────────────────────────────────────
   const doLeaveAction = async (group_id, status) => {

@@ -56,12 +56,13 @@ export default function StaffNotificationsScreen({ navigation }) {
     setLoading(true);
     try {
       const { data } = await api.get('/notifications/inbox');
-      setNotifications(data);
+      const list = Array.isArray(data) ? data : [];
+      setNotifications(list);
       Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
       // Mark all as read silently so the badge clears on the home screen
-      if (data.some(n => !n.is_read)) {
+      if (list.some(n => !n.is_read)) {
         api.post('/notifications/inbox/read-all').catch(() => {});
-        setNotifications(data.map(n => ({ ...n, is_read: true })));
+        setNotifications(list.map(n => ({ ...n, is_read: true })));
       }
     } catch {
       Alert.alert('Error', 'Could not load notifications');

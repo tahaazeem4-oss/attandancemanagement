@@ -24,8 +24,6 @@ const MONTH_NAMES = {
   '09': 'September','10': 'October', '11': 'November', '12': 'December',
 };
 
-const BASE_URL = api.defaults.baseURL;
-
 export default function StudentLecturesScreen({ navigation }) {
   const [lectures,      setLectures]      = useState([]);
   const [loading,       setLoading]       = useState(true);
@@ -87,8 +85,8 @@ export default function StudentLecturesScreen({ navigation }) {
 
   // ── Open / View PDF ────────────────────────────────────────
   const openLecture = async (lecture) => {
-    const token = api.defaults.headers.common['Authorization']?.replace('Bearer ', '');
-    const url   = `${BASE_URL}/lectures/${lecture.id}/file?_token=${encodeURIComponent(token)}`;
+    const url = lecture.file_url;
+    if (!url) { Alert.alert('Error', 'No file URL available'); return; }
     const canOpen = await Linking.canOpenURL(url);
     if (canOpen) {
       await Linking.openURL(url);

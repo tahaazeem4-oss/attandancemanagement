@@ -1,8 +1,9 @@
 ﻿import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator }   from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 
 // Auth screens
@@ -58,23 +59,27 @@ const headerStyle = {
 };
 
 // â”€â”€ Tab bar config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-const tabBarOptions = {
-  tabBarStyle: {
-    backgroundColor: '#2563EB',
-    borderTopWidth: 0,
-    height: 60,
-    paddingBottom: 8,
-    paddingTop: 6,
-    elevation: 12,
-    shadowColor: '#1E3A8A',
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: -3 },
-  },
-  tabBarActiveTintColor:   '#ffffff',
-  tabBarInactiveTintColor: 'rgba(255,255,255,0.45)',
-  tabBarLabelStyle: { fontSize: 11, fontWeight: '700', letterSpacing: 0.2 },
-};
+function useTabBarOptions() {
+  const insets = useSafeAreaInsets();
+  const bottomPad = Math.max(insets.bottom, 8);
+  return {
+    tabBarStyle: {
+      backgroundColor: '#2563EB',
+      borderTopWidth: 0,
+      height: 56 + bottomPad,
+      paddingBottom: bottomPad,
+      paddingTop: 6,
+      elevation: 12,
+      shadowColor: '#1E3A8A',
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: -3 },
+    },
+    tabBarActiveTintColor:   '#ffffff',
+    tabBarInactiveTintColor: 'rgba(255,255,255,0.45)',
+    tabBarLabelStyle: { fontSize: 11, fontWeight: '700', letterSpacing: 0.2 },
+  };
+}
 
 // â”€â”€ Tab icon renderer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function tabIcon(focused, name, nameOutline, size = 24) {
@@ -95,12 +100,14 @@ function TeacherHomeStack() {
       <Stack.Screen name="Report"            component={ReportScreen}            options={{ headerShown: false }} />
       <Stack.Screen name="UploadLecture"     component={UploadLectureScreen}     options={{ headerShown: false }} />
       <Stack.Screen name="LectureList"       component={LectureListScreen}       options={{ headerShown: false }} />
-      <Stack.Screen name="SendNotification"  component={SendNotificationScreen}  options={{ headerShown: false }} />
+      <Stack.Screen name="SendNotification"     component={SendNotificationScreen}     options={{ headerShown: false }} />
+      <Stack.Screen name="StaffNotifications"    component={StaffNotificationsScreen}   options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }
 
 function TeacherTabs() {
+  const tabBarOptions = useTabBarOptions();
   return (
     <Tab.Navigator screenOptions={{ ...tabBarOptions, headerShown: false }} initialRouteName="HomeTab">
       <Tab.Screen
@@ -137,12 +144,14 @@ function AdminHomeStack() {
       <Stack.Screen name="SendNotification" component={SendNotificationScreen} options={{ headerShown: false }} />
       <Stack.Screen name="UploadLecture"    component={UploadLectureScreen}    options={{ headerShown: false }} />
       <Stack.Screen name="LectureList"      component={LectureListScreen}      options={{ headerShown: false }} />
-      <Stack.Screen name="AdminSubjects"    component={AdminSubjectsScreen}    options={{ headerShown: false }} />
+      <Stack.Screen name="AdminSubjects"      component={AdminSubjectsScreen}      options={{ headerShown: false }} />
+      <Stack.Screen name="StaffNotifications" component={StaffNotificationsScreen} options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }
 
 function AdminTabs() {
+  const tabBarOptions = useTabBarOptions();
   return (
     <Tab.Navigator screenOptions={{ ...tabBarOptions, headerShown: false }} initialRouteName="HomeTab">
       <Tab.Screen
@@ -173,12 +182,14 @@ function SuperAdminHomeStack() {
       <Stack.Screen name="SuperAdminHome"     component={SuperAdminHomeScreen}     options={{ headerShown: false }} />
       <Stack.Screen name="SuperAdminSchools"  component={SuperAdminSchoolsScreen}  options={{ title: 'Manage Schools' }} />
       <Stack.Screen name="SuperAdminTeachers" component={SuperAdminTeachersScreen} options={{ title: 'Manage Teachers' }} />
-      <Stack.Screen name="SuperAdminStudents" component={SuperAdminStudentsScreen} options={{ title: 'Manage Students' }} />
+      <Stack.Screen name="SuperAdminStudents"  component={SuperAdminStudentsScreen}  options={{ title: 'Manage Students' }} />
+      <Stack.Screen name="StaffNotifications"  component={StaffNotificationsScreen}  options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }
 
 function SuperAdminTabs() {
+  const tabBarOptions = useTabBarOptions();
   return (
     <Tab.Navigator screenOptions={{ ...tabBarOptions, headerShown: false }} initialRouteName="HomeTab">
       <Tab.Screen
@@ -209,12 +220,14 @@ function StudentHomeStack() {
       <Stack.Screen name="StudentHome"          component={StudentHomeScreen}     options={{ headerShown: false }} />
       <Stack.Screen name="StudentHistory"       component={StudentHistoryScreen}  options={{ headerShown: false }} />
       <Stack.Screen name="StudentLeaves"        component={StudentLeaveScreen}    options={{ headerShown: false }} />
-      <Stack.Screen name="StudentLectures"      component={StudentLecturesScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="StudentLectures"       component={StudentLecturesScreen}       options={{ headerShown: false }} />
+      <Stack.Screen name="StudentNotifications" component={StudentNotificationsScreen}  options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }
 
 function StudentTabs() {
+  const tabBarOptions = useTabBarOptions();
   return (
     <Tab.Navigator screenOptions={{ ...tabBarOptions, headerShown: false }} initialRouteName="HomeTab">
       <Tab.Screen

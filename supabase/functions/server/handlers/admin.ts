@@ -1,0 +1,600 @@
+// handlers/admin.ts — admin dashboard, teachers, students, classes, assignments, leaves
+import {
+  json,
+  getDb,
+  verifyToken,
+  hashPassword,
+  sendPush,
+  tokensForStudents,
+} from "../_shared.ts";
+
+export async function handleAdmin(
+  req: Request,
+  path: string,
+  url: URL,
+): Promise<Response> {
+  const method = req.method;
+
+  let user: Record<string, unknown>;
+  try {
+    user = await verifyToken(req);
+  } catch {
+    return json({ message: "Unauthorized" }, 401);
+  }
+  if (user.role !== "admin" && user.role !== "super_admin")
+    return json({ message: "Forbidden" }, 403);
+
+  const db = getDb();
+  const schoolId = user.school_id as number;
+
+  // ── GET /admin/stats ─────────────────────────────────────────
+  if (path === "/admin/stats" && method === "GET") {
+    try {
+      const [
+        { count: teachers },
+        { count: students },
+        { count: classes },
+        { count: pending_leaves },
+        { count: student_accounts },
+      ] = await Promise.all([
+        db.from("teachers").select("*", { count: "exact", head: true }).eq("school_id", schoolId),
+        db.from("students").select("*", { count: "exact", head: true }).eq("school_id", schoolId),
+        db.from("classes").select("*", { count: "exact", head: true }).eq("school_id", schoolId),
+        db.from("leave_applications")
+          .select("*, students!inner(school_id)", { count: "exact", head: true })
+          .eq("status", "pending")
+          .eq("students.school_id", schoolId),
+        db.from("student_accounts")
+          .select("*, students!inner(school_id)", { count: "exact", head: true })
+          .eq("students.school_id", schoolId),
+      ]);
+      return json({ teachers, students, classes, pending_leaves, student_accounts });
+    } catch (err) {
+      console.error("[admin/stats]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── GET /admin/teachers ──────────────────────────────────────
+  if (path === "/admin/teachers" && method === "GET") {
+    try {
+      const { data: teachers } = await db
+        .from("teachers")
+        .select("id, first_name, last_name, email, phone, created_at")
+        .eq("school_id", schoolId)
+        .order("last_name");
+
+      const { data: assignments } = await db
+        .from("teacher_classes")
+        .select(
+          `teacher_id, class_id, section_id,
+           classes!inner(class_name), sections!inner(section_name)`,
+        )
+        .in(
+          "teacher_id",
+          (teachers || []).map((t: Record<string, unknown>) => t.id),
+        );
+
+      const assignMap: Record<number, unknown[]> = {};
+      for (const a of assignments || []) {
+        const r = a as Record<string, unknown>;
+        const tid = r.teacher_id as number;
+        if (!assignMap[tid]) assignMap[tid] = [];
+        assignMap[tid].push({
+          class_id: r.class_id,
+          section_id: r.section_id,
+          class_name: (r.classes as Record<string, unknown>).class_name,
+          section_name: (r.sections as Record<string, unknown>).section_name,
+        });
+      }
+
+      const result = (teachers || []).map((t: Record<string, unknown>) => ({
+        ...t,
+        assignments: assignMap[t.id as number] || [],
+        teacher_role: (assignMap[t.id as number]?.length || 0) > 0 ? "class_teacher" : "subject_teacher",
+      }));
+
+      return json(result);
+    } catch (err) {
+      console.error("[admin/teachers GET]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── POST /admin/teachers ─────────────────────────────────────
+  if (path === "/admin/teachers" && method === "POST") {
+    try {
+      const { first_name, last_name, email, password, phone, assignments } =
+        await req.json();
+      if (!first_name || !last_name || !email || !password)
+        return json({ message: "Missing required fields" }, 400);
+
+      const hashed = await hashPassword(password);
+      const { data: t, error } = await db
+        .from("teachers")
+        .insert({ school_id: schoolId, first_name, last_name, email: email.trim().toLowerCase(), password: hashed, phone: phone || null })
+        .select()
+        .single();
+      if (error) {
+        if (error.code === "23505") return json({ message: "Email already exists" }, 409);
+        throw error;
+      }
+
+      if (Array.isArray(assignments) && assignments.length) {
+        await db.from("teacher_classes").insert(
+          assignments.map((a: Record<string, unknown>) => ({
+            teacher_id: t.id,
+            class_id: a.class_id,
+            section_id: a.section_id,
+          })),
+        );
+      }
+
+      return json({ message: "Teacher created", id: t.id }, 201);
+    } catch (err) {
+      console.error("[admin/teachers POST]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── PUT /admin/teachers/:id ──────────────────────────────────
+  const teacherMatch = path.match(/^\/admin\/teachers\/(\d+)$/);
+  if (teacherMatch && method === "PUT") {
+    const id = parseInt(teacherMatch[1]);
+    try {
+      const { first_name, last_name, email, phone, assignments } = await req.json();
+      await db
+        .from("teachers")
+        .update({ first_name, last_name, email: email?.trim().toLowerCase(), phone: phone || null })
+        .eq("id", id)
+        .eq("school_id", schoolId);
+
+      // Replace assignments
+      await db.from("teacher_classes").delete().eq("teacher_id", id);
+      if (Array.isArray(assignments) && assignments.length) {
+        await db.from("teacher_classes").insert(
+          assignments.map((a: Record<string, unknown>) => ({
+            teacher_id: id,
+            class_id: a.class_id,
+            section_id: a.section_id,
+          })),
+        );
+      }
+
+      return json({ message: "Teacher updated" });
+    } catch (err) {
+      console.error("[admin/teachers PUT]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── DELETE /admin/teachers/:id ───────────────────────────────
+  if (teacherMatch && method === "DELETE") {
+    const id = parseInt(teacherMatch[1]);
+    try {
+      await db.from("teachers").delete().eq("id", id).eq("school_id", schoolId);
+      return json({ message: "Teacher deleted" });
+    } catch (err) {
+      console.error("[admin/teachers DELETE]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── POST /admin/teachers/:id/reset-password ──────────────────
+  const teacherResetMatch = path.match(/^\/admin\/teachers\/(\d+)\/reset-password$/);
+  if (teacherResetMatch && method === "POST") {
+    const id = parseInt(teacherResetMatch[1]);
+    try {
+      const { new_password } = await req.json();
+      const hashed = await hashPassword(new_password);
+      await db.from("teachers").update({ password: hashed }).eq("id", id).eq("school_id", schoolId);
+      return json({ message: "Password reset" });
+    } catch (err) {
+      console.error("[admin/teachers/reset-password]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── GET /admin/students ──────────────────────────────────────
+  if (path === "/admin/students" && method === "GET") {
+    try {
+      const classId = url.searchParams.get("class_id");
+      const sectionId = url.searchParams.get("section_id");
+
+      let q = db
+        .from("students")
+        .select(
+          `id, first_name, last_name, age, roll_no, class_id, section_id, created_at,
+           classes!inner(class_name), sections!inner(section_name)`,
+        )
+        .eq("school_id", schoolId)
+        .order("last_name");
+
+      if (classId) q = q.eq("class_id", classId);
+      if (sectionId) q = q.eq("section_id", sectionId);
+
+      const { data: students } = await q;
+
+      const studentIds = (students || []).map((s: Record<string, unknown>) => s.id);
+      const { data: accounts } = studentIds.length
+        ? await db.from("student_accounts").select("student_id").in("student_id", studentIds)
+        : { data: [] };
+
+      const accSet = new Set((accounts || []).map((a: Record<string, unknown>) => a.student_id));
+
+      const result = (students || []).map((s: Record<string, unknown>) => ({
+        ...s,
+        class_name: (s.classes as Record<string, unknown>).class_name,
+        section_name: (s.sections as Record<string, unknown>).section_name,
+        has_account: accSet.has(s.id),
+      }));
+
+      return json(result);
+    } catch (err) {
+      console.error("[admin/students GET]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── POST /admin/students ─────────────────────────────────────
+  if (path === "/admin/students" && method === "POST") {
+    try {
+      const body = await req.json();
+      const { data, error } = await db
+        .from("students")
+        .insert({ school_id: schoolId, ...body, roll_no: body.roll_no || null })
+        .select()
+        .single();
+      if (error) throw error;
+      return json({ message: "Student created", id: data.id }, 201);
+    } catch (err) {
+      console.error("[admin/students POST]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  const studentMatch = path.match(/^\/admin\/students\/(\d+)$/);
+  // ── PUT /admin/students/:id ──────────────────────────────────
+  if (studentMatch && method === "PUT") {
+    const id = parseInt(studentMatch[1]);
+    try {
+      const body = await req.json();
+      await db
+        .from("students")
+        .update({ ...body, roll_no: body.roll_no || null })
+        .eq("id", id)
+        .eq("school_id", schoolId);
+      return json({ message: "Student updated" });
+    } catch (err) {
+      console.error("[admin/students PUT]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── DELETE /admin/students/:id ───────────────────────────────
+  if (studentMatch && method === "DELETE") {
+    const id = parseInt(studentMatch[1]);
+    try {
+      await db.from("students").delete().eq("id", id).eq("school_id", schoolId);
+      return json({ message: "Student deleted" });
+    } catch (err) {
+      console.error("[admin/students DELETE]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── POST /admin/students/:id/reset-password ──────────────────
+  const studentResetMatch = path.match(/^\/admin\/students\/(\d+)\/reset-password$/);
+  if (studentResetMatch && method === "POST") {
+    const id = parseInt(studentResetMatch[1]);
+    try {
+      const { new_password } = await req.json();
+      const hashed = await hashPassword(new_password);
+      await db.from("student_accounts").update({ password: hashed }).eq("student_id", id);
+      return json({ message: "Password reset" });
+    } catch (err) {
+      console.error("[admin/students/reset-password]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── GET /admin/classes ───────────────────────────────────────
+  if (path === "/admin/classes" && method === "GET") {
+    try {
+      const { data: classes } = await db
+        .from("classes")
+        .select("id, class_name")
+        .eq("school_id", schoolId)
+        .order("class_name");
+
+      const { data: sections } = await db
+        .from("sections")
+        .select("id, class_id, section_name")
+        .in(
+          "class_id",
+          (classes || []).map((c: Record<string, unknown>) => c.id),
+        );
+
+      const secMap: Record<number, unknown[]> = {};
+      for (const s of sections || []) {
+        const r = s as Record<string, unknown>;
+        const cid = r.class_id as number;
+        if (!secMap[cid]) secMap[cid] = [];
+        secMap[cid].push(r);
+      }
+
+      const result = (classes || []).map((c: Record<string, unknown>) => ({
+        ...c,
+        sections: secMap[c.id as number] || [],
+      }));
+      return json(result);
+    } catch (err) {
+      console.error("[admin/classes GET]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── POST /admin/classes ──────────────────────────────────────
+  if (path === "/admin/classes" && method === "POST") {
+    try {
+      const { class_name } = await req.json();
+      const { data, error } = await db
+        .from("classes")
+        .insert({ school_id: schoolId, class_name })
+        .select()
+        .single();
+      if (error) throw error;
+      return json({ message: "Class created", id: data.id }, 201);
+    } catch (err) {
+      console.error("[admin/classes POST]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  const adminClassMatch = path.match(/^\/admin\/classes\/(\d+)$/);
+  // ── PUT /admin/classes/:id ───────────────────────────────────
+  if (adminClassMatch && method === "PUT") {
+    const id = parseInt(adminClassMatch[1]);
+    try {
+      const { class_name } = await req.json();
+      await db.from("classes").update({ class_name }).eq("id", id).eq("school_id", schoolId);
+      return json({ message: "Class updated" });
+    } catch (err) {
+      console.error("[admin/classes PUT]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── DELETE /admin/classes/:id ────────────────────────────────
+  if (adminClassMatch && method === "DELETE") {
+    const id = parseInt(adminClassMatch[1]);
+    try {
+      await db.from("classes").delete().eq("id", id).eq("school_id", schoolId);
+      return json({ message: "Class deleted" });
+    } catch (err) {
+      console.error("[admin/classes DELETE]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── POST /admin/classes/:id/sections ─────────────────────────
+  const adminClassSectionsMatch = path.match(/^\/admin\/classes\/(\d+)\/sections$/);
+  if (adminClassSectionsMatch && method === "POST") {
+    const classId = parseInt(adminClassSectionsMatch[1]);
+    try {
+      const { section_name } = await req.json();
+      const { data, error } = await db
+        .from("sections")
+        .insert({ class_id: classId, section_name })
+        .select()
+        .single();
+      if (error) throw error;
+      return json({ message: "Section created", id: data.id }, 201);
+    } catch (err) {
+      console.error("[admin/classes/:id/sections POST]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── DELETE /admin/sections/:id ───────────────────────────────
+  const adminSectionDeleteMatch = path.match(/^\/admin\/sections\/(\d+)$/);
+  if (adminSectionDeleteMatch && method === "DELETE") {
+    const id = parseInt(adminSectionDeleteMatch[1]);
+    try {
+      await db.from("sections").delete().eq("id", id);
+      return json({ message: "Section deleted" });
+    } catch (err) {
+      console.error("[admin/sections DELETE]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── GET /admin/assignments ───────────────────────────────────
+  if (path === "/admin/assignments" && method === "GET") {
+    try {
+      const { data: teachers } = await db
+        .from("teachers")
+        .select("id")
+        .eq("school_id", schoolId);
+
+      if (!teachers?.length) return json([]);
+
+      const { data } = await db
+        .from("teacher_classes")
+        .select(
+          `id, teacher_id, class_id, section_id,
+           teachers!inner(first_name, last_name),
+           classes!inner(class_name),
+           sections!inner(section_name)`,
+        )
+        .in(
+          "teacher_id",
+          teachers.map((t: Record<string, unknown>) => t.id),
+        );
+
+      const result = (data || []).map((r: Record<string, unknown>) => ({
+        id: r.id,
+        teacher_id: r.teacher_id,
+        class_id: r.class_id,
+        section_id: r.section_id,
+        teacher_name: `${(r.teachers as Record<string, unknown>).first_name} ${(r.teachers as Record<string, unknown>).last_name}`,
+        class_name: (r.classes as Record<string, unknown>).class_name,
+        section_name: (r.sections as Record<string, unknown>).section_name,
+      }));
+      return json(result);
+    } catch (err) {
+      console.error("[admin/assignments GET]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── POST /admin/assignments ──────────────────────────────────
+  if (path === "/admin/assignments" && method === "POST") {
+    try {
+      const { teacher_id, class_id, section_id } = await req.json();
+      const { data, error } = await db
+        .from("teacher_classes")
+        .insert({ teacher_id, class_id, section_id })
+        .select()
+        .single();
+      if (error) {
+        if (error.code === "23505") return json({ message: "Assignment already exists" }, 409);
+        throw error;
+      }
+      return json({ message: "Assignment created", id: data.id }, 201);
+    } catch (err) {
+      console.error("[admin/assignments POST]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── DELETE /admin/assignments/:id ────────────────────────────
+  const assignmentDeleteMatch = path.match(/^\/admin\/assignments\/(\d+)$/);
+  if (assignmentDeleteMatch && method === "DELETE") {
+    const id = parseInt(assignmentDeleteMatch[1]);
+    try {
+      await db.from("teacher_classes").delete().eq("id", id);
+      return json({ message: "Assignment deleted" });
+    } catch (err) {
+      console.error("[admin/assignments DELETE]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── GET /admin/leaves ────────────────────────────────────────
+  if (path === "/admin/leaves" && method === "GET") {
+    try {
+      const statusFilter = url.searchParams.get("status");
+
+      // Get all student IDs for this school first
+      const { data: schoolStudents } = await db
+        .from("students")
+        .select("id")
+        .eq("school_id", schoolId);
+
+      const studentIds = (schoolStudents || []).map(
+        (s: Record<string, unknown>) => s.id as number,
+      );
+      if (!studentIds.length) return json([]);
+
+      let q = db
+        .from("leave_applications")
+        .select(
+          `id, group_id, student_id, date, reason, status, withdrawal_status, applied_at,
+           students!inner(first_name, last_name, roll_no, class_id, section_id,
+             classes!inner(class_name), sections!inner(section_name)
+           )`,
+        )
+        .in("student_id", studentIds)
+        .order("applied_at", { ascending: false });
+
+      if (statusFilter) q = q.eq("status", statusFilter);
+
+      const { data: leaves } = await q;
+
+      // Group by group_id
+      const grouped: Record<string, unknown> = {};
+      for (const row of leaves || []) {
+        const r = row as Record<string, unknown>;
+        const s = r.students as Record<string, unknown>;
+        const gid = r.group_id as string;
+        if (!grouped[gid]) {
+          grouped[gid] = {
+            group_id: gid,
+            student_id: r.student_id,
+            student_name: `${s.first_name} ${s.last_name}`,
+            roll_no: s.roll_no,
+            class_name: (s.classes as Record<string, unknown>).class_name,
+            section_name: (s.sections as Record<string, unknown>).section_name,
+            reason: r.reason,
+            status: r.status,
+            withdrawal_status: r.withdrawal_status,
+            dates: [],
+            applied_at: r.applied_at,
+          };
+        }
+        (grouped[gid] as Record<string, unknown[]>).dates.push(r.date as string);
+        const priority: Record<string, number> = { rejected: 0, approved: 1, pending: 2 };
+        const cur = (grouped[gid] as Record<string, unknown>).status as string;
+        const next = r.status as string;
+        if (priority[next] < priority[cur]) {
+          (grouped[gid] as Record<string, unknown>).status = next;
+        }
+      }
+
+      return json(Object.values(grouped));
+    } catch (err) {
+      console.error("[admin/leaves GET]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── PUT /admin/leaves/group/:id/status ───────────────────────
+  const adminLeaveStatusMatch = path.match(/^\/admin\/leaves\/group\/([^/]+)\/status$/);
+  if (adminLeaveStatusMatch && method === "PUT") {
+    const groupId = adminLeaveStatusMatch[1];
+    try {
+      const { status } = await req.json();
+      if (!["approved", "rejected"].includes(status))
+        return json({ message: "Invalid status" }, 400);
+
+      // Fetch the leave rows so we can mark attendance and notify
+      const { data: leaves } = await db
+        .from("leave_applications")
+        .select("id, student_id, date")
+        .eq("group_id", groupId);
+
+      if (!leaves?.length)
+        return json({ message: "Leave group not found" }, 404);
+
+      await db.from("leave_applications").update({ status }).eq("group_id", groupId);
+
+      const studentId = (leaves[0] as Record<string, unknown>).student_id as number;
+
+      if (status === "approved") {
+        // Lock attendance as 'leave' for each requested date
+        for (const leave of leaves) {
+          const l = leave as Record<string, unknown>;
+          await db.from("student_attendance").upsert(
+            { student_id: studentId, date: l.date, status: "leave" },
+            { onConflict: "student_id,date" },
+          );
+        }
+        tokensForStudents(db, [studentId]).then((tokens) =>
+          sendPush(tokens, "Leave Approved", "Your leave request has been approved by the admin.", { type: "leave" })
+        );
+      } else {
+        tokensForStudents(db, [studentId]).then((tokens) =>
+          sendPush(tokens, "Leave Rejected", "Your leave request has been rejected by the admin.", { type: "leave" })
+        );
+      }
+
+      return json({ message: "Status updated", count: leaves.length });
+    } catch (err) {
+      console.error("[admin/leaves/group/status]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  return json({ message: "Not found" }, 404);
+}

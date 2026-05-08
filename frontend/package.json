@@ -4,6 +4,7 @@
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "start": "cross-env REACT_NATIVE_PACKAGER_HOSTNAME=192.168.100.36 expo start --host lan",
+    "start:dev-client": "cross-env REACT_NATIVE_PACKAGER_HOSTNAME=192.168.100.36 expo start --dev-client --host lan",
     "android": "cross-env REACT_NATIVE_PACKAGER_HOSTNAME=192.168.100.36 expo start --android --host lan",
     "ios": "cross-env REACT_NATIVE_PACKAGER_HOSTNAME=192.168.100.36 expo start --ios --host lan",
     "web": "expo start --web --host lan"
@@ -11,13 +12,15 @@
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
     "@expo/vector-icons": "^15.0.3",
-    "@react-native-community/datetimepicker": "^9.1.0",
+    "@react-native-community/datetimepicker": "^8.4.4",
     "@react-native-picker/picker": "^2.11.1",
     "@react-navigation/bottom-tabs": "^6.5.20",
     "@react-navigation/native": "^6.1.17",
     "@react-navigation/native-stack": "^6.9.26",
+    "@supabase/supabase-js": "^2.105.4",
     "axios": "^1.7.2",
     "expo": "~54.0.0",
+    "expo-dev-client": "~6.0.21",
     "expo-document-picker": "~14.0.8",
     "expo-file-system": "~19.0.22",
     "expo-image-picker": "~17.0.11",

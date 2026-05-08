@@ -2,6 +2,7 @@
   "expo": {
     "name": "Attendance Management",
     "slug": "attendance-app",
+    "scheme": "attendance-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
