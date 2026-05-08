@@ -127,45 +127,36 @@ export default function HomeScreen({ navigation }) {
         {/* Subtle decorative circle */}
         <View style={styles.headerDeco} pointerEvents="none" />
 
-        {/* ── Row 1: School info + Sign Out ── */}
-        <View style={styles.schoolRow}>
-          <View style={styles.schoolLeft}>
-            {school?.logo_url
-              ? <Image source={{ uri: school.logo_url }} style={styles.schoolLogo} resizeMode="contain" />
-              : <View style={styles.schoolLogoFallback}><Text style={styles.schoolLogoText}>{initials}</Text></View>
-            }
-            <View style={{ flex: 1 }}>
+        <View style={styles.headerRow}>
+          <View style={{ flex: 1 }}>
+            {/* School logo + name */}
+            <View style={styles.schoolRow}>
+              {school?.logo_url
+                ? <Image source={{ uri: school.logo_url }} style={styles.schoolLogo} resizeMode="contain" />
+                : <View style={styles.schoolLogoFallback}><Text style={styles.schoolLogoText}>{initials}</Text></View>
+              }
               <Text style={styles.schoolName} numberOfLines={1}>{schoolName}</Text>
-              <Text style={styles.schoolSub}  numberOfLines={1}>{schoolSub}</Text>
+            </View>
+
+            {/* Teacher name + greeting */}
+            <Text style={styles.greetTxt}>{greet()}, {teacher.first_name} {teacher.last_name}</Text>
+
+            {/* Role badge + date on same line */}
+            <View style={styles.metaRow}>
+              {teacherRole && ROLE_CFG[teacherRole] && (
+                <View style={[styles.rolePill, { backgroundColor: ROLE_CFG[teacherRole].bg }]}>
+                  <Text style={[styles.roleTxt, { color: ROLE_CFG[teacherRole].color }]}>
+                    {ROLE_CFG[teacherRole].label}
+                  </Text>
+                </View>
+              )}
+              <Text style={styles.dateTxt} numberOfLines={1}>{todayLabel}</Text>
             </View>
           </View>
+
           <Pressable onPress={logout} style={({ pressed }) => [styles.signOutBtn, pressed && { opacity: 0.7 }]}>
             <Text style={styles.signOutTxt}>Sign Out</Text>
           </Pressable>
-        </View>
-
-        {/* Thin divider */}
-        <View style={styles.headerDivider} />
-
-        {/* ── Row 2: Teacher info ── */}
-        <View style={styles.teacherRow}>
-          <View style={styles.teacherAvatar}>
-            <Text style={styles.teacherAvatarTxt}>
-              {(teacher.first_name?.[0] || '') + (teacher.last_name?.[0] || '')}
-            </Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.greetTxt}>{greet()} 👋</Text>
-            <Text style={styles.teacherName}>{teacher.first_name} {teacher.last_name}</Text>
-            <Text style={styles.dateTxt}>{todayLabel}</Text>
-          </View>
-          {teacherRole && ROLE_CFG[teacherRole] && (
-            <View style={[styles.rolePill, { backgroundColor: ROLE_CFG[teacherRole].bg }]}>
-              <Text style={[styles.roleTxt, { color: ROLE_CFG[teacherRole].color }]}>
-                {ROLE_CFG[teacherRole].label}
-              </Text>
-            </View>
-          )}
         </View>
       </LinearGradient>
 
@@ -296,45 +287,43 @@ const styles = StyleSheet.create({
   },
   headerDeco: { position: 'absolute', width: 200, height: 200, borderRadius: 100, backgroundColor: 'rgba(255,255,255,0.05)', top: -70, right: -50 },
 
-  // School row
-  schoolRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  schoolLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, marginRight: 10 },
-  schoolLogo: { width: 42, height: 42, borderRadius: 10 },
+  // Header
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
+
+  // School row inside header
+  schoolRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  schoolLogo: { width: 36, height: 36, borderRadius: 8 },
   schoolLogoFallback: {
-    width: 42, height: 42, borderRadius: 10,
+    width: 36, height: 36, borderRadius: 8,
     backgroundColor: 'rgba(255,255,255,0.18)',
     justifyContent: 'center', alignItems: 'center',
   },
-  schoolLogoText: { color: '#fff', fontSize: 15, fontWeight: '900', letterSpacing: 0.5 },
-  schoolName: { color: '#BFDBFE', fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
-  schoolSub:  { color: 'rgba(191,219,254,0.7)', fontSize: 11, marginTop: 1 },
+  schoolLogoText: { color: '#fff', fontSize: 13, fontWeight: '900', letterSpacing: 0.5 },
+  schoolName: { color: '#BFDBFE', fontSize: 14, fontWeight: '700', flex: 1 },
+
+  // Teacher greeting line — always single line
+  greetTxt: {
+    color: '#fff', fontSize: 17, fontWeight: '800',
+    numberOfLines: 1, flexShrink: 1,
+  },
+
+  // Meta row: role pill + date
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' },
+  dateTxt: { color: 'rgba(191,219,254,0.65)', fontSize: 11, flexShrink: 1 },
+
+  rolePill: {
+    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4,
+    alignItems: 'center',
+  },
+  roleTxt: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
+
   signOutBtn: {
     paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
     backgroundColor: 'rgba(255,255,255,0.12)',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)',
+    marginLeft: 10,
   },
   signOutTxt: { color: '#BFDBFE', fontSize: 12, fontWeight: '600' },
-
-  // Divider
-  headerDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginVertical: 16 },
-
-  // Teacher row
-  teacherRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  teacherAvatar: {
-    width: 50, height: 50, borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    justifyContent: 'center', alignItems: 'center',
-    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.25)',
-  },
-  teacherAvatarTxt: { color: '#fff', fontSize: 16, fontWeight: '900' },
-  greetTxt:    { color: 'rgba(191,219,254,0.9)', fontSize: 12, fontWeight: '500' },
-  teacherName: { color: '#fff', fontSize: 18, fontWeight: '800', marginTop: 1 },
-  dateTxt:     { color: 'rgba(191,219,254,0.5)', fontSize: 11, marginTop: 2 },
-  rolePill: {
-    borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6,
-    alignItems: 'center',
-  },
-  roleTxt: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
 
   // ── Section labels ───────────────────────────────────────────
   section: { marginHorizontal: 16, marginTop: 20 },

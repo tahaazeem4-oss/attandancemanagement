@@ -248,3 +248,254 @@ exports.getMe = async (req, res) => {
     return res.status(500).json({ message: 'Server error' });
   }
 };
+
+// ── POST /api/auth/forgot-password/request ───────────────────
+// Accepts an email, finds the user across all 4 role tables, generates a
+// 6-digit OTP, stores its bcrypt hash in password_reset_codes, and emails it.
+// Always returns 200 with the same message to avoid leaking whether an
+// email is registered.
+exports.requestPasswordReset = async (req, res) => {
+  const { email } = req.body;
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim()))
+    return res.status(400).json({ message: 'A valid email address is required.' });
+
+  const e  = String(email).trim().toLowerCase();
+  const ip = req.ip || '';
+  const ua = req.headers['user-agent'] || '';
+
+  const SAFE_MSG = 'If an account exists with this email, a verification code has been sent.';
+
+  try {
+    // Rate-limit: max 3 requests per 10 minutes per email
+    const [recent] = await db.query(
+      `SELECT COUNT(*) AS cnt FROM password_reset_codes
+       WHERE email = ? AND created_at > NOW() - INTERVAL '10 minutes'`,
+      [e]
+    );
+    if (parseInt(recent[0].cnt, 10) >= 3)
+      return res.status(429).json({ message: 'Too many requests. Please wait 10 minutes before trying again.' });
+
+    // Locate the user across all role tables to get their first name
+    let firstName = null;
+    let foundRole = null;
+
+    const [sa] = await db.query('SELECT first_name FROM super_admins WHERE email = ?', [e]);
+    if (sa.length) { firstName = sa[0].first_name; foundRole = 'super_admin'; }
+
+    if (!foundRole) {
+      const [ad] = await db.query('SELECT first_name FROM admins WHERE email = ?', [e]);
+      if (ad.length) { firstName = ad[0].first_name; foundRole = 'admin'; }
+    }
+    if (!foundRole) {
+      const [te] = await db.query('SELECT first_name FROM teachers WHERE email = ?', [e]);
+      if (te.length) { firstName = te[0].first_name; foundRole = 'teacher'; }
+    }
+    if (!foundRole) {
+      const [st] = await db.query(
+        `SELECT s.first_name FROM student_accounts sa
+         JOIN students s ON s.id = sa.student_id
+         WHERE sa.email = ?`,
+        [e]
+      );
+      if (st.length) { firstName = st[0].first_name; foundRole = 'student'; }
+    }
+
+    // Email not found — return same success message for security
+    if (!foundRole) return res.json({ message: SAFE_MSG });
+
+    // Generate 6-digit OTP and hash it
+    const code      = String(Math.floor(100000 + Math.random() * 900000));
+    const codeHash  = await bcrypt.hash(code, 10);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+
+    await db.query(
+      `INSERT INTO password_reset_codes
+         (email, role, code_hash, expires_at, requested_ip, requested_user_agent)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [e, foundRole, codeHash, expiresAt.toISOString(), ip, ua]
+    );
+
+    // Send the email — log failure but don't reject the request
+    try {
+      const { sendPasswordResetCodeEmail } = require('../services/emailService');
+      await sendPasswordResetCodeEmail({ to: e, firstName, code, expiresMinutes: 10 });
+    } catch (emailErr) {
+      console.error('[ForgotPassword] Email send failed:', emailErr.message);
+    }
+
+    return res.json({ message: SAFE_MSG });
+  } catch (err) {
+    console.error('requestPasswordReset error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ── POST /api/auth/forgot-password/verify ───────────────────
+// Validates the 6-digit OTP. On success marks the record as verified and
+// returns a short-lived reset_token JWT (15 min) for the reset step.
+exports.verifyPasswordResetCode = async (req, res) => {
+  const { email, code } = req.body;
+  if (!email || !code)
+    return res.status(400).json({ message: 'Email and code are required.' });
+
+  const e           = String(email).trim().toLowerCase();
+  const cleanedCode = String(code).trim();
+
+  try {
+    // Find most recent unexpired, unused record
+    const [rows] = await db.query(
+      `SELECT * FROM password_reset_codes
+       WHERE email = ? AND is_used = false AND expires_at > NOW()
+       ORDER BY created_at DESC LIMIT 1`,
+      [e]
+    );
+
+    if (!rows.length)
+      return res.status(400).json({ message: 'Invalid or expired verification code.' });
+
+    const record = rows[0];
+
+    if (record.attempts >= record.max_attempts)
+      return res.status(400).json({ message: 'Too many failed attempts. Please request a new code.' });
+
+    // Increment attempts before checking — prevents timing-based enumeration
+    await db.query(
+      'UPDATE password_reset_codes SET attempts = attempts + 1 WHERE id = ?',
+      [record.id]
+    );
+
+    const valid = await bcrypt.compare(cleanedCode, record.code_hash);
+    if (!valid) {
+      const remaining = record.max_attempts - record.attempts - 1;
+      return res.status(400).json({
+        message: remaining > 0
+          ? `Invalid code. ${remaining} attempt${remaining !== 1 ? 's' : ''} remaining.`
+          : 'Too many failed attempts. Please request a new code.',
+      });
+    }
+
+    // Mark the record as verified
+    await db.query(
+      'UPDATE password_reset_codes SET verified_at = NOW() WHERE id = ?',
+      [record.id]
+    );
+
+    // Issue a 15-minute reset token
+    const reset_token = jwt.sign(
+      { reset_id: record.id, email: e, role: record.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '15m' }
+    );
+
+    return res.json({ reset_token });
+  } catch (err) {
+    console.error('verifyPasswordResetCode error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ── POST /api/auth/forgot-password/reset ────────────────────
+// Accepts a reset_token (from /verify) and a new password.
+// Updates the correct role table and marks the OTP record as used.
+exports.resetPassword = async (req, res) => {
+  const { reset_token, new_password } = req.body;
+  if (!reset_token || !new_password)
+    return res.status(400).json({ message: 'reset_token and new_password are required.' });
+  if (String(new_password).length < 6)
+    return res.status(400).json({ message: 'Password must be at least 6 characters.' });
+
+  let payload;
+  try {
+    payload = jwt.verify(reset_token, process.env.JWT_SECRET);
+  } catch {
+    return res.status(400).json({ message: 'Reset link has expired. Please request a new code.' });
+  }
+
+  const { reset_id, email, role } = payload;
+
+  try {
+    // The record must be verified but not yet used
+    const [rows] = await db.query(
+      `SELECT id FROM password_reset_codes
+       WHERE id = ? AND is_used = false AND verified_at IS NOT NULL`,
+      [reset_id]
+    );
+    if (!rows.length)
+      return res.status(400).json({ message: 'This reset link has already been used. Please request a new code.' });
+
+    const hashed = await bcrypt.hash(String(new_password), 12);
+
+    if (role === 'super_admin') {
+      await db.query('UPDATE super_admins SET password = ? WHERE email = ?', [hashed, email]);
+    } else if (role === 'admin') {
+      await db.query('UPDATE admins SET password = ? WHERE email = ?', [hashed, email]);
+    } else if (role === 'teacher') {
+      await db.query('UPDATE teachers SET password = ? WHERE email = ?', [hashed, email]);
+    } else if (role === 'student') {
+      await db.query('UPDATE student_accounts SET password = ? WHERE email = ?', [hashed, email]);
+    } else {
+      return res.status(400).json({ message: 'Invalid role in token.' });
+    }
+
+    // Mark the OTP record as consumed
+    await db.query(
+      'UPDATE password_reset_codes SET is_used = true, used_at = NOW() WHERE id = ?',
+      [reset_id]
+    );
+
+    return res.json({ message: 'Password updated successfully. You can now sign in with your new password.' });
+  } catch (err) {
+    console.error('resetPassword error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ── PUT /api/auth/change-password ────────────────────────────
+// Allows a logged-in user to change their password by supplying the
+// correct current password. Works for all 4 roles.
+exports.changePassword = async (req, res) => {
+  const { old_password, new_password } = req.body;
+  if (!old_password || !new_password)
+    return res.status(400).json({ message: 'old_password and new_password are required.' });
+  if (String(new_password).length < 6)
+    return res.status(400).json({ message: 'New password must be at least 6 characters.' });
+
+  const u = req.user;
+
+  try {
+    let currentHash = null;
+    let table = null;
+
+    if (u.role === 'super_admin') {
+      const [rows] = await db.query('SELECT password FROM super_admins WHERE id = ?', [u.id]);
+      if (!rows.length) return res.status(404).json({ message: 'User not found.' });
+      currentHash = rows[0].password; table = 'super_admins';
+    } else if (u.role === 'admin') {
+      const [rows] = await db.query('SELECT password FROM admins WHERE id = ?', [u.id]);
+      if (!rows.length) return res.status(404).json({ message: 'User not found.' });
+      currentHash = rows[0].password; table = 'admins';
+    } else if (u.role === 'teacher') {
+      const [rows] = await db.query('SELECT password FROM teachers WHERE id = ?', [u.id]);
+      if (!rows.length) return res.status(404).json({ message: 'User not found.' });
+      currentHash = rows[0].password; table = 'teachers';
+    } else if (u.role === 'student') {
+      const [rows] = await db.query('SELECT password FROM student_accounts WHERE id = ?', [u.id]);
+      if (!rows.length) return res.status(404).json({ message: 'User not found.' });
+      currentHash = rows[0].password; table = 'student_accounts';
+    } else {
+      return res.status(400).json({ message: 'Unknown role.' });
+    }
+
+    const valid = await bcrypt.compare(String(old_password), currentHash);
+    if (!valid)
+      return res.status(401).json({ message: 'Current password is incorrect.' });
+
+    const hashed = await bcrypt.hash(String(new_password), 12);
+    await db.query(`UPDATE ${table} SET password = ? WHERE id = ?`, [hashed, u.id]);
+
+    return res.json({ message: 'Password changed successfully.' });
+  } catch (err) {
+    console.error('changePassword error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};

@@ -60,11 +60,7 @@ export default function LoginScreen({ navigation }) {
   };
 
   const handleForgotPassword = () => {
-    Alert.alert(
-      'Reset Password',
-      'Please contact your school administrator to reset your password.',
-      [{ text: 'OK' }]
-    );
+    navigation.navigate('ForgotPassword', { email: email.trim() });
   };
 
   return (
