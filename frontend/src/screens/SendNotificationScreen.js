@@ -36,18 +36,21 @@ function timeAgo(iso) {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-export default function SendNotificationScreen({ navigation }) {
+export default function SendNotificationScreen({ navigation, route }) {
+  // Prefill from navigation (e.g. from ReportScreen)
+  const prefill = route?.params?.prefill || null;
+
   // Class data for pickers
   const [classes,   setClasses]   = useState([]);
   const [sections,  setSections]  = useState([]);
   const [students,  setStudents]  = useState([]);
 
-  // Form state
-  const [target,    setTarget]    = useState('school');
-  const [classId,   setClassId]   = useState('');
-  const [sectionId, setSectionId] = useState('');
-  const [studentId, setStudentId] = useState('');
-  const [studentName, setStudentName] = useState('');
+  // Form state — seed from prefill if provided
+  const [target,    setTarget]    = useState(prefill ? 'student' : 'school');
+  const [classId,   setClassId]   = useState(prefill ? String(prefill.class_id) : '');
+  const [sectionId, setSectionId] = useState(prefill ? String(prefill.section_id) : '');
+  const [studentId, setStudentId] = useState(prefill ? String(prefill.student_id) : '');
+  const [studentName, setStudentName] = useState(prefill ? prefill.student_name : '');
   const [category,  setCategory]  = useState('general');
   const [title,     setTitle]     = useState('');
   const [message,   setMessage]   = useState('');
@@ -128,14 +131,18 @@ export default function SendNotificationScreen({ navigation }) {
         message: message.trim(),
       });
 
-      Alert.alert('Sent ✅', 'Notification sent successfully');
+      Alert.alert('Sent \u2705', 'Notification sent successfully', [
+        { text: 'OK', onPress: () => { if (prefill) navigation.goBack(); } },
+      ]);
       setTitle('');
       setMessage('');
-      setClassId('');
-      setSectionId('');
-      setStudentId('');
-      setStudentName('');
-      setTarget('school');
+      if (!prefill) {
+        setClassId('');
+        setSectionId('');
+        setStudentId('');
+        setStudentName('');
+        setTarget('school');
+      }
       setCategory('general');
       loadSent();
     } catch (err) {
@@ -232,23 +239,36 @@ export default function SendNotificationScreen({ navigation }) {
           // ── Compose Form ──────────────────────────────────
           <View style={styles.body}>
 
-            {/* Target Type */}
-            <Text style={styles.label}>Send To *</Text>
-            <View style={styles.targetGrid}>
-              {TARGETS.map(t => (
-                <Pressable
-                  key={t.value}
-                  style={[styles.targetCard, target === t.value && styles.targetCardActive]}
-                  onPress={() => { setTarget(t.value); setClassId(''); setSectionId(''); setStudentId(''); setStudentName(''); }}
-                >
-                  <Text style={[styles.targetLabel, target === t.value && styles.targetLabelActive]}>{t.label}</Text>
-                  <Text style={styles.targetDesc}>{t.desc}</Text>
-                </Pressable>
-              ))}
-            </View>
+            {/* Target Type — hidden when prefilled */}
+            {!prefill && (
+              <>
+                <Text style={styles.label}>Send To *</Text>
+                <View style={styles.targetGrid}>
+                  {TARGETS.map(t => (
+                    <Pressable
+                      key={t.value}
+                      style={[styles.targetCard, target === t.value && styles.targetCardActive]}
+                      onPress={() => { setTarget(t.value); setClassId(''); setSectionId(''); setStudentId(''); setStudentName(''); }}
+                    >
+                      <Text style={[styles.targetLabel, target === t.value && styles.targetLabelActive]}>{t.label}</Text>
+                      <Text style={styles.targetDesc}>{t.desc}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </>
+            )}
 
-            {/* Class picker (class / section / student targets) */}
-            {(target === 'class' || target === 'section' || target === 'student') && (
+            {/* Prefill locked banner */}
+            {prefill && (
+              <View style={styles.prefillBanner}>
+                <Text style={styles.prefillBannerLabel}>Sending to student</Text>
+                <Text style={styles.prefillBannerName}>👤 {prefill.student_name}</Text>
+                <Text style={styles.prefillBannerSub}>{prefill.class_name}  •  Section {prefill.section_name}</Text>
+              </View>
+            )}
+
+            {/* Class picker (class / section / student targets) — hidden when prefilled */}
+            {!prefill && (target === 'class' || target === 'section' || target === 'student') && (
               <>
                 <Text style={styles.label}>Class *</Text>
                 {loadingCls
@@ -266,8 +286,8 @@ export default function SendNotificationScreen({ navigation }) {
               </>
             )}
 
-            {/* Section picker (section / student targets) */}
-            {(target === 'section' || target === 'student') && classId && (
+            {/* Section picker — hidden when prefilled */}
+            {!prefill && (target === 'section' || target === 'student') && classId && (
               <>
                 <Text style={styles.label}>Section {target === 'section' ? '*' : ''}</Text>
                 <PickerField
@@ -280,8 +300,8 @@ export default function SendNotificationScreen({ navigation }) {
               </>
             )}
 
-            {/* Student picker */}
-            {target === 'student' && classId && (
+            {/* Student picker — hidden when prefilled */}
+            {!prefill && target === 'student' && classId && (
               <>
                 <Text style={styles.label}>Student *</Text>
                 {loadingStu
@@ -415,6 +435,12 @@ const styles = StyleSheet.create({
   previewBox:    { backgroundColor: C.primaryLight, borderRadius: 12, padding: 14, marginTop: 18 },
   previewLabel:  { fontSize: 11, fontWeight: '700', color: C.primary, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
   previewAudience: { fontSize: 14, color: C.primaryDark, fontWeight: '600' },
+
+  // Prefill locked banner
+  prefillBanner:     { backgroundColor: C.primaryLight, borderRadius: 14, padding: 16, marginTop: 10, marginBottom: 4, borderWidth: 1.5, borderColor: '#BFDBFE' },
+  prefillBannerLabel:{ fontSize: 11, fontWeight: '700', color: C.primary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 },
+  prefillBannerName: { fontSize: 17, fontWeight: '900', color: C.textDark, marginBottom: 2 },
+  prefillBannerSub:  { fontSize: 13, color: C.textMed, fontWeight: '600' },
 
   // Send button
   sendBtn:       { marginTop: 24, backgroundColor: C.primary, borderRadius: 14, paddingVertical: 15, alignItems: 'center', elevation: 4, shadowColor: C.primary, shadowOpacity: 0.3, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } },

@@ -20,8 +20,9 @@ const CARDS = [
   { key: 'SendNotification', icon: 'notifications-outline', label: 'Notifications',  tint: '#8B5CF6', bg: '#F5F3FF' },
   { key: 'UploadLecture',      icon: 'cloud-upload-outline',  label: 'Upload',         tint: '#0891B2', bg: '#F0F9FF' },
   { key: 'LectureList',        icon: 'videocam-outline',      label: 'Lectures',       tint: '#2563EB', bg: '#EFF6FF' },
-  { key: 'AdminSubjects',      icon: 'book-outline',          label: 'Subjects',       tint: '#7C3AED', bg: '#F5F3FF' },
-  { key: 'StaffNotifications', icon: 'notifications',         label: 'My Inbox',       tint: '#8B5CF6', bg: '#F5F3FF' },
+  { key: 'AdminSubjects',           icon: 'book-outline',          label: 'Subjects',         tint: '#7C3AED', bg: '#F5F3FF' },
+  { key: 'StaffNotifications',      icon: 'notifications',         label: 'My Inbox',         tint: '#8B5CF6', bg: '#F5F3FF' },
+  { key: 'AdminTeacherAttendance',  icon: 'calendar-outline',      label: 'Teacher Report',   tint: '#10B981', bg: '#ECFDF5' },
 ];
 
 export default function AdminHomeScreen({ navigation }) {

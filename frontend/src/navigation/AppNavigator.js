@@ -25,6 +25,7 @@ import StudentAttendanceScreen from '../screens/StudentAttendanceScreen';
 import AddStudentScreen        from '../screens/AddStudentScreen';
 import ReportScreen            from '../screens/ReportScreen';
 import TeacherLeavesScreen     from '../screens/TeacherLeavesScreen';
+import StudentAttendanceDetailScreen from '../screens/StudentAttendanceDetailScreen';
 
 // Admin screens
 import AdminHomeScreen        from '../screens/admin/AdminHomeScreen';
@@ -33,7 +34,8 @@ import AdminStudentsScreen    from '../screens/admin/AdminStudentsScreen';
 import AdminClassesScreen     from '../screens/admin/AdminClassesScreen';
 import AdminAssignmentsScreen from '../screens/admin/AdminAssignmentsScreen';
 import AdminLeavesScreen      from '../screens/admin/AdminLeavesScreen';
-import AdminSubjectsScreen    from '../screens/admin/AdminSubjectsScreen';
+import AdminSubjectsScreen                from '../screens/admin/AdminSubjectsScreen';
+import AdminTeacherAttendanceScreen       from '../screens/admin/AdminTeacherAttendanceScreen';
 
 // Super admin screens
 import SuperAdminHomeScreen     from '../screens/superadmin/SuperAdminHomeScreen';
@@ -98,6 +100,7 @@ function TeacherHomeStack() {
       <Stack.Screen name="AddStudent"        component={AddStudentScreen}        options={{ title: 'Add Student' }} />
       <Stack.Screen name="TeacherLeaves"     component={TeacherLeavesScreen}     options={{ title: 'Leave Requests', headerShown: false }} />
       <Stack.Screen name="Report"            component={ReportScreen}            options={{ headerShown: false }} />
+      <Stack.Screen name="StudentAttendanceDetail" component={StudentAttendanceDetailScreen} options={{ headerShown: false }} />
       <Stack.Screen name="UploadLecture"     component={UploadLectureScreen}     options={{ headerShown: false }} />
       <Stack.Screen name="LectureList"       component={LectureListScreen}       options={{ headerShown: false }} />
       <Stack.Screen name="SendNotification"     component={SendNotificationScreen}     options={{ headerShown: false }} />
@@ -144,8 +147,11 @@ function AdminHomeStack() {
       <Stack.Screen name="SendNotification" component={SendNotificationScreen} options={{ headerShown: false }} />
       <Stack.Screen name="UploadLecture"    component={UploadLectureScreen}    options={{ headerShown: false }} />
       <Stack.Screen name="LectureList"      component={LectureListScreen}      options={{ headerShown: false }} />
-      <Stack.Screen name="AdminSubjects"      component={AdminSubjectsScreen}      options={{ headerShown: false }} />
-      <Stack.Screen name="StaffNotifications" component={StaffNotificationsScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="AdminSubjects"           component={AdminSubjectsScreen}           options={{ headerShown: false }} />
+      <Stack.Screen name="StaffNotifications"       component={StaffNotificationsScreen}       options={{ headerShown: false }} />
+      <Stack.Screen name="AdminTeacherAttendance"   component={AdminTeacherAttendanceScreen}   options={{ headerShown: false }} />
+      <Stack.Screen name="Report"                    component={ReportScreen}                    options={{ headerShown: false }} />
+      <Stack.Screen name="StudentAttendanceDetail"   component={StudentAttendanceDetailScreen}   options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }

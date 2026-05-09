@@ -10,7 +10,7 @@
  */
 
 import React from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, Image } from 'react-native';
 
 export function LogoMark({ size = 52, variant = 'blue' }) {
   const bg        = variant === 'white' ? '#fff'
@@ -61,18 +61,22 @@ export function LogoMark({ size = 52, variant = 'blue' }) {
 }
 
 /**
- * Stacked hero block: large mark + app name + tagline
+ * Stacked hero block: app icon image + app name + tagline
  * Used at the top of LoginScreen and SignUpScreen.
  */
 export function LogoHero({ markSize = 72, nameColor = '#fff', tagColor = 'rgba(255,255,255,0.60)' }) {
   return (
     <View style={{ alignItems: 'center' }}>
-      <LogoMark size={markSize} variant="white" />
+      <Image
+        source={require('../../assets/icon.png')}
+        style={{ width: markSize * 1.4, height: markSize * 1.4, borderRadius: markSize * 0.28 }}
+        resizeMode="contain"
+      />
       <Text style={{
         fontSize: 28, fontWeight: '800', color: nameColor,
         marginTop: 14, letterSpacing: 0.3,
       }}>
-        EduTrack
+        EdTrack
       </Text>
       <Text style={{
         fontSize: 13, color: tagColor,
