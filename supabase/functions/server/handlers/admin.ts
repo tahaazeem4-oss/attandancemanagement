@@ -240,6 +240,18 @@ export async function handleAdmin(
   if (path === "/admin/students" && method === "POST") {
     try {
       const body = await req.json();
+      // Enforce roll_no uniqueness within school+class+section
+      if (body.roll_no && body.class_id && body.section_id) {
+        const { data: dup } = await db
+          .from("students")
+          .select("id")
+          .eq("school_id", schoolId)
+          .eq("class_id", body.class_id)
+          .eq("section_id", body.section_id)
+          .eq("roll_no", body.roll_no);
+        if (dup?.length)
+          return json({ message: `Roll number ${body.roll_no} is already taken in this class/section.` }, 409);
+      }
       const { data, error } = await db
         .from("students")
         .insert({ school_id: schoolId, ...body, roll_no: body.roll_no || null })
@@ -254,11 +266,24 @@ export async function handleAdmin(
   }
 
   const studentMatch = path.match(/^\/admin\/students\/(\d+)$/);
-  // ── PUT /admin/students/:id ──────────────────────────────────
+  // ── PUT /admin/students/:id ────────────────────────────────
   if (studentMatch && method === "PUT") {
     const id = parseInt(studentMatch[1]);
     try {
       const body = await req.json();
+      // Enforce roll_no uniqueness (exclude self)
+      if (body.roll_no && body.class_id && body.section_id) {
+        const { data: dup } = await db
+          .from("students")
+          .select("id")
+          .eq("school_id", schoolId)
+          .eq("class_id", body.class_id)
+          .eq("section_id", body.section_id)
+          .eq("roll_no", body.roll_no)
+          .neq("id", id);
+        if (dup?.length)
+          return json({ message: `Roll number ${body.roll_no} is already taken in this class/section.` }, 409);
+      }
       await db
         .from("students")
         .update({ ...body, roll_no: body.roll_no || null })
@@ -592,6 +617,68 @@ export async function handleAdmin(
       return json({ message: "Status updated", count: leaves.length });
     } catch (err) {
       console.error("[admin/leaves/group/status]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── GET /admin/teacher-attendance ───────────────────────────
+  // Query params: teacher_id (optional), year, month
+  // Returns rows grouped by teacher, with per-day status + summary counts
+  if (path === "/admin/teacher-attendance" && method === "GET") {
+    try {
+      const teacherId  = url.searchParams.get("teacher_id");
+      const year       = parseInt(url.searchParams.get("year")  || String(new Date().getFullYear()));
+      const month      = parseInt(url.searchParams.get("month") || String(new Date().getMonth() + 1));
+
+      const from = `${year}-${String(month).padStart(2, "0")}-01`;
+      const toDate = new Date(year, month, 0); // last day of month
+      const to   = `${year}-${String(month).padStart(2, "0")}-${String(toDate.getDate()).padStart(2, "0")}`;
+
+      // Fetch teachers for this school
+      let tq = db.from("teachers").select("id, first_name, last_name, email, phone").eq("school_id", schoolId).order("last_name");
+      if (teacherId) tq = tq.eq("id", teacherId);
+      const { data: teachers } = await tq;
+      if (!teachers?.length) return json([]);
+
+      const teacherIds = teachers.map((t: Record<string, unknown>) => t.id as number);
+
+      // Fetch attendance records for these teachers in the month
+      const { data: records } = await db
+        .from("teacher_attendance")
+        .select("teacher_id, date, status, check_in")
+        .in("teacher_id", teacherIds)
+        .gte("date", from)
+        .lte("date", to)
+        .order("date");
+
+      // Group by teacher
+      const recMap: Record<number, Record<string, unknown>[]> = {};
+      for (const r of records || []) {
+        const row = r as Record<string, unknown>;
+        const tid = row.teacher_id as number;
+        if (!recMap[tid]) recMap[tid] = [];
+        recMap[tid].push(row);
+      }
+
+      const result = teachers.map((t: Record<string, unknown>) => {
+        const days = recMap[t.id as number] || [];
+        const present = days.filter((d) => d.status === "present").length;
+        const absent  = days.filter((d) => d.status === "absent").length;
+        const leave   = days.filter((d) => d.status === "leave").length;
+        return {
+          id:         t.id,
+          first_name: t.first_name,
+          last_name:  t.last_name,
+          email:      t.email,
+          phone:      t.phone,
+          summary: { present, absent, leave, total: days.length },
+          days,
+        };
+      });
+
+      return json(result);
+    } catch (err) {
+      console.error("[admin/teacher-attendance GET]", err);
       return json({ message: "Server error" }, 500);
     }
   }

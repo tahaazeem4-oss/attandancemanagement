@@ -187,8 +187,8 @@ function SuperAdminHomeStack() {
     <Stack.Navigator screenOptions={headerStyle}>
       <Stack.Screen name="SuperAdminHome"     component={SuperAdminHomeScreen}     options={{ headerShown: false }} />
       <Stack.Screen name="SuperAdminSchools"  component={SuperAdminSchoolsScreen}  options={{ title: 'Manage Schools' }} />
-      <Stack.Screen name="SuperAdminTeachers" component={SuperAdminTeachersScreen} options={{ title: 'Manage Teachers' }} />
-      <Stack.Screen name="SuperAdminStudents"  component={SuperAdminStudentsScreen}  options={{ title: 'Manage Students' }} />
+      <Stack.Screen name="SuperAdminTeachers" component={SuperAdminTeachersScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="SuperAdminStudents"  component={SuperAdminStudentsScreen}  options={{ headerShown: false }} />
       <Stack.Screen name="StaffNotifications"  component={StaffNotificationsScreen}  options={{ headerShown: false }} />
     </Stack.Navigator>
   );

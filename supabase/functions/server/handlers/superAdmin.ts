@@ -23,19 +23,88 @@ export async function handleSuperAdmin(
   if (path === "/super-admin/stats" && method === "GET") {
     try {
       const [
+        { count: organizations },
         { count: schools },
         { count: admins },
         { count: teachers },
         { count: students },
       ] = await Promise.all([
+        db.from("organizations").select("*", { count: "exact", head: true }),
         db.from("schools").select("*", { count: "exact", head: true }),
         db.from("admins").select("*", { count: "exact", head: true }),
         db.from("teachers").select("*", { count: "exact", head: true }),
         db.from("students").select("*", { count: "exact", head: true }),
       ]);
-      return json({ schools, admins, teachers, students });
+      return json({ organizations, campuses: schools, schools: organizations, admins, teachers, students });
     } catch (err) {
       console.error("[super-admin/stats]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── GET /super-admin/organizations ───────────────────────────
+  if (path === "/super-admin/organizations" && method === "GET") {
+    try {
+      const { data, error } = await db
+        .from("organizations")
+        .select("id, name, created_at")
+        .order("name");
+      if (error) throw error;
+      return json(data || []);
+    } catch (err) {
+      console.error("[super-admin/organizations GET]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── POST /super-admin/organizations ──────────────────────────
+  if (path === "/super-admin/organizations" && method === "POST") {
+    try {
+      const { name } = await req.json();
+      if (!name?.trim()) return json({ message: "Organization name is required" }, 400);
+      const { data, error } = await db
+        .from("organizations")
+        .insert({ name: name.trim() })
+        .select()
+        .single();
+      if (error) throw error;
+      return json({ message: "Organization created", id: data.id }, 201);
+    } catch (err) {
+      console.error("[super-admin/organizations POST]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  const orgMatch = path.match(/^\/super-admin\/organizations\/(\d+)$/);
+
+  // ── PUT /super-admin/organizations/:id ───────────────────────
+  if (orgMatch && method === "PUT") {
+    const id = parseInt(orgMatch[1]);
+    try {
+      const { name } = await req.json();
+      if (!name?.trim()) return json({ message: "Organization name is required" }, 400);
+      await db.from("organizations").update({ name: name.trim() }).eq("id", id);
+      return json({ message: "Organization updated" });
+    } catch (err) {
+      console.error("[super-admin/organizations PUT]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── DELETE /super-admin/organizations/:id ────────────────────
+  if (orgMatch && method === "DELETE") {
+    const id = parseInt(orgMatch[1]);
+    try {
+      const { count } = await db
+        .from("schools")
+        .select("*", { count: "exact", head: true })
+        .eq("org_id", id);
+      if (count && count > 0)
+        return json({ message: "Cannot delete an organization that still has campuses. Delete all campuses first." }, 409);
+      await db.from("organizations").delete().eq("id", id);
+      return json({ message: "Organization deleted" });
+    } catch (err) {
+      console.error("[super-admin/organizations DELETE]", err);
       return json({ message: "Server error" }, 500);
     }
   }
@@ -187,7 +256,7 @@ export async function handleSuperAdmin(
     }
   }
 
-  // ── GET /super-admin/schools/:schoolId/teachers ───────────────
+  // ── GET/POST /super-admin/schools/:schoolId/teachers ──────────
   const schoolTeachersMatch = path.match(/^\/super-admin\/schools\/(\d+)\/teachers$/);
   if (schoolTeachersMatch && method === "GET") {
     const schoolId = parseInt(schoolTeachersMatch[1]);
@@ -240,14 +309,14 @@ export async function handleSuperAdmin(
     }
   }
 
-  // ── POST /super-admin/teachers ───────────────────────────────
-  if (path === "/super-admin/teachers" && method === "POST") {
+  if (schoolTeachersMatch && method === "POST") {
+    const schoolId = parseInt(schoolTeachersMatch[1]);
     try {
-      const { school_id, first_name, last_name, email, password, phone, assignments } = await req.json();
+      const { first_name, last_name, email, password, phone, assignments } = await req.json();
       const hashed = await hashPassword(password);
       const { data: t, error } = await db
         .from("teachers")
-        .insert({ school_id, first_name, last_name, email: email.trim().toLowerCase(), password: hashed, phone: phone || null })
+        .insert({ school_id: schoolId, first_name, last_name, email: email.trim().toLowerCase(), password: hashed, phone: phone || null })
         .select()
         .single();
       if (error) {
@@ -261,15 +330,15 @@ export async function handleSuperAdmin(
       }
       return json({ message: "Teacher created", id: t.id }, 201);
     } catch (err) {
-      console.error("[super-admin/teachers POST]", err);
+      console.error("[super-admin/schools/:id/teachers POST]", err);
       return json({ message: "Server error" }, 500);
     }
   }
 
-  const saTeacherMatch = path.match(/^\/super-admin\/teachers\/(\d+)$/);
-  // ── PUT /super-admin/teachers/:id ────────────────────────────
-  if (saTeacherMatch && method === "PUT") {
-    const id = parseInt(saTeacherMatch[1]);
+  // ── PUT/DELETE/RESET /super-admin/schools/:schoolId/teachers/:id ─
+  const schoolTeacherIdMatch = path.match(/^\/super-admin\/schools\/\d+\/teachers\/(\d+)$/);
+  if (schoolTeacherIdMatch && method === "PUT") {
+    const id = parseInt(schoolTeacherIdMatch[1]);
     try {
       const { first_name, last_name, email, phone, assignments } = await req.json();
       await db.from("teachers").update({ first_name, last_name, email: email?.trim().toLowerCase(), phone: phone || null }).eq("id", id);
@@ -281,39 +350,37 @@ export async function handleSuperAdmin(
       }
       return json({ message: "Teacher updated" });
     } catch (err) {
-      console.error("[super-admin/teachers PUT]", err);
+      console.error("[super-admin/schools/:id/teachers/:id PUT]", err);
       return json({ message: "Server error" }, 500);
     }
   }
 
-  // ── DELETE /super-admin/teachers/:id ─────────────────────────
-  if (saTeacherMatch && method === "DELETE") {
-    const id = parseInt(saTeacherMatch[1]);
+  if (schoolTeacherIdMatch && method === "DELETE") {
+    const id = parseInt(schoolTeacherIdMatch[1]);
     try {
       await db.from("teachers").delete().eq("id", id);
       return json({ message: "Teacher deleted" });
     } catch (err) {
-      console.error("[super-admin/teachers DELETE]", err);
+      console.error("[super-admin/schools/:id/teachers/:id DELETE]", err);
       return json({ message: "Server error" }, 500);
     }
   }
 
-  // ── POST /super-admin/teachers/:id/reset-password ────────────
-  const saTeacherResetMatch = path.match(/^\/super-admin\/teachers\/(\d+)\/reset-password$/);
-  if (saTeacherResetMatch && method === "POST") {
-    const id = parseInt(saTeacherResetMatch[1]);
+  const schoolTeacherResetMatch = path.match(/^\/super-admin\/schools\/\d+\/teachers\/(\d+)\/reset-password$/);
+  if (schoolTeacherResetMatch && method === "POST") {
+    const id = parseInt(schoolTeacherResetMatch[1]);
     try {
       const { new_password } = await req.json();
       const hashed = await hashPassword(new_password);
       await db.from("teachers").update({ password: hashed }).eq("id", id);
       return json({ message: "Password reset" });
     } catch (err) {
-      console.error("[super-admin/teachers/reset-password]", err);
+      console.error("[super-admin/schools/:id/teachers/:id/reset-password]", err);
       return json({ message: "Server error" }, 500);
     }
   }
 
-  // ── GET /super-admin/schools/:schoolId/students ───────────────
+  // ── GET/POST /super-admin/schools/:schoolId/students ──────────
   const schoolStudentsMatch = path.match(/^\/super-admin\/schools\/(\d+)\/students$/);
   if (schoolStudentsMatch && method === "GET") {
     const schoolId = parseInt(schoolStudentsMatch[1]);
@@ -341,39 +408,90 @@ export async function handleSuperAdmin(
     }
   }
 
-  // ── POST /super-admin/students ───────────────────────────────
-  if (path === "/super-admin/students" && method === "POST") {
+  if (schoolStudentsMatch && method === "POST") {
+    const schoolId = parseInt(schoolStudentsMatch[1]);
     try {
       const body = await req.json();
-      const { data, error } = await db.from("students").insert(body).select().single();
+      // Enforce roll_no uniqueness within school+class+section
+      if (body.roll_no) {
+        const { data: dup } = await db
+          .from("students")
+          .select("id")
+          .eq("school_id", schoolId)
+          .eq("class_id", body.class_id)
+          .eq("section_id", body.section_id)
+          .eq("roll_no", body.roll_no);
+        if (dup?.length)
+          return json({ message: `Roll number ${body.roll_no} is already taken in this class/section.` }, 409);
+      }
+      const { data, error } = await db
+        .from("students")
+        .insert({ school_id: schoolId, ...body })
+        .select()
+        .single();
       if (error) throw error;
       return json({ message: "Student created", id: data.id }, 201);
     } catch (err) {
-      console.error("[super-admin/students POST]", err);
+      console.error("[super-admin/schools/:id/students POST]", err);
       return json({ message: "Server error" }, 500);
     }
   }
 
-  const saStudentMatch = path.match(/^\/super-admin\/students\/(\d+)$/);
-  if (saStudentMatch && method === "PUT") {
-    const id = parseInt(saStudentMatch[1]);
+  // ── PUT/DELETE/RESET /super-admin/schools/:schoolId/students/:id ─
+  const schoolStudentIdMatch = path.match(/^\/super-admin\/schools\/\d+\/students\/(\d+)$/);
+  if (schoolStudentIdMatch && method === "PUT") {
+    const id = parseInt(schoolStudentIdMatch[1]);
     try {
       const body = await req.json();
-      await db.from("students").update(body).eq("id", id);
+      // Enforce roll_no uniqueness (exclude self)
+      if (body.roll_no && body.class_id && body.section_id) {
+        const { data: existing } = await db
+          .from("students")
+          .select("id, school_id")
+          .eq("id", id)
+          .single();
+        if (existing) {
+          const { data: dup } = await db
+            .from("students")
+            .select("id")
+            .eq("school_id", (existing as Record<string, unknown>).school_id as number)
+            .eq("class_id", body.class_id)
+            .eq("section_id", body.section_id)
+            .eq("roll_no", body.roll_no)
+            .neq("id", id);
+          if (dup?.length)
+            return json({ message: `Roll number ${body.roll_no} is already taken in this class/section.` }, 409);
+        }
+      }
+      await db.from("students").update({ ...body, roll_no: body.roll_no || null }).eq("id", id);
       return json({ message: "Student updated" });
     } catch (err) {
-      console.error("[super-admin/students PUT]", err);
+      console.error("[super-admin/schools/:id/students/:id PUT]", err);
       return json({ message: "Server error" }, 500);
     }
   }
 
-  if (saStudentMatch && method === "DELETE") {
-    const id = parseInt(saStudentMatch[1]);
+  if (schoolStudentIdMatch && method === "DELETE") {
+    const id = parseInt(schoolStudentIdMatch[1]);
     try {
       await db.from("students").delete().eq("id", id);
       return json({ message: "Student deleted" });
     } catch (err) {
-      console.error("[super-admin/students DELETE]", err);
+      console.error("[super-admin/schools/:id/students/:id DELETE]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  const schoolStudentResetMatch = path.match(/^\/super-admin\/schools\/\d+\/students\/(\d+)\/reset-password$/);
+  if (schoolStudentResetMatch && method === "POST") {
+    const id = parseInt(schoolStudentResetMatch[1]);
+    try {
+      const { new_password } = await req.json();
+      const hashed = await hashPassword(new_password);
+      await db.from("student_accounts").update({ password: hashed }).eq("student_id", id);
+      return json({ message: "Password reset" });
+    } catch (err) {
+      console.error("[super-admin/schools/:id/students/:id/reset-password]", err);
       return json({ message: "Server error" }, 500);
     }
   }

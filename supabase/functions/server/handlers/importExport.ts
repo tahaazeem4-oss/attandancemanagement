@@ -327,6 +327,7 @@ export async function handleImportExport(
   if (path === "/import-export/attendance/export" && method === "GET") {
     const classId = url.searchParams.get("class_id");
     const sectionId = url.searchParams.get("section_id");
+    const studentIdParam = url.searchParams.get("student_id"); // optional — single student
     const dateSingle = url.searchParams.get("date");
     const fromDate = url.searchParams.get("from") || dateSingle || new Date().toISOString().slice(0, 10);
     const toDate = url.searchParams.get("to") || fromDate;
@@ -352,13 +353,18 @@ export async function handleImportExport(
         .eq("school_id", schoolId)
         .single();
 
-      const { data: students } = await db
+      let studentsQuery = db
         .from("students")
         .select("id, roll_no, first_name, last_name")
         .eq("class_id", classId)
         .eq("section_id", sectionId)
         .eq("school_id", schoolId)
         .order("last_name");
+
+      // If filtering by single student, scope the query
+      if (studentIdParam) studentsQuery = studentsQuery.eq("id", studentIdParam);
+
+      const { data: students } = await studentsQuery;
 
       if (!students?.length)
         return json({ message: "No students found for this class/section" }, 404);

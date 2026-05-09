@@ -4,6 +4,7 @@ import {
   StyleSheet, ActivityIndicator, StatusBar, Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
 
@@ -76,19 +77,19 @@ function SearchPickerModal({ visible, title, items, labelKey = 'name', onSelect,
 }
 
 // ── Dropdown Button ───────────────────────────────────────────
-function DropdownBtn({ label, value, onPress, placeholder = 'Tap to select' }) {
+function DropdownBtn({ label, value, onPress, placeholder = 'Tap to select', light = false }) {
   return (
     <Pressable
-      style={({ pressed }) => [dd.btn, pressed && { opacity: 0.85 }]}
+      style={({ pressed }) => [light ? dd.btnLight : dd.btn, pressed && { opacity: 0.85 }]}
       onPress={onPress}
     >
       <View style={{ flex: 1 }}>
-        <Text style={dd.label}>{label}</Text>
-        <Text style={[dd.value, !value && dd.placeholder]} numberOfLines={1}>
+        <Text style={light ? dd.labelLight : dd.label}>{label}</Text>
+        <Text style={[light ? dd.valueLight : dd.value, !value && (light ? dd.placeholderLight : dd.placeholder)]} numberOfLines={1}>
           {value || placeholder}
         </Text>
       </View>
-      <Text style={dd.arrow}>⌄</Text>
+      <Text style={light ? dd.arrowLight : dd.arrow}>⌄</Text>
     </Pressable>
   );
 }
@@ -277,9 +278,11 @@ function AddTeacherModal({ visible, schoolId, classes, onClose, onSaved }) {
 function EditTeacherModal({ visible, schoolId, teacher, classes, onClose, onSaved }) {
   const [form, setForm] = useState({ first_name: '', last_name: '', email: '', phone: '', assignments: [] });
   const [newPwd, setNewPwd] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading,    setLoading]    = useState(false);
   const [pwdLoading, setPwdLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error,      setError]      = useState('');
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [delLoading, setDelLoading] = useState(false);
 
   useEffect(() => {
     if (teacher) {
@@ -291,7 +294,7 @@ function EditTeacherModal({ visible, schoolId, teacher, classes, onClose, onSave
         assignments: teacher.assignments || [],
       });
     }
-    setError(''); setNewPwd('');
+    setError(''); setNewPwd(''); setConfirmDel(false);
   }, [teacher, visible]);
 
   const setF = (k, v) => setForm(p => ({ ...p, [k]: v }));
@@ -313,6 +316,19 @@ function EditTeacherModal({ visible, schoolId, teacher, classes, onClose, onSave
       setError(e?.response?.data?.message || 'Failed to update teacher.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteTeacher = async () => {
+    setDelLoading(true);
+    try {
+      await api.delete(`/super-admin/schools/${schoolId}/teachers/${teacher.id}`);
+      onSaved();
+    } catch (e) {
+      setError(e?.response?.data?.message || 'Could not delete teacher.');
+      setConfirmDel(false);
+    } finally {
+      setDelLoading(false);
     }
   };
 
@@ -369,6 +385,28 @@ function EditTeacherModal({ visible, schoolId, teacher, classes, onClose, onSave
             <Pressable style={[tm.outlineBtn, pwdLoading && { opacity: 0.7 }]} onPress={handleResetPassword} disabled={pwdLoading}>
               {pwdLoading ? <ActivityIndicator color={C.primary} size="small" /> : <Text style={tm.outlineBtnTxt}>Reset Password</Text>}
             </Pressable>
+
+            <View style={modal.divider} />
+            <Text style={modal.sectionLabel}>Danger Zone</Text>
+            {!confirmDel
+              ? (
+                <Pressable style={tm.dangerBtn} onPress={() => setConfirmDel(true)}>
+                  <Text style={tm.dangerBtnTxt}>Remove Teacher</Text>
+                </Pressable>
+              ) : (
+                <View>
+                  <Text style={{ color: C.textMed, fontSize: 13, marginBottom: 10, lineHeight: 18 }}>Are you sure? This cannot be undone.</Text>
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <Pressable style={[tm.outlineBtn, { flex: 1, marginTop: 0, padding: 11 }]} onPress={() => setConfirmDel(false)} disabled={delLoading}>
+                      <Text style={tm.outlineBtnTxt}>Cancel</Text>
+                    </Pressable>
+                    <Pressable style={[tm.dangerBtn, { flex: 1 }]} onPress={handleDeleteTeacher} disabled={delLoading}>
+                      {delLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={tm.dangerBtnTxt}>Yes, Remove</Text>}
+                    </Pressable>
+                  </View>
+                </View>
+              )
+            }
           </ScrollView>
         </View>
       </View>
@@ -378,10 +416,9 @@ function EditTeacherModal({ visible, schoolId, teacher, classes, onClose, onSave
 
 // ── Main Screen ───────────────────────────────────────────────
 export default function SuperAdminTeachersScreen() {
+  const insets = useSafeAreaInsets();
   const [schools,         setSchools]         = useState([]);
   const [selectedSchool,  setSelectedSchool]  = useState(null);
-  const [admins,          setAdmins]          = useState([]);
-  const [selectedAdmin,   setSelectedAdmin]   = useState(null);
   const [classes,         setClasses]         = useState([]);
   const [selectedClass,   setSelectedClass]   = useState(null);
   const [selectedSection, setSelectedSection] = useState(null);
@@ -390,13 +427,10 @@ export default function SuperAdminTeachersScreen() {
   const [loading,         setLoading]         = useState(false);
   const [schoolsLoading,  setSchoolsLoading]  = useState(true);
   const [schoolPicker,    setSchoolPicker]    = useState(false);
-  const [adminPicker,     setAdminPicker]     = useState(false);
   const [classPicker,     setClassPicker]     = useState(false);
   const [sectionPicker,   setSectionPicker]   = useState(false);
   const [addModal,        setAddModal]        = useState(false);
   const [editTeacher,     setEditTeacher]     = useState({ open: false, teacher: null });
-  const [deleteTeacher,   setDeleteTeacher]   = useState({ open: false, teacher: null });
-  const [deleting,        setDeleting]        = useState(false);
 
   useEffect(() => {
     api.get('/super-admin/schools')
@@ -419,25 +453,14 @@ export default function SuperAdminTeachersScreen() {
 
   const selectSchool = (school) => {
     setSelectedSchool(school);
-    setSelectedAdmin(null);
     setSelectedClass(null);
     setSelectedSection(null);
-    setAdmins([]); setClasses([]); setTeachers([]);
+    setClasses([]); setTeachers([]);
     setListSearch('');
-    Promise.all([
-      api.get(`/super-admin/schools/${school.id}/admins`),
-      api.get(`/super-admin/schools/${school.id}/classes`),
-    ]).then(([aRes, cRes]) => {
-      setAdmins(aRes.data);
-      setClasses(cRes.data);
-    }).catch(() => Alert.alert('Error', 'Could not load school data'));
-  };
-
-  const selectAdmin = (admin) => {
-    setSelectedAdmin(admin);
-    setSelectedClass(null);
-    setSelectedSection(null);
-    loadTeachers(selectedSchool.id, null, null);
+    api.get(`/super-admin/schools/${school.id}/classes`)
+      .then(({ data }) => setClasses(data))
+      .catch(() => Alert.alert('Error', 'Could not load school data'));
+    loadTeachers(school.id, null, null);
   };
 
   const selectClass = (cls) => {
@@ -451,20 +474,6 @@ export default function SuperAdminTeachersScreen() {
     loadTeachers(selectedSchool.id, selectedClass?.id, section.id);
   };
 
-  const handleDelete = async () => {
-    if (!deleteTeacher.teacher) return;
-    setDeleting(true);
-    try {
-      await api.delete(`/super-admin/schools/${selectedSchool.id}/teachers/${deleteTeacher.teacher.id}`);
-      setDeleteTeacher({ open: false, teacher: null });
-      loadTeachers(selectedSchool.id, selectedClass?.id, selectedSection?.id);
-    } catch (e) {
-      Alert.alert('Error', e?.response?.data?.message || 'Could not delete teacher');
-    } finally {
-      setDeleting(false);
-    }
-  };
-
   const filteredTeachers = useMemo(() => {
     if (!listSearch.trim()) return teachers;
     const q = listSearch.toLowerCase();
@@ -476,14 +485,8 @@ export default function SuperAdminTeachersScreen() {
 
   const initials = (t) => `${t.first_name[0]}${t.last_name[0]}`.toUpperCase();
 
-  const adminLabel   = selectedAdmin   ? `${selectedAdmin.first_name} ${selectedAdmin.last_name}` : null;
   const classLabel   = selectedClass   ? selectedClass.class_name : null;
   const sectionLabel = selectedSection ? selectedSection.section_name : null;
-
-  const adminPickerItems = useMemo(() =>
-    admins.map(a => ({ ...a, name: `${a.first_name} ${a.last_name}` })),
-    [admins]
-  );
 
   const classPickerItems = useMemo(() => [
     { id: null, class_name: 'All Classes' },
@@ -497,41 +500,35 @@ export default function SuperAdminTeachersScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#1E3A8A" />
 
       {/* Header */}
-      <LinearGradient colors={['#1E3A8A', '#2563EB']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
+      <LinearGradient colors={['#1E3A8A', '#2563EB']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <Text style={styles.headerTitle}>Manage Teachers</Text>
-        <Text style={styles.headerSub}>School → Campus → Class → Section</Text>
+      </LinearGradient>
 
+      {/* Filters */}
+      <View style={styles.filterSection}>
         {schoolsLoading
-          ? <ActivityIndicator color="rgba(255,255,255,0.7)" style={{ marginTop: 14 }} />
+          ? <ActivityIndicator color={C.primary} style={{ marginVertical: 10 }} />
           : (
             <DropdownBtn
-              label="School"
+              label="Campus"
               value={selectedSchool?.name}
-              placeholder="Tap to select a school"
+              placeholder="Tap to select a campus"
               onPress={() => setSchoolPicker(true)}
+              light
             />
           )}
 
         {selectedSchool && (
-          <DropdownBtn
-            label="Campus / Admin"
-            value={adminLabel}
-            placeholder="Tap to select campus admin"
-            onPress={() => setAdminPicker(true)}
-          />
-        )}
-
-        {selectedAdmin && (
           <View style={styles.filterRow}>
             <View style={{ flex: 1 }}>
               <DropdownBtn
                 label="Class"
                 value={classLabel}
-                placeholder="Select class"
+                placeholder="All Classes"
                 onPress={() => setClassPicker(true)}
+                light
               />
             </View>
             <View style={{ width: 8 }} />
@@ -539,46 +536,45 @@ export default function SuperAdminTeachersScreen() {
               <DropdownBtn
                 label="Section"
                 value={sectionLabel}
-                placeholder={selectedClass ? 'Select section' : '—'}
+                placeholder={selectedClass ? 'All Sections' : '—'}
                 onPress={() => selectedClass && setSectionPicker(true)}
+                light
               />
             </View>
           </View>
         )}
-      </LinearGradient>
 
-      {/* Toolbar: search + add */}
-      {selectedAdmin && (
-        <View style={styles.toolbar}>
-          <View style={styles.searchBox}>
-            <Text style={styles.searchIcon}>🔍</Text>
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search teachers..."
-              placeholderTextColor={C.textLight}
-              value={listSearch}
-              onChangeText={setListSearch}
-            />
-            {!!listSearch && (
-              <Pressable onPress={() => setListSearch('')}>
-                <Text style={styles.searchClear}>✕</Text>
-              </Pressable>
-            )}
+        {selectedSchool && (
+          <View style={styles.searchAddRow}>
+            <View style={[styles.searchBox, { flex: 1 }]}>
+              <Text style={styles.searchIcon}>🔍</Text>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search teachers..."
+                placeholderTextColor={C.textLight}
+                value={listSearch}
+                onChangeText={setListSearch}
+              />
+              {!!listSearch && (
+                <Pressable onPress={() => setListSearch('')}>
+                  <Text style={styles.searchClear}>✕</Text>
+                </Pressable>
+              )}
+            </View>
+            <Pressable style={styles.addBtn} onPress={() => setAddModal(true)}>
+              <Text style={styles.addBtnTxt}>+ Add</Text>
+            </Pressable>
           </View>
-          <Pressable style={styles.addBtn} onPress={() => setAddModal(true)}>
-            <Text style={styles.addBtnTxt}>+ Add</Text>
-          </Pressable>
-        </View>
-      )}
+        )}
+      </View>
 
       {/* Count bar */}
-      {selectedAdmin && !loading && (
+      {selectedSchool && !loading && (
         <View style={styles.countBar}>
           <Text style={styles.countTxt}>
             {filteredTeachers.length} of {teachers.length} teacher{teachers.length !== 1 ? 's' : ''}
             {selectedClass ? ` · ${classLabel}` : ''}
             {selectedSection ? ` · ${sectionLabel}` : ''}
-            {` · ${adminLabel}`}
           </Text>
         </View>
       )}
@@ -592,15 +588,7 @@ export default function SuperAdminTeachersScreen() {
             <Text style={styles.emptyTxt}>Tap the school dropdown above to get started</Text>
           </View>
         )
-        : !selectedAdmin
-          ? (
-            <View style={styles.empty}>
-              <Text style={styles.emptyIcon}>👤</Text>
-              <Text style={styles.emptyTitle}>No campus selected</Text>
-              <Text style={styles.emptyTxt}>Tap "Campus / Admin" above to select a campus</Text>
-            </View>
-          )
-          : loading
+        : loading
             ? <ActivityIndicator color={C.primary} size="large" style={{ marginTop: 40 }} />
             : (
               <FlatList
@@ -616,7 +604,10 @@ export default function SuperAdminTeachersScreen() {
                   </View>
                 }
                 renderItem={({ item }) => (
-                  <View style={styles.card}>
+                  <Pressable
+                    style={({ pressed }) => [styles.card, pressed && { opacity: 0.88 }]}
+                    onPress={() => setEditTeacher({ open: true, teacher: item })}
+                  >
                     <LinearGradient colors={['#EEF2FF', '#E0E7FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.avatar}>
                       <Text style={styles.avatarTxt}>{initials(item)}</Text>
                     </LinearGradient>
@@ -637,15 +628,10 @@ export default function SuperAdminTeachersScreen() {
                       <Text style={styles.cardSub}>{item.email}</Text>
                       {!!item.phone && <Text style={styles.cardSub}>{item.phone}</Text>}
                     </View>
-                    <View style={styles.cardActions}>
-                      <Pressable style={styles.editBtn} onPress={() => setEditTeacher({ open: true, teacher: item })}>
-                        <Text style={styles.editBtnTxt}>Edit</Text>
-                      </Pressable>
-                      <Pressable style={styles.deleteBtn} onPress={() => setDeleteTeacher({ open: true, teacher: item })}>
-                        <Text style={styles.deleteBtnTxt}>✕</Text>
-                      </Pressable>
+                    <View style={styles.eyeBtn}>
+                      <Text style={styles.eyeIcon}>›</Text>
                     </View>
-                  </View>
+                  </Pressable>
                 )}
               />
             )}
@@ -653,22 +639,14 @@ export default function SuperAdminTeachersScreen() {
       {/* Pickers */}
       <SearchPickerModal
         visible={schoolPicker}
-        title="Select School"
+        title="Select Campus"
         items={schools}
         labelKey="name"
         onSelect={selectSchool}
         onClose={() => setSchoolPicker(false)}
-        emptyText="No schools found"
+        emptyText="No campuses found"
       />
-      <SearchPickerModal
-        visible={adminPicker}
-        title="Select Campus / Admin"
-        items={adminPickerItems}
-        labelKey="name"
-        onSelect={(admin) => { selectAdmin(admin); setAdminPicker(false); }}
-        onClose={() => setAdminPicker(false)}
-        emptyText="No campus admins found for this school"
-      />
+
       <SearchPickerModal
         visible={classPicker}
         title="Select Class"
@@ -720,38 +698,30 @@ export default function SuperAdminTeachersScreen() {
         onClose={() => setEditTeacher({ open: false, teacher: null })}
         onSaved={() => { setEditTeacher({ open: false, teacher: null }); loadTeachers(selectedSchool.id, selectedClass?.id, selectedSection?.id); }}
       />
-      <ConfirmModal
-        visible={deleteTeacher.open}
-        title="Remove Teacher"
-        message={`Remove ${deleteTeacher.teacher?.first_name} ${deleteTeacher.teacher?.last_name}? This cannot be undone.`}
-        actionLabel="Remove"
-        loading={deleting}
-        onCancel={() => setDeleteTeacher({ open: false, teacher: null })}
-        onConfirm={handleDelete}
-      />
+
     </View>
   );
 }
 
 // ── Styles ────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container:   { flex: 1, backgroundColor: C.bg },
-  header:      { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 20 },
-  headerTitle: { color: '#fff', fontSize: 20, fontWeight: '800' },
-  headerSub:   { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 4, marginBottom: 14 },
+  container:     { flex: 1, backgroundColor: C.bg },
+  header:        { paddingHorizontal: 16, paddingBottom: 16 },
+  headerTitle:   { color: '#fff', fontSize: 20, fontWeight: '800' },
+  addBtn:        { backgroundColor: C.primary, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 11, height: 42, justifyContent: 'center' },
+  addBtnTxt:     { color: '#fff', fontWeight: '700', fontSize: 13 },
 
-  toolbar:     { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.border },
-  searchBox:   { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', borderRadius: 12, paddingHorizontal: 10, height: 40 },
-  searchIcon:  { fontSize: 14, marginRight: 6 },
-  searchInput: { flex: 1, fontSize: 14, color: C.textDark },
-  searchClear: { color: C.textLight, fontSize: 14, paddingLeft: 6 },
-  addBtn:      { backgroundColor: C.primary, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 },
-  addBtnTxt:   { color: '#fff', fontWeight: '700', fontSize: 13 },
+  filterSection: { backgroundColor: C.card, paddingHorizontal: 14, paddingTop: 14, paddingBottom: 14, borderBottomWidth: 1, borderColor: C.border },
+  filterRow:     { flexDirection: 'row', marginTop: 10 },
+  searchAddRow:  { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
+  searchBox:     { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', borderRadius: 12, paddingHorizontal: 12, height: 42, borderWidth: 1, borderColor: C.border },
+  searchIcon:    { fontSize: 14, marginRight: 8 },
+  searchInput:   { flex: 1, fontSize: 14, color: C.textDark },
+  searchClear:   { color: C.textLight, fontSize: 14, paddingLeft: 6 },
 
   countBar:    { paddingHorizontal: 16, paddingVertical: 7, backgroundColor: '#F8FAFC', borderBottomWidth: 1, borderColor: C.border },
   countTxt:    { fontSize: 12, color: C.textMed, fontWeight: '600' },
 
-  filterRow:   { flexDirection: 'row', marginTop: 0 },
 
   empty:       { alignItems: 'center', marginTop: 70, paddingHorizontal: 32 },
   emptyIcon:   { fontSize: 44, marginBottom: 12 },
@@ -765,11 +735,8 @@ const styles = StyleSheet.create({
   cardSub:     { fontSize: 12, color: C.textMed, marginTop: 1 },
   rolePill:    { borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
   rolePillTxt: { fontSize: 10, fontWeight: '700' },
-  cardActions: { flexDirection: 'row', gap: 6 },
-  editBtn:     { backgroundColor: '#EEF2FF', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
-  editBtnTxt:  { color: '#4F46E5', fontWeight: '700', fontSize: 12 },
-  deleteBtn:   { backgroundColor: '#FEF2F2', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  deleteBtnTxt: { color: '#DC2626', fontWeight: '700', fontSize: 13 },
+  eyeBtn:      { width: 30, height: 30, borderRadius: 10, backgroundColor: C.primary, justifyContent: 'center', alignItems: 'center' },
+  eyeIcon:     { fontSize: 20, color: '#fff', fontWeight: '700', lineHeight: 22 },
 });
 
 const modal = StyleSheet.create({
@@ -789,6 +756,8 @@ const tm = StyleSheet.create({
   primaryBtnTxt: { color: '#fff', fontWeight: '800', fontSize: 15 },
   outlineBtn:    { borderWidth: 1.5, borderColor: C.primary, borderRadius: 12, padding: 13, alignItems: 'center', marginTop: 8 },
   outlineBtnTxt: { color: C.primary, fontWeight: '700', fontSize: 14 },
+  dangerBtn:     { backgroundColor: '#DC2626', borderRadius: 12, padding: 13, alignItems: 'center', marginTop: 8 },
+  dangerBtnTxt:  { color: '#fff', fontWeight: '700', fontSize: 14 },
 });
 
 const confirm = StyleSheet.create({
@@ -850,9 +819,14 @@ const map = StyleSheet.create({
 
 // Dropdown button styles
 const dd = StyleSheet.create({
-  btn:         { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 14, paddingHorizontal: 16, paddingVertical: 13, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
-  label:       { fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 },
-  value:       { fontSize: 15, fontWeight: '700', color: '#fff' },
-  placeholder: { color: 'rgba(255,255,255,0.45)', fontWeight: '400' },
-  arrow:       { color: 'rgba(255,255,255,0.6)', fontSize: 18, marginLeft: 8 },
+  btn:              { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 14, paddingHorizontal: 16, paddingVertical: 13, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
+  label:            { fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 },
+  value:            { fontSize: 15, fontWeight: '700', color: '#fff' },
+  placeholder:      { color: 'rgba(255,255,255,0.45)', fontWeight: '400' },
+  arrow:            { color: 'rgba(255,255,255,0.6)', fontSize: 18, marginLeft: 8 },
+  btnLight:         { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAFC', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, borderWidth: 1, borderColor: C.border },
+  labelLight:       { fontSize: 10, fontWeight: '700', color: C.textLight, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 },
+  valueLight:       { fontSize: 14, fontWeight: '700', color: C.textDark },
+  placeholderLight: { color: C.textLight, fontWeight: '400' },
+  arrowLight:       { color: C.textMed, fontSize: 18, marginLeft: 8 },
 });

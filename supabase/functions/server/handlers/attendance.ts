@@ -140,5 +140,84 @@ export async function handleAttendance(
     }
   }
 
+  // ── GET /attendance/monthly ──────────────────────────────────
+  // Params: class_id, section_id, year, month, student_id (optional)
+  // Returns each student with per-day status + summary counts
+  if (path === "/attendance/monthly" && method === "GET") {
+    try {
+      const class_id   = url.searchParams.get("class_id");
+      const section_id = url.searchParams.get("section_id");
+      const studentIdParam = url.searchParams.get("student_id");
+      const year  = parseInt(url.searchParams.get("year")  || String(new Date().getFullYear()));
+      const month = parseInt(url.searchParams.get("month") || String(new Date().getMonth() + 1));
+      const schoolId = user.school_id as number;
+
+      if (!class_id || !section_id)
+        return json({ message: "class_id and section_id are required" }, 400);
+
+      const from = `${year}-${String(month).padStart(2, "0")}-01`;
+      const lastDay = new Date(year, month, 0).getDate();
+      const to   = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+
+      let sq = db
+        .from("students")
+        .select("id, first_name, last_name, roll_no")
+        .eq("class_id", class_id)
+        .eq("section_id", section_id)
+        .eq("school_id", schoolId)
+        .order("last_name")
+        .order("first_name");
+      if (studentIdParam) sq = sq.eq("id", studentIdParam);
+      const { data: students } = await sq;
+
+      if (!students?.length) return json([]);
+
+      const studentIds = (students as Record<string, unknown>[]).map((s) => s.id as number);
+
+      const { data: attendance } = await db
+        .from("student_attendance")
+        .select("student_id, date, status")
+        .in("student_id", studentIds)
+        .gte("date", from)
+        .lte("date", to);
+
+      // Build lookup: studentId → { date → status }
+      const lookup: Record<number, Record<string, string>> = {};
+      for (const a of (attendance || []) as Record<string, unknown>[]) {
+        const sid = a.student_id as number;
+        if (!lookup[sid]) lookup[sid] = {};
+        lookup[sid][a.date as string] = a.status as string;
+      }
+
+      const result = (students as Record<string, unknown>[]).map((s) => {
+        const sid  = s.id as number;
+        const days = lookup[sid] || {};
+        let present = 0, absent = 0, leave = 0;
+        const dayList: { date: string; status: string }[] = [];
+        for (let d = 1; d <= lastDay; d++) {
+          const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+          const status  = days[dateStr] || "not_marked";
+          dayList.push({ date: dateStr, status });
+          if (status === "present") present++;
+          else if (status === "absent") absent++;
+          else if (status === "leave") leave++;
+        }
+        return {
+          id:         s.id,
+          first_name: s.first_name,
+          last_name:  s.last_name,
+          roll_no:    s.roll_no,
+          summary: { present, absent, leave },
+          days: dayList,
+        };
+      });
+
+      return json(result);
+    } catch (err) {
+      console.error("[attendance/monthly]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
   return json({ message: "Not found" }, 404);
 }
