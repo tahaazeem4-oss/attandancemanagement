@@ -86,7 +86,7 @@ async function request(method, path, data, config = {}) {
   console.log(`[API] ${res.status} ${url.pathname}`, typeof responseData !== 'object' ? responseData : '');
 
   if (res.status === 401) {
-    if (_onUnauthorized) _onUnauthorized();
+    if (_onUnauthorized && !url.pathname.includes('/login')) _onUnauthorized();
     throw { response: { status: 401, data: responseData } };
   }
 

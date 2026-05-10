@@ -35,6 +35,10 @@ export default function StudentLecturesScreen({ navigation, route }) {
   const [filterType,    setFilterType]    = useState(fixedType);
   const [filterSubject, setFilterSubject] = useState('');
 
+  // Support parent viewing child's portal
+  const childId = route?.params?.child?.student_id;
+  const isParentViewing = !!childId;
+
   useEffect(() => {
     setFilterType(fixedType);
   }, [fixedType]);
@@ -44,15 +48,15 @@ export default function StudentLecturesScreen({ navigation, route }) {
   , [lectures]);
 
   const availableYears = useMemo(() => {
-    const years = Array.from(new Set(lectures.map(l => l.date?.slice(0, 4)).filter(Boolean))).sort().reverse();
+    const years = Array.from(new Set(lectures.map(l => l.date?.slice(0, 4) || l.uploaded_at?.slice(0, 4)).filter(Boolean))).sort().reverse();
     return [{ label: 'All Years', value: '' }, ...years.map(y => ({ label: y, value: y }))];
   }, [lectures]);
 
   const availableMonths = useMemo(() => {
     const pool = filterYear
-      ? lectures.filter(l => l.date?.slice(0, 4) === filterYear)
+      ? lectures.filter(l => (l.date || l.uploaded_at)?.slice(0, 4) === filterYear)
       : lectures;
-    const months = Array.from(new Set(pool.map(l => l.date?.slice(5, 7)).filter(Boolean))).sort();
+    const months = Array.from(new Set(pool.map(l => (l.date || l.uploaded_at)?.slice(5, 7)).filter(Boolean))).sort();
     return [{ label: 'All Months', value: '' }, ...months.map(m => ({ label: MONTH_NAMES[m] || m, value: m }))];
   }, [lectures, filterYear]);
 
@@ -65,11 +69,12 @@ export default function StudentLecturesScreen({ navigation, route }) {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return lectures.filter(l => {
-      if (q && !l.lecture_name?.toLowerCase().includes(q) && !l.subject_name?.toLowerCase().includes(q)) return false;
+      if (q && !l.lecture_name?.toLowerCase().includes(q) && !l.title?.toLowerCase().includes(q) && !l.subject_name?.toLowerCase().includes(q)) return false;
       if (filterSubject && l.subject_name !== filterSubject) return false;
       if (filterType    && l.type         !== filterType)    return false;
-      if (filterYear    && l.date?.slice(0, 4) !== filterYear)  return false;
-      if (filterMonth   && l.date?.slice(5, 7) !== filterMonth) return false;
+      const dateField = l.date || l.uploaded_at;
+      if (filterYear    && dateField?.slice(0, 4) !== filterYear)  return false;
+      if (filterMonth   && dateField?.slice(5, 7) !== filterMonth) return false;
       return true;
     });
   }, [lectures, search, filterSubject, filterType, filterYear, filterMonth]);
@@ -77,21 +82,25 @@ export default function StudentLecturesScreen({ navigation, route }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await api.get('/lectures');
-      setLectures(data);
+      const endpoint = isParentViewing 
+        ? `/parent/children/${childId}/lectures`
+        : '/lectures';
+      const { data } = await api.get(endpoint);
+      const lecturesData = isParentViewing ? (data.lectures || []) : data;
+      setLectures(lecturesData);
     } catch {
       Alert.alert('Error', 'Could not load lectures');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isParentViewing, childId]);
 
   useEffect(() => { load(); }, [load]);
 
   const renderItem = ({ item }) => (
     <Pressable
       style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]}
-      onPress={() => navigation.navigate('StudentLectureDetail', { lecture: item })}
+      onPress={() => navigation.navigate('StudentLectureDetail', { lecture: item, child: route?.params?.child })}
     >
       <View style={styles.cardTop}>
         <View style={[styles.typePill, { backgroundColor: TYPE_BG[item.type] }]}>
@@ -103,14 +112,16 @@ export default function StudentLecturesScreen({ navigation, route }) {
           <Text style={styles.downloadIcon}>⬇</Text>
         </View>
       </View>
-      <Text style={styles.lectureName} numberOfLines={2}>{item.lecture_name}</Text>
+      <Text style={styles.lectureName} numberOfLines={2}>{item.lecture_name || item.title || 'Untitled'}</Text>
       <View style={styles.metaRow}>
-        <Text style={styles.metaChip}>📚 {item.subject_name}</Text>
-        <Text style={styles.metaChip}>📅 {item.date?.slice(0, 10)}</Text>
+        <Text style={styles.metaChip}>📚 {item.subject_name || item.subject || 'Subject'}</Text>
+        <Text style={styles.metaChip}>📅 {(item.date || item.uploaded_at || '').slice(0, 10)}</Text>
       </View>
-      <Text style={styles.metaClass}>
-        🏫 {item.class_name}{item.section_name ? ` — Sec ${item.section_name}` : ' — All Sections'}
-      </Text>
+      {item.class_name && (
+        <Text style={styles.metaClass}>
+          🏫 {item.class_name}{item.section_name ? ` — Sec ${item.section_name}` : ' — All Sections'}
+        </Text>
+      )}
       {item.uploaded_by && (
         <Text style={styles.uploader}>Uploaded by {item.uploaded_by}</Text>
       )}
@@ -218,34 +229,36 @@ export default function StudentLecturesScreen({ navigation, route }) {
   );
 
   return (
-    <View style={styles.root}>
+    <View style={styles.rootWrap}>
       <AppHeader title={screenTitle} navigation={navigation} />
-
-      {loading ? (
-        <ActivityIndicator color="#4F46E5" style={{ flex: 1, marginTop: 60 }} size="large" />
-      ) : (
-        <FlatList
-          data={filtered}
-          keyExtractor={l => String(l.id)}
-          contentContainerStyle={styles.listContent}
-          ListHeaderComponent={ListHeader}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Text style={styles.emptyIcon}>📭</Text>
-              <Text style={styles.emptyTxt}>No lectures found</Text>
-              <Text style={styles.emptySub}>Try adjusting your filters</Text>
-            </View>
-          }
-          renderItem={renderItem}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        />
-      )}
+      <View style={styles.root}>
+        {loading ? (
+          <ActivityIndicator color="#4F46E5" style={{ flex: 1, marginTop: 60 }} size="large" />
+        ) : (
+          <FlatList
+            data={filtered}
+            keyExtractor={l => String(l.id)}
+            contentContainerStyle={styles.listContent}
+            ListHeaderComponent={ListHeader}
+            ListEmptyComponent={
+              <View style={styles.empty}>
+                <Text style={styles.emptyIcon}>📭</Text>
+                <Text style={styles.emptyTxt}>No lectures found</Text>
+                <Text style={styles.emptySub}>Try adjusting your filters</Text>
+              </View>
+            }
+            renderItem={renderItem}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          />
+        )}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  rootWrap: { flex: 1, backgroundColor: C.bg },
   root:   { flex: 1, backgroundColor: C.bg },
 
   // Header

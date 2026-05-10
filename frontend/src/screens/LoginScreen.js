@@ -146,11 +146,6 @@ export default function LoginScreen({ navigation }) {
               </LinearGradient>
             </Animated.View>
           </Pressable>
-
-          <Pressable style={styles.signupRow} onPress={() => navigation.navigate('SignUp')}>
-            <Text style={styles.signupText}>New here? </Text>
-            <Text style={styles.signupLink}>Create an account</Text>
-          </Pressable>
         </View>
       </Animated.View>
       </ScrollView>
@@ -221,7 +216,4 @@ const styles = StyleSheet.create({
   },
   btnText: { color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: 0.3 },
 
-  signupRow:  { flexDirection: 'row', justifyContent: 'center', marginTop: 22 },
-  signupText: { color: '#64748B', fontSize: 14 },
-  signupLink: { color: '#2563EB', fontSize: 14, fontWeight: '700' },
 });

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, Pressable, Image,
-  StyleSheet, ActivityIndicator, StatusBar, Animated
+  StyleSheet, ActivityIndicator, Animated
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import { C } from '../../config/theme';
@@ -17,18 +18,43 @@ const ACTIONS = [
   { key: 'StudentHomework',     icon: 'clipboard-outline',     label: 'Homework',            sub: 'Browse homework files',               tint: '#D97706', bg: '#FFFBEB' },
 ];
 
-export default function StudentHomeScreen({ navigation }) {
+export default function StudentHomeScreen({ navigation, route }) {
+  const insets = useSafeAreaInsets();
   const { user, school, logout } = useAuth();
   const [stats,   setStats]   = useState(null);
   const [loading, setLoading] = useState(true);
+  const [resolvedCampus, setResolvedCampus] = useState(null);
+
+  // Support parent viewing child's portal
+  const childData = route?.params?.child;
+  const isParentViewing = !!childData;
+  const displayUser = childData || user;
 
   const fadeAnims  = useRef(ACTIONS.map(() => new Animated.Value(0))).current;
   const slideAnims = useRef(ACTIONS.map(() => new Animated.Value(20))).current;
 
   useEffect(() => {
     const now = new Date();
-    api.get('/student-portal/attendance', { params: { month: now.getMonth() + 1, year: now.getFullYear() } })
-      .then(({ data }) => setStats(data.stats))
+    const endpoint = isParentViewing
+      ? `/parent/children/${childData.student_id}/attendance`
+      : '/student-portal/attendance';
+    
+    api.get(endpoint, { params: { month: now.getMonth() + 1, year: now.getFullYear() } })
+      .then(({ data }) => {
+        if (data?.stats) {
+          setStats(data.stats);
+          return;
+        }
+        const records = data?.records || data?.attendance || [];
+        if (!Array.isArray(records)) {
+          setStats(null);
+          return;
+        }
+        const present = records.filter(r => r.status === 'present').length;
+        const absent = records.filter(r => r.status === 'absent').length;
+        const leave = records.filter(r => r.status === 'leave').length;
+        setStats({ present, absent, leave, total: records.length });
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
 
@@ -38,44 +64,74 @@ export default function StudentHomeScreen({ navigation }) {
         Animated.spring(slideAnims[i], { toValue: 0, tension: 70, friction: 10, useNativeDriver: true }),
       ])
     )).start();
-  }, []);
+  }, [isParentViewing, childData?.student_id]);
+
+  useEffect(() => {
+    const schoolId = childData?.school_id || displayUser?.school_id || user?.school_id;
+    if (!schoolId) {
+      setResolvedCampus(null);
+      return;
+    }
+
+    let mounted = true;
+    api.get('/schools')
+      .then(({ data }) => {
+        const schools = Array.isArray(data) ? data : [];
+        const found = schools.find((s) => Number(s?.id) === Number(schoolId)) || null;
+        if (mounted) setResolvedCampus(found);
+      })
+      .catch(() => {
+        if (mounted) setResolvedCampus(null);
+      });
+
+    return () => { mounted = false; };
+  }, [childData?.school_id, displayUser?.school_id, user?.school_id]);
 
   const attendancePct = stats && stats.total > 0
     ? Math.round((stats.present / stats.total) * 100)
     : null;
+  const topInset = Math.max(insets.top, 0);
+  const heroMarginTop = topInset + 6;
+  const campusName = school?.name || resolvedCampus?.name || childData?.school_name || user?.school_name || 'Campus';
+  const campusLogo = school?.logo_url || resolvedCampus?.logo_url || childData?.school_logo_url || user?.school_logo_url || null;
+  const campusInitials = (school?.initials || campusName.slice(0, 2) || 'CP').toUpperCase();
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 48 }} showsVerticalScrollIndicator={false}>
-      <StatusBar barStyle="light-content" backgroundColor="#1E40AF" />
+    <View style={styles.wrapper}>
+      <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 48 }} showsVerticalScrollIndicator={false}>
 
-      {/* ── Header ──────────────────────────────────────────────── */}
+      {/* ── Hero Card ──────────────────────────────────────────────── */}
       <LinearGradient
         colors={['#1E3A8A', '#2563EB']}
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={styles.header}
+        style={[
+          styles.header,
+          {
+            marginTop: heroMarginTop,
+            paddingTop: 20,
+          },
+        ]}
       >
         <View style={styles.headerDeco} pointerEvents="none" />
 
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
-            {school && (
-              <View style={styles.schoolRow}>
-                {school.logo_url
-                  ? <Image source={{ uri: school.logo_url }} style={styles.schoolBadge} resizeMode="contain" />
-                  : <View style={styles.schoolBadgeFallback}>
-                      <Text style={styles.schoolBadgeText}>{school.initials || school.name.slice(0, 2).toUpperCase()}</Text>
-                    </View>
-                }
-                <Text style={styles.schoolName} numberOfLines={1}>{school.name}</Text>
-              </View>
-            )}
             <Text style={styles.roleLabel}>Student Portal</Text>
-            <Text style={styles.name}>{user?.first_name} {user?.last_name}</Text>
-            <Text style={styles.meta}>{user?.class_name} · Sec {user?.section_name} · #{user?.roll_no}</Text>
+            <Text style={styles.name}>{displayUser?.first_name} {displayUser?.last_name}</Text>
+            <Text style={styles.meta}>{displayUser?.class_name} · Sec {displayUser?.section_name} · #{displayUser?.roll_no}</Text>
           </View>
-          <Pressable onPress={logout} style={({ pressed }) => [styles.logoutBtn, pressed && { opacity: 0.7 }]}>
-            <Text style={styles.logoutText}>Sign Out</Text>
-          </Pressable>
+          {isParentViewing ? (
+            <View style={styles.liveBadge}>
+              <Text style={styles.liveText}>LIVE VIEW</Text>
+            </View>
+          ) : (
+            <Pressable 
+              onPress={logout} 
+              style={({ pressed }) => [styles.logoutBtn, pressed && { opacity: 0.7 }]}
+            >
+              <Text style={styles.logoutText}>Sign Out</Text>
+            </Pressable>
+          )}
         </View>
 
         {/* ── Attendance summary strip ── */}
@@ -100,6 +156,19 @@ export default function StudentHomeScreen({ navigation }) {
       {/* ── Quick Actions ────────────────────────────────────────── */}
       <Text style={styles.sectionTitle}>Quick Actions</Text>
 
+      <View style={styles.optionsCampusCard}>
+          {campusLogo
+            ? <Image source={{ uri: campusLogo }} style={styles.optionsCampusLogo} resizeMode="contain" />
+            : <View style={styles.optionsCampusLogoFallback}>
+                <Text style={styles.optionsCampusLogoText}>{campusInitials}</Text>
+              </View>
+          }
+          <View style={{ flex: 1 }}>
+            <Text style={styles.optionsCampusLabel}>Campus</Text>
+            <Text style={styles.optionsCampusName} numberOfLines={2}>{campusName}</Text>
+          </View>
+      </View>
+
       <View style={styles.grid}>
         {ACTIONS.map(({ key, icon, label, tint, bg }, i) => (
           <Animated.View
@@ -109,7 +178,11 @@ export default function StudentHomeScreen({ navigation }) {
             <Pressable
               style={({ pressed }) => [styles.navCard, pressed && styles.navCardPressed]}
               onPress={() => {
-                navigation.navigate(key);
+                if (isParentViewing) {
+                  navigation.navigate(key, { child: childData });
+                } else {
+                  navigation.navigate(key);
+                }
               }}
             >
               <View style={[styles.iconBox, { backgroundColor: bg }]}>
@@ -120,27 +193,34 @@ export default function StudentHomeScreen({ navigation }) {
           </Animated.View>
         ))}
       </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  wrapper: { flex: 1, backgroundColor: C.bg },
   container: { flex: 1, backgroundColor: C.bg },
 
   // ── Header ──
-  header:             { paddingHorizontal: 20, paddingTop: 52, paddingBottom: 28, overflow: 'hidden' },
+  header:             {
+    marginHorizontal: 12,
+    marginTop: 8,
+    borderRadius: 20,
+    paddingHorizontal: 18,
+    paddingTop: 20,
+    paddingBottom: 22,
+    overflow: 'hidden',
+  },
   headerDeco:         { position: 'absolute', width: 200, height: 200, borderRadius: 100, backgroundColor: 'rgba(255,255,255,0.05)', top: -70, right: -50 },
   headerRow:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  schoolRow:          { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
-  schoolBadge:        { width: 28, height: 28, borderRadius: 8 },
-  schoolBadgeFallback:{ width: 28, height: 28, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
-  schoolBadgeText:    { color: '#fff', fontSize: 10, fontWeight: '800' },
-  schoolName:         { color: '#BFDBFE', fontSize: 13, fontWeight: '600', flex: 1 },
   roleLabel:          { color: '#93C5FD', fontSize: 11, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 4 },
   name:               { color: '#fff', fontSize: 22, fontWeight: '800' },
   meta:               { color: '#BFDBFE', fontSize: 12, marginTop: 4 },
   logoutBtn:          { backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 },
   logoutText:         { color: '#fff', fontSize: 13, fontWeight: '600' },
+  liveBadge:          { backgroundColor: 'rgba(255,255,255,0.14)', borderWidth: 1, borderColor: 'rgba(191,219,254,0.4)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginLeft: 10 },
+  liveText:           { color: '#DBEAFE', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
 
   // ── Summary strip ──
   summaryRow:   { flexDirection: 'row', marginTop: 24, paddingTop: 20, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.12)' },
@@ -149,7 +229,14 @@ const styles = StyleSheet.create({
   summaryLabel: { color: 'rgba(255,255,255,0.55)', fontSize: 10, fontWeight: '600', marginTop: 3, textTransform: 'uppercase', letterSpacing: 0.4 },
 
   // ── Section ──
-  sectionTitle: { fontSize: 11, fontWeight: '700', color: C.textLight, marginHorizontal: 20, marginTop: 28, marginBottom: 14, textTransform: 'uppercase', letterSpacing: 1 },
+  sectionTitle: { fontSize: 11, fontWeight: '700', color: C.textLight, marginHorizontal: 20, marginTop: 18, marginBottom: 14, textTransform: 'uppercase', letterSpacing: 1 },
+
+  optionsCampusCard:         { marginHorizontal: 14, marginBottom: 12, backgroundColor: '#EFF6FF', borderRadius: 14, borderWidth: 1, borderColor: '#DBEAFE', paddingVertical: 10, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  optionsCampusLogo:         { width: 40, height: 40, borderRadius: 10 },
+  optionsCampusLogoFallback: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#BFDBFE', justifyContent: 'center', alignItems: 'center' },
+  optionsCampusLogoText:     { color: '#1E3A8A', fontSize: 12, fontWeight: '900' },
+  optionsCampusLabel:        { color: '#2563EB', fontSize: 10, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
+  optionsCampusName:         { color: '#1E3A8A', fontSize: 13, fontWeight: '700', marginTop: 2 },
 
   // ── Grid ──
   grid:     { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 14, justifyContent: 'space-between', rowGap: 12 },

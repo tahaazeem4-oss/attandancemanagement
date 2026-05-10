@@ -9,9 +9,10 @@ exports.getStats = async (req, res) => {
     const [[{ teachers }]] = await db.query('SELECT COUNT(*) AS teachers FROM teachers WHERE school_id=?', [sid]);
     const [[{ students }]] = await db.query('SELECT COUNT(*) AS students FROM students WHERE school_id=?', [sid]);
     const [[{ classes  }]] = await db.query('SELECT COUNT(*) AS classes  FROM classes  WHERE school_id=?', [sid]);
-    const [[{ pending  }]] = await db.query(`SELECT COUNT(*) AS pending FROM leave_applications la JOIN students s ON s.id=la.student_id WHERE s.school_id=? AND la.status='pending'`, [sid]);
+    const [[{ pending  }]] = await db.query(`SELECT COUNT(*) AS pending FROM leave_applications la JOIN students s ON s.id=la.student_id WHERE s.school_id=? AND la.status='pending' AND la.withdrawal_status IS NULL`, [sid]);
+    const [[{ withdrawals }]] = await db.query(`SELECT COUNT(*) AS withdrawals FROM leave_applications la JOIN students s ON s.id=la.student_id WHERE s.school_id=? AND la.withdrawal_status='pending'`, [sid]);
     const [[{ accounts }]] = await db.query('SELECT COUNT(*) AS accounts FROM student_accounts sa JOIN students s ON s.id=sa.student_id WHERE s.school_id=?', [sid]);
-    res.json({ teachers, students, classes, pending_leaves: pending, student_accounts: accounts });
+    res.json({ teachers, students, classes, pending_leaves: pending, pending_withdrawals: withdrawals, student_accounts: accounts });
   } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
 };
 
@@ -279,7 +280,7 @@ exports.deleteAssignment = async (req, res) => {
 exports.listLeaves = async (req, res) => {
   const { status } = req.query;
   const sid = req.user.school_id;
-  let q = `SELECT la.id, la.group_id, la.date, la.reason, la.status, la.applied_at,
+  let q = `SELECT la.id, la.group_id, la.date, la.reason, la.status, la.applied_at, la.withdrawal_status,
                   s.id AS student_id, s.first_name, s.last_name, s.roll_no,
                   c.class_name, sec.section_name
            FROM   leave_applications la
@@ -309,6 +310,7 @@ exports.listLeaves = async (req, res) => {
           section_name: row.section_name,
           reason: row.reason,
           status: row.status,
+          withdrawal_status: row.withdrawal_status,
           applied_at: row.applied_at,
           dates: [],
           ids: [],
@@ -408,5 +410,61 @@ exports.updateLeaveStatus = async (req, res) => {
       }
     }
     res.json({ message: 'Leave status updated' });
+  } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
+};
+
+// ── PUT /admin/leaves/group/:group_id/withdrawal  (handle withdrawal request) ─
+exports.handleWithdrawalRequest = async (req, res) => {
+  const { action } = req.body;
+  const { group_id } = req.params;
+  if (!['approve', 'reject'].includes(action))
+    return res.status(400).json({ message: 'action must be approve or reject' });
+  try {
+    // Find the leave in this group
+    const [leaves] = await db.query(
+      `SELECT la.id, la.student_id, la.date FROM leave_applications
+       WHERE la.group_id = ? AND la.withdrawal_status = 'pending'`,
+      [group_id]
+    );
+    if (leaves.length === 0)
+      return res.status(404).json({ message: 'No pending withdrawal found for this group' });
+
+    // Update withdrawal status
+    const newWithdrawalStatus = action === 'approve' ? 'approved' : 'rejected';
+    await db.query(
+      `UPDATE leave_applications SET withdrawal_status = ? WHERE group_id = ? AND withdrawal_status = 'pending'`,
+      [newWithdrawalStatus, group_id]
+    );
+
+    // If approved, cancel the leave and unlock attendance
+    if (action === 'approve') {
+      for (const leave of leaves) {
+        await db.query(
+          `UPDATE leave_applications SET status = 'cancelled' WHERE group_id = ?`,
+          [group_id]
+        );
+        await db.query(
+          `DELETE FROM student_attendance WHERE student_id = ? AND date = ? AND status = 'leave'`,
+          [leave.student_id, leave.date]
+        );
+      }
+    }
+
+    res.json({ message: `Withdrawal ${newWithdrawalStatus}` });
+
+    // Notify student (non-blocking)
+    if (leaves.length) {
+      const studentId = leaves[0].student_id;
+      const dateLabel = leaves.map(l => l.date).join(', ');
+      push.tokensForStudents([studentId]).then(tokens =>
+        push.send(tokens,
+          action === 'approve' ? 'Withdrawal Approved' : 'Withdrawal Rejected',
+          action === 'approve'
+            ? `Your withdrawal request for ${dateLabel} has been approved.`
+            : `Your withdrawal request for ${dateLabel} has been rejected.`,
+          { type: 'withdrawal_decision', action, group_id }
+        )
+      );
+    }
   } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
 };

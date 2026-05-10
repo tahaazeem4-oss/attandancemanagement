@@ -1,14 +1,14 @@
 ﻿import React, { useState, useEffect, useCallback } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Text, Pressable, FlatList, ActivityIndicator } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator }   from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
+import AppHeader from '../components/AppHeader';
 
 // Auth screens
-import SignUpScreen          from '../screens/SignUpScreen';
 import LoginScreen           from '../screens/LoginScreen';
 import ForgotPasswordScreen  from '../screens/ForgotPasswordScreen';
 
@@ -36,6 +36,7 @@ import AdminClassesScreen     from '../screens/admin/AdminClassesScreen';
 import AdminAssignmentsScreen from '../screens/admin/AdminAssignmentsScreen';
 import AdminLeavesScreen      from '../screens/admin/AdminLeavesScreen';
 import AdminSubjectsScreen                from '../screens/admin/AdminSubjectsScreen';
+import AdminParentsScreen               from '../screens/admin/AdminParentsScreen';
 import AdminTeacherAttendanceScreen       from '../screens/admin/AdminTeacherAttendanceScreen';
 
 // Super admin screens
@@ -51,6 +52,10 @@ import StudentLeaveScreen         from '../screens/student/StudentLeaveScreen';
 import StudentLecturesScreen      from '../screens/student/StudentLecturesScreen';
 import StudentLectureDetailScreen from '../screens/student/StudentLectureDetailScreen';
 import StudentNotificationsScreen from '../screens/student/StudentNotificationsScreen';
+
+// Parent screens
+import ParentLoginScreen       from '../screens/parent/ParentLoginScreen';
+import ParentDashboardScreen   from '../screens/parent/ParentDashboardScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab   = createBottomTabNavigator();
@@ -183,6 +188,7 @@ function AdminHomeStack() {
       <Stack.Screen name="UploadLecture"    component={UploadLectureScreen}    options={{ headerShown: false }} />
       <Stack.Screen name="LectureList"      component={LectureListScreen}      options={{ headerShown: false }} />
       <Stack.Screen name="AdminSubjects"           component={AdminSubjectsScreen}           options={{ headerShown: false }} />
+      <Stack.Screen name="AdminParents"            component={AdminParentsScreen}            options={{ headerShown: false }} />
       <Stack.Screen name="StaffNotifications"       component={StaffNotificationsScreen}       options={{ headerShown: false }} />
       <Stack.Screen name="AdminTeacherAttendance"   component={AdminTeacherAttendanceScreen}   options={{ headerShown: false }} />
       <Stack.Screen name="Report"                    component={ReportScreen}                    options={{ headerShown: false }} />
@@ -330,6 +336,189 @@ function StudentTabs() {
   );
 }
 
+// ────────────────────────────────────────────────────────────────────────────────────────────────────────
+// PARENT STACKS
+// ────────────────────────────────────────────────────────────────────────────────────────────────────────
+function ParentChildHomeStack({ route, child }) {
+  const activeChild = child || route?.params?.child || null;
+  return (
+    <Stack.Navigator key={activeChild?.student_id ? `child-${activeChild.student_id}` : 'child-none'} screenOptions={headerStyle}>
+      <Stack.Screen name="StudentHome"          component={StudentHomeScreen}     initialParams={{ child: activeChild }} options={{ headerShown: false }} />
+      <Stack.Screen name="StudentHistory"       component={StudentHistoryScreen}  initialParams={{ child: activeChild }} options={{ headerShown: false }} />
+      <Stack.Screen name="StudentLeaves"        component={StudentLeaveScreen}    initialParams={{ child: activeChild }} options={{ headerShown: false }} />
+      <Stack.Screen
+        name="StudentClasswork"
+        component={StudentLecturesScreen}
+        initialParams={{ fixedType: 'classwork', title: 'Class Work', child: activeChild }}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="StudentHomework"
+        component={StudentLecturesScreen}
+        initialParams={{ fixedType: 'homework', title: 'Homework', child: activeChild }}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen name="StudentLectureDetail" component={StudentLectureDetailScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="StudentNotifications" component={StudentNotificationsScreen} initialParams={{ child: activeChild }} options={{ headerShown: false }} />
+    </Stack.Navigator>
+  );
+}
+
+function ParentSwitchChildTab({ navigation, currentChild, onSelectChild, onBackHome }) {
+  const [loading, setLoading] = useState(true);
+  const [children, setChildren] = useState([]);
+
+  useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    api.get('/parent/dashboard')
+      .then(({ data }) => {
+        if (mounted) setChildren(data.children || []);
+      })
+      .catch(() => {
+        if (mounted) setChildren([]);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => { mounted = false; };
+  }, [currentChild?.student_id]);
+
+  const initials = (child) => `${(child.first_name || '?')[0]}${(child.last_name || '?')[0]}`.toUpperCase();
+
+  return (
+    <View style={styles.parentSwitchContainer}>
+      <AppHeader title="Your Children" navigation={navigation} />
+      {loading ? (
+        <ActivityIndicator size="large" color="#2563EB" style={{ marginTop: 40 }} />
+      ) : (
+        <FlatList
+          data={children}
+          keyExtractor={(item) => String(item.student_id)}
+          contentContainerStyle={styles.parentSwitchList}
+          ListEmptyComponent={
+            <View style={styles.parentSwitchEmpty}>
+              <Text style={styles.parentSwitchEmptyIcon}>👶</Text>
+              <Text style={styles.parentSwitchEmptyTitle}>No children linked yet</Text>
+              <Text style={styles.parentSwitchEmptyTxt}>Link a child from parent home page first.</Text>
+            </View>
+          }
+          renderItem={({ item }) => {
+            const active = currentChild?.student_id === item.student_id;
+            return (
+              <Pressable
+                onPress={() => { onSelectChild(item); onBackHome(item); }}
+                style={({ pressed }) => [
+                  styles.parentSwitchCard,
+                  active && styles.parentSwitchCardActive,
+                  pressed && { opacity: 0.85 },
+                ]}
+              >
+                <View style={[styles.parentSwitchAvatar, active && styles.parentSwitchAvatarActive]}>
+                  <Text style={styles.parentSwitchAvatarText}>{initials(item)}</Text>
+                </View>
+                <View style={styles.parentSwitchBody}>
+                  <Text style={styles.parentSwitchName}>{item.first_name} {item.last_name}</Text>
+                  <Text style={styles.parentSwitchSubtitle}>{item.class_name || 'Class'} • Sec {item.section_name || '-'}</Text>
+                  {item.age ? <Text style={styles.parentSwitchMeta}>Age {item.age}</Text> : null}
+                </View>
+                <Ionicons name={active ? 'checkmark-circle' : 'chevron-forward'} size={20} color={active ? '#2563EB' : '#94A3B8'} />
+              </Pressable>
+            );
+          }}
+        />
+      )}
+    </View>
+  );
+}
+
+function ParentStudentPortalTabs({ route, navigation }) {
+  const initialChild = route?.params?.child || null;
+  const [currentChild, setCurrentChild] = useState(initialChild);
+  const tabBarOptions = useTabBarOptions();
+  const [notifUnread, setNotifUnread] = useState(0);
+
+  useEffect(() => {
+    const incomingChild = route?.params?.child || null;
+    const selectionToken = route?.params?.selectionToken;
+    if (
+      incomingChild?.student_id &&
+      (incomingChild.student_id !== currentChild?.student_id || !!selectionToken)
+    ) {
+      setCurrentChild(incomingChild);
+    }
+  }, [route?.params?.child?.student_id, route?.params?.selectionToken]);
+
+  useEffect(() => {
+    if (currentChild?.student_id) return;
+    let mounted = true;
+    api.get('/parent/dashboard')
+      .then(({ data }) => {
+        const first = (data.children || [])[0] || null;
+        if (mounted && first?.student_id) setCurrentChild(first);
+      })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, [currentChild?.student_id]);
+
+  const fetchUnread = useCallback(() => {
+    if (currentChild?.student_id) {
+      api.get(`/parent/children/${currentChild.student_id}/notifications`)
+        .then(({ data }) => {
+          const list = data.notifications || [];
+          setNotifUnread(list.filter(n => !n.is_read).length);
+        })
+        .catch(() => setNotifUnread(0));
+      return;
+    }
+    api.get('/notifications/me/unread-count')
+      .then(({ data }) => setNotifUnread(data.count || 0))
+      .catch(() => setNotifUnread(0));
+  }, [currentChild?.student_id]);
+  useEffect(() => { fetchUnread(); }, [fetchUnread]);
+
+  return (
+    <Tab.Navigator screenOptions={{ ...tabBarOptions, headerShown: false }} initialRouteName="HomeTab">
+      <Tab.Screen
+        name="ParentHomeTab"
+        component={ParentDashboardScreen}
+        listeners={{
+          tabPress: (e) => {
+            e.preventDefault();
+            navigation.navigate('ParentDashboard');
+          },
+        }}
+        options={{ title: 'Parent Home', tabBarIcon: ({ focused }) => tabIcon(focused, 'grid', 'grid-outline') }}
+      />
+      <Tab.Screen
+        name="HomeTab"
+        children={(props) => <ParentChildHomeStack {...props} child={currentChild} />}
+        options={{ title: 'Home', tabBarIcon: ({ focused }) => tabIcon(focused, 'home', 'home-outline', 26) }}
+      />
+      <Tab.Screen
+        name="NotifTab"
+        children={(props) => <StudentNotificationsScreen {...props} route={{ ...props.route, params: { ...(props.route?.params || {}), child: currentChild } }} />}
+        listeners={{ tabPress: fetchUnread }}
+        options={{
+          title: 'Notifications',
+          tabBarBadge: notificationBadgeValue(notifUnread),
+          tabBarBadgeStyle: { backgroundColor: '#EF4444', color: '#fff', fontSize: 10, minWidth: 18, height: 18, lineHeight: 18 },
+          tabBarIcon: ({ focused }) => notificationTabIcon({ focused, unread: notifUnread }),
+        }}
+      />
+    </Tab.Navigator>
+  );
+}
+
+function ParentStack() {
+  return (
+    <Stack.Navigator screenOptions={headerStyle}>
+      <Stack.Screen name="ParentDashboard" component={ParentDashboardScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="ChildStudentPortal" component={ParentStudentPortalTabs} options={{ headerShown: false }} />
+    </Stack.Navigator>
+  );
+}
+
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // ROOT NAVIGATOR
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -341,8 +530,8 @@ export default function AppNavigator() {
       {!user ? (
         <>
           <Stack.Screen name="Login"         component={LoginScreen} />
-          <Stack.Screen name="SignUp"         component={SignUpScreen} />
           <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+          <Stack.Screen name="ParentLogin"    component={ParentLoginScreen} />
         </>
       ) : user.role === 'super_admin' ? (
         <Stack.Screen name="SuperAdminTabs" component={SuperAdminTabs} />
@@ -350,6 +539,8 @@ export default function AppNavigator() {
         <Stack.Screen name="AdminTabs" component={AdminTabs} />
       ) : user.role === 'student' ? (
         <Stack.Screen name="StudentTabs" component={StudentTabs} />
+      ) : user.role === 'parent' ? (
+        <Stack.Screen name="ParentStack" component={ParentStack} />
       ) : (
         <Stack.Screen name="TeacherTabs" component={TeacherTabs} />
       )}
@@ -358,6 +549,90 @@ export default function AppNavigator() {
 }
 
 const styles = StyleSheet.create({
+  parentSwitchContainer: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+  },
+  parentSwitchList: {
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 24,
+  },
+  parentSwitchEmpty: {
+    alignItems: 'center',
+    marginTop: 60,
+    paddingHorizontal: 32,
+  },
+  parentSwitchEmptyIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  parentSwitchEmptyTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 4,
+  },
+  parentSwitchEmptyTxt: {
+    fontSize: 14,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  parentSwitchCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    marginVertical: 6,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  parentSwitchCardActive: {
+    borderColor: '#2563EB',
+    backgroundColor: '#F8FBFF',
+  },
+  parentSwitchAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#EEF2FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  parentSwitchAvatarActive: {
+    backgroundColor: '#DBEAFE',
+  },
+  parentSwitchAvatarText: {
+    color: '#2563EB',
+    fontWeight: '800',
+    fontSize: 14,
+  },
+  parentSwitchBody: {
+    flex: 1,
+  },
+  parentSwitchName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  parentSwitchSubtitle: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 1,
+  },
+  parentSwitchMeta: {
+    fontSize: 11,
+    color: '#94A3B8',
+    marginTop: 2,
+  },
   notifIconWrap: {
     width: 34,
     height: 28,

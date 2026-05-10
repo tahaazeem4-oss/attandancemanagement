@@ -1,28 +1,36 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet, StatusBar, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const PT = Platform.OS === 'ios' ? 44 : (StatusBar.currentHeight ?? 24);
+export default function AppHeader({ title, navigation, showBack = true }) {
+  const insets = useSafeAreaInsets();
+  const statusInset = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0;
+  const topInset = Math.max(insets.top, statusInset);
+  const topPad = topInset + 10;
 
-export default function AppHeader({ title, navigation }) {
   return (
     <>
-      <StatusBar barStyle="light-content" backgroundColor="#1E3A8A" />
+      <StatusBar barStyle="light-content" backgroundColor="#1E3A8A" translucent={false} />
       <LinearGradient
         colors={['#1E3A8A', '#2563EB']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={styles.header}
+        style={[styles.header, { paddingTop: topPad }]}
       >
         <View style={styles.row}>
           {/* Left: back arrow */}
-          <Pressable
-            onPress={() => navigation?.goBack()}
-            style={styles.backBtn}
-            hitSlop={10}
-          >
-            <Text style={styles.backIcon}>‹</Text>
-          </Pressable>
+          {showBack ? (
+            <Pressable
+              onPress={() => navigation?.goBack()}
+              style={styles.backBtn}
+              hitSlop={10}
+            >
+              <Text style={styles.backIcon}>‹</Text>
+            </Pressable>
+          ) : (
+            <View style={styles.side} />
+          )}
 
           {/* Center: title */}
           <Text style={styles.title} numberOfLines={1}>{title}</Text>
@@ -37,36 +45,39 @@ export default function AppHeader({ title, navigation }) {
 
 const styles = StyleSheet.create({
   header: {
-    paddingTop: PT,
-    paddingBottom: 14,
-    paddingHorizontal: 4,
+    paddingBottom: 12,
+    paddingHorizontal: 8,
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 44,
+    height: 42,
   },
   backBtn: {
-    width: 48,
-    height: 48,
+    width: 42,
+    height: 42,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.14)',
   },
   backIcon: {
     color: '#fff',
-    fontSize: 34,
-    lineHeight: 38,
-    marginTop: -4,
+    fontSize: 30,
+    lineHeight: 34,
+    marginTop: -2,
   },
   title: {
     flex: 1,
     textAlign: 'center',
     color: '#fff',
-    fontSize: 18,
-    fontWeight: '700',
-    letterSpacing: 0.3,
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
   side: {
-    width: 48,
+    width: 42,
   },
 });

@@ -132,7 +132,7 @@ exports.requestWithdrawal = async (req, res) => {
   const studentId    = req.user.student_id;
   try {
     const [rows] = await db.query(
-      `SELECT id, status, withdrawal_status FROM leave_applications
+      `SELECT id, status, withdrawal_status, date FROM leave_applications
        WHERE group_id=? AND student_id=? AND status IN ('pending','approved')`,
       [group_id, studentId]
     );
@@ -146,6 +146,21 @@ exports.requestWithdrawal = async (req, res) => {
        WHERE group_id=? AND student_id=? AND status IN ('pending','approved')`,
       [group_id, studentId]
     );
+    
+    // Notify teacher and admin of withdrawal request
+    const [student] = await db.query('SELECT first_name, last_name, school_id, class_id, section_id FROM students WHERE id=?', [studentId]);
+    if (student.length > 0) {
+      const studentName = `${student[0].first_name} ${student[0].last_name}`;
+      const dateLabel = rows[0].date ? new Date(rows[0].date).toLocaleDateString() : 'N/A';
+      Promise.all([
+        push.tokensForClassTeachers(student[0].class_id, student[0].section_id),
+        push.tokensForSchoolAdmins(student[0].school_id),
+      ]).then(([teacherTokens, adminTokens]) => {
+        const allTokens = [...new Set([...teacherTokens, ...adminTokens])];
+        push.send(allTokens, 'Leave Withdrawal Request', `${studentName} requested to withdraw leave on ${dateLabel}.`, { type: 'withdrawal_request', group_id });
+      }).catch(() => {});
+    }
+    
     res.json({ message: 'Withdrawal request submitted, awaiting teacher approval' });
   } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
 };

@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import { C } from '../config/theme';
@@ -17,6 +18,7 @@ const ROLE_LABELS = {
 };
 
 export default function ProfileScreen() {
+  const insets = useSafeAreaInsets();
   const { user, school, logout } = useAuth();
 
   const [oldPassword,     setOldPassword]     = useState('');
@@ -26,6 +28,8 @@ export default function ProfileScreen() {
   const [showOld,         setShowOld]         = useState(false);
   const [showNew,         setShowNew]         = useState(false);
   const [showConfirm,     setShowConfirm]     = useState(false);
+  const statusInset = StatusBar.currentHeight ?? 0;
+  const headerTopPad = Math.max(insets.top, statusInset) + 18;
 
   const initials = `${user?.first_name?.[0] || ''}${user?.last_name?.[0] || ''}`.toUpperCase();
 
@@ -70,13 +74,13 @@ export default function ProfileScreen() {
       contentContainerStyle={{ paddingBottom: 60 }}
       showsVerticalScrollIndicator={false}
     >
-      <StatusBar barStyle="light-content" backgroundColor="#1E40AF" />
+      <StatusBar barStyle="light-content" backgroundColor="#1E40AF" translucent={false} />
 
       {/* ── Header ────────────────────────────────────────── */}
       <LinearGradient
         colors={['#1E3A8A', '#2563EB']}
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={styles.header}
+        style={[styles.header, { paddingTop: headerTopPad }]}
       >
         <View style={styles.headerDeco} pointerEvents="none" />
         <View style={styles.avatarWrap}>

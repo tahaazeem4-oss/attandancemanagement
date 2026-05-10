@@ -56,6 +56,17 @@ export function AuthProvider({ children }) {
   // Computed: backward-compat teacher ref (used by existing teacher screens)
   const teacher = user?.role === 'teacher' ? user : null;
 
+  const resolveSchoolById = async (schoolId) => {
+    if (!schoolId) return null;
+    try {
+      const { data } = await api.get('/schools');
+      const list = Array.isArray(data) ? data : [];
+      return list.find((s) => Number(s?.id) === Number(schoolId)) || null;
+    } catch {
+      return null;
+    }
+  };
+
   // Restore session from storage on launch
   useEffect(() => {
     (async () => {
@@ -104,6 +115,58 @@ export function AuthProvider({ children }) {
     return data;
   };
 
+  const parentLogin = async (email, password) => {
+    const { data } = await api.post('/parent/login', { email: email.trim().toLowerCase(), password });
+    const u = {
+      id: data.id,
+      email: data.email,
+      first_name: data.first_name,
+      last_name: data.last_name,
+      role: 'parent',
+      school_id: data.school_id,
+    };
+    await storage.setItem('token', data.token);
+    await storage.setItem('user',  JSON.stringify(u));
+    api.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
+    setUser(u);
+
+    const sc = await resolveSchoolById(data.school_id);
+    if (sc) {
+      await storage.setItem('school', JSON.stringify(sc));
+      setSchool(sc);
+    } else {
+      await storage.removeItem('school');
+      setSchool(null);
+    }
+    return data;
+  };
+
+  const parentSignup = async (payload) => {
+    const { data } = await api.post('/parent/signup', payload);
+    const u = {
+      id: data.id,
+      email: data.email,
+      first_name: data.first_name,
+      last_name: data.last_name,
+      role: 'parent',
+      school_id: data.school_id,
+    };
+    await storage.setItem('token', data.token);
+    await storage.setItem('user',  JSON.stringify(u));
+    api.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
+    setUser(u);
+
+    const sc = await resolveSchoolById(data.school_id);
+    if (sc) {
+      await storage.setItem('school', JSON.stringify(sc));
+      setSchool(sc);
+    } else {
+      await storage.removeItem('school');
+      setSchool(null);
+    }
+    return data;
+  };
+
   const signup = async (payload) => {
     const { data } = await api.post('/auth/signup', payload);
     const u = data.user;
@@ -144,7 +207,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, teacher, school, loading, login, signup, logout }}>
+    <AuthContext.Provider value={{ user, teacher, school, loading, login, parentLogin, parentSignup, signup, logout }}>
       {children}
     </AuthContext.Provider>
   );

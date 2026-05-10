@@ -6,6 +6,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import { C } from '../config/theme';
@@ -24,6 +25,7 @@ function greet() {
 }
 
 export default function HomeScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const { teacher, school, logout } = useAuth();
   const [todayStatus,      setTodayStatus]      = useState(null);
   const [loadingStatus,    setLoadingStatus]    = useState(true);
@@ -111,16 +113,18 @@ export default function HomeScreen({ navigation }) {
   const schoolSub  = school?.tagline || 'Attendance Management System';
   const initials   = school?.initials || schoolName.slice(0, 2).toUpperCase();
   const isLocked   = teacherRole === 'subject_teacher';
+  const statusInset = StatusBar.currentHeight ?? 0;
+  const headerTopPad = Math.max(insets.top, statusInset) + 18;
 
   return (
     <ScrollView style={styles.root} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }}>
-      <StatusBar barStyle="light-content" backgroundColor="#1E40AF" />
+      <StatusBar barStyle="light-content" backgroundColor="#1E40AF" translucent={false} />
 
       {/* ══ HEADER ══════════════════════════════════════════════ */}
       <LinearGradient
         colors={['#1E3A8A', '#2563EB']}
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={styles.header}
+        style={[styles.header, { paddingTop: headerTopPad }]}
       >
         {/* Subtle decorative circle */}
         <View style={styles.headerDeco} pointerEvents="none" />

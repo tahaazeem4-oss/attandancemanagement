@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
+    "bootstrap:parents": "node createParentsFromStudents.js",
     "kill": "powershell -Command \"Stop-Process -Id (Get-NetTCPConnection -LocalPort 5000 -State Listen).OwningProcess -Force 2>$null; Write-Host 'Port freed'\""
   },
   "dependencies": {

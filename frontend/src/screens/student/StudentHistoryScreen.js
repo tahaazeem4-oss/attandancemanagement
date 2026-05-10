@@ -12,7 +12,7 @@ const STATUS_BG    = { present: '#ECFDF5', absent: '#FEF2F2', leave: '#FFFBEB' }
 const STATUS_ICON  = { present: '✓', absent: '✗', leave: '~' };
 const MONTHS       = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-export default function StudentHistoryScreen({ navigation }) {
+export default function StudentHistoryScreen({ navigation, route }) {
   const now     = new Date();
   const [year,  setYear]  = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1); // 1-based
@@ -20,14 +20,22 @@ export default function StudentHistoryScreen({ navigation }) {
   const [stats,   setStats]   = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Support parent viewing child's portal
+  const childData = route?.params?.child;
+  const childId = childData?.student_id;
+  const isParentViewing = !!childData;
+  const endpoint = isParentViewing 
+    ? `/parent/children/${childId}/attendance`
+    : '/student-portal/attendance';
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await api.get('/student-portal/attendance', { params: { month, year } });
+      const { data } = await api.get(endpoint, { params: { month, year } });
       setRecords(data.records || []); setStats(data.stats || null);
     } catch { setRecords([]); }
     finally { setLoading(false); }
-  }, [month, year]);
+  }, [month, year, endpoint]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -41,9 +49,9 @@ export default function StudentHistoryScreen({ navigation }) {
   const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1;
 
   return (
-    <View style={styles.container}>
+    <View style={styles.wrapper}>
       <AppHeader title="Attendance History" navigation={navigation} />
-
+      <View style={styles.container}>
       {/* Month navigator */}
       <View style={styles.navRow}>
         <Pressable style={styles.navBtn} onPress={() => changeMonth(-1)}>
@@ -95,11 +103,13 @@ export default function StudentHistoryScreen({ navigation }) {
             }}
           />
         )}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  wrapper:     { flex: 1, backgroundColor: C.bg },
   container:   { flex: 1, backgroundColor: C.bg },
   navRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 20, paddingVertical: 12, backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.border },
   navBtn:      { width: 36, height: 36, borderRadius: 10, backgroundColor: C.primaryLight, justifyContent: 'center', alignItems: 'center' },

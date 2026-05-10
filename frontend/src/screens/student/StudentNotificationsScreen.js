@@ -43,19 +43,30 @@ function timeAgo(iso) {
 
 const FILTER_CATEGORIES = ['all', ...Object.keys(CATEGORY_META)];
 
-export default function StudentNotificationsScreen({ navigation }) {
+export default function StudentNotificationsScreen({ navigation, route }) {
   const [notifications, setNotifications] = useState([]);
   const [loading,       setLoading]       = useState(true);
   const [markingAll,    setMarkingAll]     = useState(false);
   const [filter,        setFilter]        = useState('all');
   const [expanded,      setExpanded]      = useState(null); // id of expanded card
 
+  // Support parent viewing child's portal
+  const childId = route?.params?.child?.student_id;
+  const isParentViewing = !!childId;
+
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await api.get('/notifications/me');
+      let data;
+      if (isParentViewing) {
+        const res = await api.get(`/parent/children/${childId}/notifications`);
+        data = res.data.notifications || [];
+      } else {
+        const res = await api.get('/notifications/me');
+        data = res.data || [];
+      }
       setNotifications(data);
       Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
     } catch {
@@ -63,7 +74,7 @@ export default function StudentNotificationsScreen({ navigation }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [childId, isParentViewing, fadeAnim]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -77,7 +88,11 @@ export default function StudentNotificationsScreen({ navigation }) {
     );
 
     try {
-      await api.post(`/notifications/${notif.id}/read`);
+      if (isParentViewing && childId) {
+        await api.post(`/parent/children/${childId}/notifications/${notif.id}/read`);
+      } else {
+        await api.post(`/notifications/${notif.id}/read`);
+      }
     } catch {
       setNotifications(prev =>
         prev.map(n => n.id === notif.id ? { ...n, is_read: false } : n)
@@ -94,6 +109,7 @@ export default function StudentNotificationsScreen({ navigation }) {
 
   // ── Mark all as read ───────────────────────────────────────
   const markAll = async () => {
+    if (isParentViewing) return;
     setMarkingAll(true);
     try {
       await api.post('/notifications/read-all');
@@ -170,11 +186,12 @@ export default function StudentNotificationsScreen({ navigation }) {
   };
 
   return (
-    <View style={styles.root}>
+    <View style={styles.rootWrap}>
       <AppHeader title="Notifications" navigation={navigation} />
+    <View style={styles.root}>
 
       {/* Mark all read row */}
-      {unreadCount > 0 && (
+      {!isParentViewing && unreadCount > 0 && (
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.border }}>
           <Text style={{ fontSize: 13, color: C.textMed, fontWeight: '600' }}>
             {unreadCount} unread
@@ -191,7 +208,7 @@ export default function StudentNotificationsScreen({ navigation }) {
         </View>
       )}
 
-      {/* Category filter tabs */}}
+      {/* Category filter tabs */}
       <View style={styles.filterBar}>
         <FlatList
           data={FILTER_CATEGORIES}
@@ -238,10 +255,12 @@ export default function StudentNotificationsScreen({ navigation }) {
           />
         )}
     </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  rootWrap: { flex: 1, backgroundColor: C.bg },
   root:  { flex: 1, backgroundColor: C.bg },
 
   // Header

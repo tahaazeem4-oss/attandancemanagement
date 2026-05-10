@@ -148,6 +148,28 @@ export async function handleAuth(
         return json({ token, role: "student", user, school });
       }
 
+      // 5. Parent
+      const { data: parents } = await db
+        .from("parents")
+        .select("*")
+        .eq("email", e);
+      if (parents?.length) {
+        const p = parents[0];
+        if (!(await comparePassword(password, p.password)))
+          return json({ message: "Invalid credentials" }, 401);
+        const user = {
+          id: p.id,
+          first_name: p.first_name,
+          last_name: p.last_name,
+          email: p.email,
+          phone: p.phone,
+          role: "parent",
+          school_id: p.school_id,
+        };
+        const token = await signJwt(user);
+        return json({ token, role: "parent", user, school: null });
+      }
+
       return json({ message: "Invalid credentials" }, 401);
     } catch (err) {
       console.error("[auth/login]", err);

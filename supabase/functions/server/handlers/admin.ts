@@ -30,25 +30,34 @@ export async function handleAdmin(
   // ── GET /admin/stats ─────────────────────────────────────────
   if (path === "/admin/stats" && method === "GET") {
     try {
+      const { data: leaveRows, error: leaveErr } = await db
+        .from("leave_applications")
+        .select("group_id, status, withdrawal_status, students!inner(school_id)")
+        .eq("students.school_id", schoolId);
+      if (leaveErr) throw leaveErr;
+
+      const pendingGroups = new Set<string>();
+      for (const row of leaveRows || []) {
+        const r = row as Record<string, unknown>;
+        const gid = String(r.group_id ?? "");
+        if (!gid) continue;
+        if (r.status === "pending" || r.withdrawal_status === "pending") pendingGroups.add(gid);
+      }
+
       const [
         { count: teachers },
         { count: students },
         { count: classes },
-        { count: pending_leaves },
         { count: student_accounts },
       ] = await Promise.all([
         db.from("teachers").select("*", { count: "exact", head: true }).eq("school_id", schoolId),
         db.from("students").select("*", { count: "exact", head: true }).eq("school_id", schoolId),
         db.from("classes").select("*", { count: "exact", head: true }).eq("school_id", schoolId),
-        db.from("leave_applications")
-          .select("*, students!inner(school_id)", { count: "exact", head: true })
-          .eq("status", "pending")
-          .eq("students.school_id", schoolId),
         db.from("student_accounts")
           .select("*, students!inner(school_id)", { count: "exact", head: true })
           .eq("students.school_id", schoolId),
       ]);
-      return json({ teachers, students, classes, pending_leaves, student_accounts });
+      return json({ teachers, students, classes, pending_leaves: pendingGroups.size, student_accounts });
     } catch (err) {
       console.error("[admin/stats]", err);
       return json({ message: "Server error" }, 500);
@@ -620,6 +629,78 @@ export async function handleAdmin(
       return json({ message: "Status updated", count: leaves.length });
     } catch (err) {
       console.error("[admin/leaves/group/status]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── PUT /admin/leaves/group/:id/withdrawal ────────────────────
+  const adminWithdrawalMatch = path.match(/^\/admin\/leaves\/group\/([^/]+)\/withdrawal$/);
+  if (adminWithdrawalMatch && method === "PUT") {
+    const groupId = adminWithdrawalMatch[1];
+    try {
+      const { action } = await req.json();
+      if (!["approve", "reject"].includes(action))
+        return json({ message: "action must be approve or reject" }, 400);
+
+      const { data: leaves, error: leavesErr } = await db
+        .from("leave_applications")
+        .select("id, student_id, date")
+        .eq("group_id", groupId)
+        .eq("withdrawal_status", "pending");
+
+      if (leavesErr) {
+        console.error("[admin/leaves/group/withdrawal] fetch error", leavesErr);
+        return json({ message: "Server error" }, 500);
+      }
+
+      if (!leaves?.length)
+        return json({ message: "No pending withdrawal found for this group" }, 404);
+
+      const studentId = (leaves[0] as Record<string, unknown>).student_id as number;
+
+      if (action === "approve") {
+        // Schema constraint allows withdrawal_status only as pending/rejected, so
+        // approval clears withdrawal_status and cancels the leave.
+        const { error: cancelErr } = await db.from("leave_applications")
+          .update({ status: "cancelled", withdrawal_status: null })
+          .eq("group_id", groupId)
+          .eq("withdrawal_status", "pending");
+        if (cancelErr) {
+          console.error("[admin/leaves/group/withdrawal] cancel error", cancelErr);
+          return json({ message: "Could not approve withdrawal" }, 500);
+        }
+        for (const leave of leaves) {
+          const l = leave as Record<string, unknown>;
+          const { error: deleteErr } = await db.from("student_attendance")
+            .delete()
+            .eq("student_id", studentId)
+            .eq("date", l.date)
+            .eq("status", "leave");
+          if (deleteErr) {
+            console.error("[admin/leaves/group/withdrawal] attendance delete error", deleteErr);
+            return json({ message: "Could not unlock attendance" }, 500);
+          }
+        }
+        tokensForStudents(db, [studentId]).then((tokens) =>
+          sendPush(tokens, "Withdrawal Approved", "Your leave withdrawal request has been approved by the admin.", { type: "withdrawal_decision", action })
+        );
+      } else {
+        const { error: rejectErr } = await db.from("leave_applications")
+          .update({ withdrawal_status: "rejected" })
+          .eq("group_id", groupId)
+          .eq("withdrawal_status", "pending");
+        if (rejectErr) {
+          console.error("[admin/leaves/group/withdrawal] reject error", rejectErr);
+          return json({ message: "Could not update withdrawal status" }, 500);
+        }
+        tokensForStudents(db, [studentId]).then((tokens) =>
+          sendPush(tokens, "Withdrawal Rejected", "Your leave withdrawal request has been rejected by the admin.", { type: "withdrawal_decision", action })
+        );
+      }
+
+      return json({ message: action === "approve" ? "Withdrawal approved" : "Withdrawal rejected" });
+    } catch (err) {
+      console.error("[admin/leaves/group/withdrawal]", err);
       return json({ message: "Server error" }, 500);
     }
   }

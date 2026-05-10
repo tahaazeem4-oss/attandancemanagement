@@ -85,6 +85,13 @@ export async function verifyToken(
   return (await verify(token, key)) as Record<string, unknown>;
 }
 
+export async function verifyTokenString(
+  token: string,
+): Promise<Record<string, unknown>> {
+  const key = await getJwtKey("verify");
+  return (await verify(token, key)) as Record<string, unknown>;
+}
+
 // ── Password utilities ────────────────────────────────────────
 export async function hashPassword(password: string): Promise<string> {
   return await bcrypt.hash(password, 10);

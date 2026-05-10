@@ -77,7 +77,7 @@ function CalendarPicker({ selectedDates, onChange }) {
 }
 
 // ── Main Screen ───────────────────────────────────────────────
-export default function StudentLeaveScreen({ navigation }) {
+export default function StudentLeaveScreen({ navigation, route }) {
   const [groups,    setGroups]    = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [modal,     setModal]     = useState(false);
@@ -87,18 +87,39 @@ export default function StudentLeaveScreen({ navigation }) {
   const [withdrawing, setWithdrawing] = useState(null); // group_id being withdrawn
   const [confirmWithdraw, setConfirmWithdraw] = useState(null); // group_id awaiting tap-confirm
 
+  // Support parent viewing child's portal
+  const childId = route?.params?.child?.student_id;
+  const isParentViewing = !!childId;
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await api.get('/student-portal/leaves');
+      let data;
+      if (isParentViewing) {
+        const res = await api.get(`/parent/children/${childId}/leaves`);
+        const raw = res.data.leaves || [];
+        data = raw.map((leave) => ({
+          group_id: leave.group_id || leave.id,
+          dates: Array.isArray(leave.dates)
+            ? leave.dates
+            : (leave.date ? [leave.date] : []),
+          reason: leave.reason,
+          status: leave.status,
+          applied_at: leave.applied_at,
+          withdrawal_status: leave.withdrawal_status || null,
+        }));
+      } else {
+        const res = await api.get('/student-portal/leaves');
+        data = res.data || [];
+      }
       // Hide fully cancelled groups
       setGroups(data.filter(g => g.status !== 'cancelled'));
     }
     catch { Alert.alert('Error', 'Could not load leaves'); }
     finally { setLoading(false); }
-  }, []);
+  }, [childId, isParentViewing]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   const openModal = () => { setSelDates([]); setReason(''); setModal(true); };
 
@@ -107,7 +128,10 @@ export default function StudentLeaveScreen({ navigation }) {
     if (!reason.trim())        return Alert.alert('Validation', 'Please provide a reason for leave.');
     setSaving(true);
     try {
-      await api.post('/student-portal/leaves', { dates: selDates, reason: reason.trim() });
+      const endpoint = isParentViewing
+        ? `/parent/children/${childId}/leaves`
+        : '/student-portal/leaves';
+      await api.post(endpoint, { dates: selDates, reason: reason.trim() });
       setModal(false);
       load();
     } catch (err) { Alert.alert('Error', err?.response?.data?.message || 'Failed to apply'); }
@@ -130,7 +154,10 @@ export default function StudentLeaveScreen({ navigation }) {
   const doWithdraw = async (group_id) => {
     setWithdrawing(group_id);
     try {
-      await api.put(`/student-portal/leaves/group/${group_id}/withdraw`);
+      const endpoint = isParentViewing
+        ? `/parent/children/${childId}/leaves/group/${group_id}/withdraw`
+        : `/student-portal/leaves/group/${group_id}/withdraw`;
+      await api.put(endpoint);
       await load();
     } catch (err) {
       Alert.alert('Error', err?.response?.data?.message || 'Failed to send withdrawal request');
@@ -147,9 +174,9 @@ export default function StudentLeaveScreen({ navigation }) {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={styles.wrapper}>
       <AppHeader title="Leave Applications" navigation={navigation} />
-
+      <View style={styles.container}>
       {loading
         ? <ActivityIndicator color={C.primary} style={{ flex: 1 }} />
         : (
@@ -253,6 +280,7 @@ export default function StudentLeaveScreen({ navigation }) {
           </View>
         </View>
       </Modal>
+      </View>
     </View>
   );
 }
@@ -275,6 +303,7 @@ const cal = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
+  wrapper:      { flex: 1, backgroundColor: C.bg },
   container:    { flex: 1, backgroundColor: C.bg },
   header:       { paddingHorizontal: 20, paddingTop: 52, paddingBottom: 24 },
   headerTitle:  { color: '#ECFDF5', fontSize: 22, fontWeight: '800' },

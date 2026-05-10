@@ -116,12 +116,15 @@ export default function TeacherLeavesScreen({ navigation }) {
   const filtered = (() => {
     if (filter === 'withdrawals') return pendingWithdrawals;
     if (filter === 'all')         return leaves;
+    if (filter === 'pending') {
+      return leaves.filter(l => l.status === 'pending' || l.withdrawal_status === 'pending');
+    }
     return leaves.filter(l => l.status === filter && !l.withdrawal_status);
   })();
 
   const counts = {
     all:         leaves.length,
-    pending:     leaves.filter(l => l.status === 'pending' && !l.withdrawal_status).length,
+    pending:     leaves.filter(l => l.status === 'pending' || l.withdrawal_status === 'pending').length,
     approved:    leaves.filter(l => l.status === 'approved' && !l.withdrawal_status).length,
     rejected:    leaves.filter(l => l.status === 'rejected').length,
     withdrawals: pendingWithdrawals.length,
@@ -143,13 +146,17 @@ export default function TeacherLeavesScreen({ navigation }) {
     return `${dates[0]}  +${dates.length - 1} more`;
   };
 
+  const getStudentName = (item) =>
+    item.student_name || `${item.first_name || ''} ${item.last_name || ''}`.trim();
+
   const renderItem = ({ item }) => {
     const isActing = acting === item.group_id;
+    const studentName = getStudentName(item);
     return (
       <View style={styles.card}>
         <View style={styles.cardTop}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.studentName}>{item.first_name} {item.last_name}</Text>
+            <Text style={styles.studentName}>{studentName}</Text>
             <Text style={styles.meta}>
               {item.class_name} · Section {item.section_name}
               {item.roll_no ? ` · Roll #${item.roll_no}` : ''}
@@ -159,9 +166,9 @@ export default function TeacherLeavesScreen({ navigation }) {
               {item.dates?.length > 1 ? ` (${item.dates.length} days)` : ''}
             </Text>
           </View>
-          <View style={[styles.badge, { backgroundColor: STATUS_BG[item.status] || '#F1F5F9' }]}>
-            <Text style={[styles.badgeTxt, { color: STATUS_COLOR[item.status] || '#64748B' }]}>
-              {item.status?.toUpperCase()}
+          <View style={[styles.badge, { backgroundColor: item.withdrawal_status === 'pending' ? '#FFFBEB' : STATUS_BG[item.status] || '#F1F5F9' }]}>
+            <Text style={[styles.badgeTxt, { color: item.withdrawal_status === 'pending' ? '#F59E0B' : STATUS_COLOR[item.status] || '#64748B' }]}>
+              {item.withdrawal_status === 'pending' ? '↩ PENDING' : item.status?.toUpperCase()}
             </Text>
           </View>
         </View>
@@ -203,7 +210,7 @@ export default function TeacherLeavesScreen({ navigation }) {
             <Pressable
               style={[styles.approveBtn, isActing && { opacity: 0.6 }]}
               disabled={isActing}
-              onPress={() => handleLeaveAction(item.group_id, 'approved', `${item.first_name} ${item.last_name}`, item.dates?.length)}
+              onPress={() => handleLeaveAction(item.group_id, 'approved', studentName, item.dates?.length)}
             >
               {isActing
                 ? <ActivityIndicator color="#fff" size="small" />
@@ -212,7 +219,7 @@ export default function TeacherLeavesScreen({ navigation }) {
             <Pressable
               style={[styles.rejectBtn, isActing && { opacity: 0.6 }]}
               disabled={isActing}
-              onPress={() => handleLeaveAction(item.group_id, 'rejected', `${item.first_name} ${item.last_name}`, item.dates?.length)}
+              onPress={() => handleLeaveAction(item.group_id, 'rejected', studentName, item.dates?.length)}
             >
               {isActing
                 ? <ActivityIndicator color="#EF4444" size="small" />
@@ -266,9 +273,9 @@ export default function TeacherLeavesScreen({ navigation }) {
 
       <FlatList
             data={filtered}
-            keyExtractor={item => String(item.group_id)}
+        keyExtractor={(item, index) => String(item.group_id ?? item.id ?? index)}
             extraData={leaves}
-            contentContainerStyle={{ padding: 14, paddingBottom: 32 }}
+        contentContainerStyle={{ padding: 14, paddingTop: 10, paddingBottom: 32 }}
             onRefresh={load}
             refreshing={loading}
             ListEmptyComponent={
@@ -300,10 +307,10 @@ const styles = StyleSheet.create({
   headerTitle:  { fontSize: 20, fontWeight: '800', color: '#E0E7FF', marginBottom: 4 },
   headerSub:    { fontSize: 13, color: 'rgba(224,231,255,0.6)' },
 
-  tabsScroll:            { backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.border },
-  tabsContent:           { paddingHorizontal: 8 },
-  tab:                   { paddingVertical: 11, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', minWidth: 90 },
-  tabActive:             { borderBottomWidth: 2, borderColor: C.primary },
+  tabsScroll:            { backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.border, minHeight: 56 },
+  tabsContent:           { paddingHorizontal: 8, paddingVertical: 8, paddingRight: 18, alignItems: 'center' },
+  tab:                   { paddingVertical: 10, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', minWidth: 92, marginRight: 8, borderRadius: 12, backgroundColor: '#E2E8F0' },
+  tabActive:             { backgroundColor: C.primary },
   tabTxt:                { fontSize: 11, fontWeight: '600', color: C.textMed, textAlign: 'center' },
   tabTxtActive:          { color: C.primary },
   tabWithdrawal:         { backgroundColor: '#FFFBEB' },
@@ -327,10 +334,10 @@ const styles = StyleSheet.create({
                         borderWidth: 1, borderColor: '#FDE68A' },
   withdrawBannerTxt: { fontSize: 12, fontWeight: '700', color: '#92400E', marginBottom: 8 },
 
-  actions:      { flexDirection: 'row', gap: 10 },
-  approveBtn:   { flex: 1, backgroundColor: C.present, borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
+  actions:      { flexDirection: 'row', justifyContent: 'space-between' },
+  approveBtn:   { width: '48%', backgroundColor: C.present, borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
   approveTxt:   { color: '#fff', fontWeight: '700', fontSize: 13 },
-  rejectBtn:    { flex: 1, backgroundColor: '#FEF2F2', borderRadius: 10, paddingVertical: 10, alignItems: 'center', borderWidth: 1, borderColor: '#FECACA' },
+  rejectBtn:    { width: '48%', backgroundColor: '#FEF2F2', borderRadius: 10, paddingVertical: 10, alignItems: 'center', borderWidth: 1, borderColor: '#FECACA' },
   rejectTxt:    { color: '#EF4444', fontWeight: '700', fontSize: 13 },
 
   empty:        { alignItems: 'center', marginTop: 60 },

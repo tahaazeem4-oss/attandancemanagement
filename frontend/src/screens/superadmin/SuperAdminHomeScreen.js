@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import { C } from '../../config/theme';
@@ -16,9 +17,12 @@ const ACTIONS = [
 ];
 
 export default function SuperAdminHomeScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const { user, logout } = useAuth();
   const [stats,   setStats]   = useState(null);
   const [loading, setLoading] = useState(true);
+  const statusInset = StatusBar.currentHeight ?? 0;
+  const headerTopPad = Math.max(insets.top, statusInset) + 18;
 
   const fadeAnims  = useRef(ACTIONS.map(() => new Animated.Value(0))).current;
   const slideAnims = useRef(ACTIONS.map(() => new Animated.Value(20))).current;
@@ -39,13 +43,13 @@ export default function SuperAdminHomeScreen({ navigation }) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 48 }} showsVerticalScrollIndicator={false}>
-      <StatusBar barStyle="light-content" backgroundColor="#1E40AF" />
+      <StatusBar barStyle="light-content" backgroundColor="#1E40AF" translucent={false} />
 
       {/* ── Header ──────────────────────────────────────────────── */}
       <LinearGradient
         colors={['#1E3A8A', '#2563EB']}
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={styles.header}
+        style={[styles.header, { paddingTop: headerTopPad }]}
       >
         <View style={styles.headerDeco} pointerEvents="none" />
 

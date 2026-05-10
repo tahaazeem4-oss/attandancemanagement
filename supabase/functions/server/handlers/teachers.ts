@@ -237,40 +237,62 @@ export async function handleTeachers(
       if (!["approve", "reject"].includes(action))
         return json({ message: "Invalid action" }, 400);
 
-      const { data: leaves } = await db
+      const { data: leaves, error: leavesErr } = await db
         .from("leave_applications")
         .select("id, student_id, date")
-        .eq("group_id", groupId);
+        .eq("group_id", groupId)
+        .eq("withdrawal_status", "pending");
+
+      if (leavesErr) {
+        console.error("[teachers/leaves/group/withdrawal] fetch error", leavesErr);
+        return json({ message: "Server error" }, 500);
+      }
 
       if (!leaves?.length)
-        return json({ message: "Leave group not found" }, 404);
+        return json({ message: "No pending withdrawal found for this group" }, 404);
 
       const studentId = (leaves[0] as Record<string, unknown>).student_id as number;
 
       if (action === "approve") {
-        // Cancel the leaves and remove attendance rows
-        await db
+        // Schema constraint allows withdrawal_status only as pending/rejected, so
+        // approval clears withdrawal_status and cancels the leave.
+        const { error: updateErr } = await db
           .from("leave_applications")
-          .update({ status: "cancelled", withdrawal_status: "approved" })
-          .eq("group_id", groupId);
+          .update({ status: "cancelled", withdrawal_status: null })
+          .eq("group_id", groupId)
+          .eq("withdrawal_status", "pending");
+
+        if (updateErr) {
+          console.error("[teachers/leaves/group/withdrawal] update error", updateErr);
+          return json({ message: "Could not approve withdrawal" }, 500);
+        }
 
         for (const leave of leaves) {
           const l = leave as Record<string, unknown>;
-          await db
+          const { error: deleteErr } = await db
             .from("student_attendance")
             .delete()
             .eq("student_id", studentId)
             .eq("date", l.date)
             .eq("status", "leave");
+          if (deleteErr) {
+            console.error("[teachers/leaves/group/withdrawal] attendance delete error", deleteErr);
+            return json({ message: "Could not unlock attendance" }, 500);
+          }
         }
         tokensForStudents(db, [studentId]).then((tokens) =>
           sendPush(tokens, "Withdrawal Approved", "Your leave withdrawal has been approved. Attendance unlocked.", { type: "leave" })
         );
       } else {
-        await db
+        const { error: rejectErr } = await db
           .from("leave_applications")
           .update({ withdrawal_status: "rejected" })
-          .eq("group_id", groupId);
+          .eq("group_id", groupId)
+          .eq("withdrawal_status", "pending");
+        if (rejectErr) {
+          console.error("[teachers/leaves/group/withdrawal] reject error", rejectErr);
+          return json({ message: "Could not reject withdrawal" }, 500);
+        }
         tokensForStudents(db, [studentId]).then((tokens) =>
           sendPush(tokens, "Withdrawal Rejected", "Your leave withdrawal request was declined.", { type: "leave" })
         );

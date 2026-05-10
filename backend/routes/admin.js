@@ -40,5 +40,6 @@ router.delete('/assignments/:id',           ...adminOnly, ctrl.deleteAssignment)
 router.get('/leaves',                             ...adminOnly, ctrl.listLeaves);
 router.put('/leaves/group/:group_id/status',       ...adminOnly, ctrl.updateLeaveGroupStatus);
 router.put('/leaves/:id/status',                   ...adminOnly, ctrl.updateLeaveStatus);
+router.put('/leaves/group/:group_id/withdrawal',  ...adminOnly, ctrl.handleWithdrawalRequest);
 
 module.exports = router;

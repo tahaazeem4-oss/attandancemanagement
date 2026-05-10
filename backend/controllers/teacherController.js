@@ -202,6 +202,16 @@ exports.handleWithdrawalRequest = async (req, res) => {
           );
         }
       }
+      
+      // Notify student of withdrawal approval
+      const [student] = await db.query('SELECT first_name, last_name, school_id FROM students WHERE id=?', [rows[0].student_id]);
+      if (student.length > 0) {
+        const dateLabel = rows[0].date ? new Date(rows[0].date).toLocaleDateString() : 'N/A';
+        push.tokensForStudents([rows[0].student_id])
+          .then(tokens => push.send(tokens, 'Leave Withdrawal Approved', `Your leave withdrawal for ${dateLabel} has been approved.`, { type: 'withdrawal_decision', group_id, status: 'approved' }))
+          .catch(() => {});
+      }
+      
       res.json({ message: 'Withdrawal approved — leave cancelled', count: rows.length });
     } else {
       await db.query(
@@ -209,6 +219,16 @@ exports.handleWithdrawalRequest = async (req, res) => {
          WHERE group_id=? AND withdrawal_status='pending'`,
         [group_id]
       );
+      
+      // Notify student of withdrawal rejection
+      const [student] = await db.query('SELECT first_name, last_name, school_id FROM students WHERE id=?', [rows[0].student_id]);
+      if (student.length > 0) {
+        const dateLabel = rows[0].date ? new Date(rows[0].date).toLocaleDateString() : 'N/A';
+        push.tokensForStudents([rows[0].student_id])
+          .then(tokens => push.send(tokens, 'Leave Withdrawal Rejected', `Your leave withdrawal for ${dateLabel} has been rejected.`, { type: 'withdrawal_decision', group_id, status: 'rejected' }))
+          .catch(() => {});
+      }
+      
       res.json({ message: 'Withdrawal request rejected' });
     }
   } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }

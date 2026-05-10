@@ -6,6 +6,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import { C } from '../../config/theme';
@@ -21,13 +22,17 @@ const CARDS = [
   { key: 'UploadLecture',      icon: 'cloud-upload-outline',  label: 'Upload',         tint: '#0891B2', bg: '#F0F9FF' },
   { key: 'LectureList',        icon: 'videocam-outline',      label: 'Lectures',       tint: '#2563EB', bg: '#EFF6FF' },
   { key: 'AdminSubjects',           icon: 'book-outline',          label: 'Subjects',         tint: '#7C3AED', bg: '#F5F3FF' },
+  { key: 'AdminParents',            icon: 'heart-outline',         label: 'Parents',          tint: '#EC4899', bg: '#FCE7F3' },
   { key: 'AdminTeacherAttendance',  icon: 'calendar-outline',      label: 'Teacher Report',   tint: '#10B981', bg: '#ECFDF5' },
 ];
 
 export default function AdminHomeScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const { user, school, logout } = useAuth();
   const [stats,   setStats]   = useState(null);
   const [loading, setLoading] = useState(true);
+  const statusInset = StatusBar.currentHeight ?? 0;
+  const headerTopPad = Math.max(insets.top, statusInset) + 18;
 
   const fadeAnims  = useRef(CARDS.map(() => new Animated.Value(0))).current;
   const slideAnims = useRef(CARDS.map(() => new Animated.Value(20))).current;
@@ -57,13 +62,13 @@ export default function AdminHomeScreen({ navigation }) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 48 }} showsVerticalScrollIndicator={false}>
-      <StatusBar barStyle="light-content" backgroundColor="#1E40AF" />
+      <StatusBar barStyle="light-content" backgroundColor="#1E40AF" translucent={false} />
 
       {/* ── Header ──────────────────────────────────────────────── */}
       <LinearGradient
         colors={['#1E3A8A', '#2563EB']}
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={styles.header}
+        style={[styles.header, { paddingTop: headerTopPad }]}
       >
         {/* Subtle decorative circle */}
         <View style={styles.headerDeco} pointerEvents="none" />
@@ -94,10 +99,10 @@ export default function AdminHomeScreen({ navigation }) {
           {loading
             ? <ActivityIndicator color="rgba(255,255,255,0.6)" />
             : [
-                { label: 'Teachers', value: stats?.teachers,       color: '#93C5FD' },
-                { label: 'Students', value: stats?.students,       color: '#6EE7B7' },
-                { label: 'Classes',  value: stats?.classes,        color: '#FDE68A' },
-                { label: 'Pending',  value: stats?.pending_leaves, color: '#FCA5A5' },
+                { label: 'Teachers', value: stats?.teachers,            color: '#93C5FD' },
+                { label: 'Students', value: stats?.students,            color: '#6EE7B7' },
+                { label: 'Classes',  value: stats?.classes,             color: '#FDE68A' },
+                { label: 'Pending',  value: stats?.pending_leaves,      color: '#FCA5A5' },
               ].map(s => (
                 <View key={s.label} style={styles.statItem}>
                   <Text style={[styles.statNum, { color: s.color }]}>{s.value ?? '—'}</Text>

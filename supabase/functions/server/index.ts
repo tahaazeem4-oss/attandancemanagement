@@ -16,6 +16,7 @@ import { handlePushToken } from "./handlers/pushToken.ts";
 import { handleUpload } from "./handlers/upload.ts";
 import { handleImportExport } from "./handlers/importExport.ts";
 import { handleSchools } from "./handlers/schools.ts";
+import { handleParent, handleAdminParents } from "./handlers/parents.ts";
 
 Deno.serve(async (req: Request) => {
   // CORS preflight
@@ -39,6 +40,7 @@ Deno.serve(async (req: Request) => {
     if (path.startsWith("/students"))        return await handleStudents(req, path, url);
     if (path.startsWith("/classes") || path.startsWith("/sections"))
                                              return await handleClasses(req, path, url);
+    if (path.startsWith("/admin/parents"))   return await handleAdminParents(req, path, url);
     if (path.startsWith("/admin"))           return await handleAdmin(req, path, url);
     if (path.startsWith("/super-admin"))     return await handleSuperAdmin(req, path, url);
     if (path.startsWith("/student-portal")) return await handleStudentPortal(req, path, url);
@@ -49,6 +51,7 @@ Deno.serve(async (req: Request) => {
     if (path.startsWith("/upload"))          return await handleUpload(req, path, url);
     if (path.startsWith("/import-export"))   return await handleImportExport(req, path, url);
     if (path.startsWith("/schools"))         return await handleSchools(req, path, url);
+    if (path.startsWith("/parent"))          return await handleParent(req, path, url);
 
     // Health check
     if (path === "/" || path === "/health") {
