@@ -59,11 +59,6 @@ export default function StaffNotificationsScreen({ navigation }) {
       const list = Array.isArray(data) ? data : [];
       setNotifications(list);
       Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
-      // Mark all as read silently so the badge clears on the home screen
-      if (list.some(n => !n.is_read)) {
-        api.post('/notifications/inbox/read-all').catch(() => {});
-        setNotifications(list.map(n => ({ ...n, is_read: true })));
-      }
     } catch {
       Alert.alert('Error', 'Could not load notifications');
     } finally {
@@ -75,12 +70,19 @@ export default function StaffNotificationsScreen({ navigation }) {
 
   const markRead = async (notif) => {
     if (notif.is_read) return;
+
+    // Optimistic update so unread highlight clears immediately on tap.
+    setNotifications(prev =>
+      prev.map(n => n.id === notif.id ? { ...n, is_read: true } : n)
+    );
+
     try {
       await api.post(`/notifications/inbox/${notif.id}/read`);
+    } catch {
       setNotifications(prev =>
-        prev.map(n => n.id === notif.id ? { ...n, is_read: true } : n)
+        prev.map(n => n.id === notif.id ? { ...n, is_read: false } : n)
       );
-    } catch {}
+    }
   };
 
   const toggleExpand = (notif) => {

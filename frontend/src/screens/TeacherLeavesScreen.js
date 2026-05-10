@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, FlatList, Pressable,
+  View, Text, FlatList, Pressable, ScrollView,
   StyleSheet, Alert, ActivityIndicator,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
@@ -235,8 +235,13 @@ export default function TeacherLeavesScreen({ navigation }) {
         </View>
       )}
 
-      {/* Filter tabs */}
-      <View style={styles.tabs}>
+      {/* Filter tabs — scrollable */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.tabsScroll}
+        contentContainerStyle={styles.tabsContent}
+      >
         {TABS.map(tab => (
           <Pressable
             key={tab.key}
@@ -257,7 +262,7 @@ export default function TeacherLeavesScreen({ navigation }) {
             </Text>
           </Pressable>
         ))}
-      </View>
+      </ScrollView>
 
       <FlatList
             data={filtered}
@@ -295,10 +300,11 @@ const styles = StyleSheet.create({
   headerTitle:  { fontSize: 20, fontWeight: '800', color: '#E0E7FF', marginBottom: 4 },
   headerSub:    { fontSize: 13, color: 'rgba(224,231,255,0.6)' },
 
-  tabs:                  { flexDirection: 'row', backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.border },
-  tab:                   { flex: 1, paddingVertical: 11, alignItems: 'center' },
+  tabsScroll:            { backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.border },
+  tabsContent:           { paddingHorizontal: 8 },
+  tab:                   { paddingVertical: 11, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', minWidth: 90 },
   tabActive:             { borderBottomWidth: 2, borderColor: C.primary },
-  tabTxt:                { fontSize: 11, fontWeight: '600', color: C.textMed },
+  tabTxt:                { fontSize: 11, fontWeight: '600', color: C.textMed, textAlign: 'center' },
   tabTxtActive:          { color: C.primary },
   tabWithdrawal:         { backgroundColor: '#FFFBEB' },
   tabWithdrawalActive:   { borderBottomWidth: 2, borderColor: '#D97706', backgroundColor: '#FFFBEB' },

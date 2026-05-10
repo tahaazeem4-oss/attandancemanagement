@@ -21,12 +21,44 @@ export async function handleSubjects(
   // GET /subjects
   if (path === "/subjects" && method === "GET") {
     try {
-      const { data } = await db
+      const { data: subjectRows } = await db
         .from("subjects")
         .select("id, name")
         .eq("school_id", schoolId)
         .order("name");
-      return json(data || []);
+
+      // Include subject names that may exist only in lectures (legacy/manual uploads).
+      const { data: lectureRows } = await db
+        .from("lectures")
+        .select("subject_name")
+        .eq("school_id", schoolId)
+        .not("subject_name", "is", null);
+
+      const byName = new Map<string, Record<string, unknown>>();
+
+      for (const s of subjectRows || []) {
+        const row = s as Record<string, unknown>;
+        const name = String(row.name || "").trim();
+        if (!name) continue;
+        byName.set(name.toLowerCase(), { id: row.id, name });
+      }
+
+      for (const l of lectureRows || []) {
+        const row = l as Record<string, unknown>;
+        const name = String(row.subject_name || "").trim();
+        if (!name) continue;
+        const key = name.toLowerCase();
+        if (!byName.has(key)) {
+          // id is null for lecture-derived subjects not yet saved in master subjects table.
+          byName.set(key, { id: null, name });
+        }
+      }
+
+      const merged = Array.from(byName.values()).sort((a, b) =>
+        String(a.name).localeCompare(String(b.name))
+      );
+
+      return json(merged);
     } catch (err) {
       console.error("[subjects GET]", err);
       return json({ message: "Server error" }, 500);

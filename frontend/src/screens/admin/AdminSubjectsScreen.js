@@ -6,6 +6,7 @@ import {
 import api from '../../services/api';
 import { C } from '../../config/theme';
 import AppHeader from '../../components/AppHeader';
+import ImportExportBar from '../../components/ImportExportBar';
 
 export default function AdminSubjectsScreen({ navigation }) {
   const [subjects, setSubjects] = useState([]);
@@ -63,6 +64,14 @@ export default function AdminSubjectsScreen({ navigation }) {
   };
 
   const handleDelete = (item) => {
+    if (!item?.id) {
+      Alert.alert(
+        'Not Deletable Yet',
+        'This subject came from lecture history. Add it once in Subjects to manage/delete it from this screen.'
+      );
+      return;
+    }
+
     Alert.alert(
       'Delete Subject',
       `Remove "${item.name}" from the subject list?\n\nExisting lectures using this subject will not be affected.`,
@@ -89,8 +98,16 @@ export default function AdminSubjectsScreen({ navigation }) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <AppHeader title="Subjects" navigation={navigation} />
+      <ImportExportBar
+        templatePath="/import-export/subjects/template"
+        templateFilename="subjects_template.xlsx"
+        importPath="/import-export/subjects/import"
+        exportPath="/import-export/subjects/export"
+        exportFilename="subjects_export.xlsx"
+        onImportDone={load}
+      />
 
-      {/* Add new subject row */}}
+      {/* Add new subject row */}
       <View style={styles.addRow}>
         <TextInput
           style={styles.input}
@@ -130,7 +147,7 @@ export default function AdminSubjectsScreen({ navigation }) {
           renderItem={({ item }) => (
             <View style={styles.card}>
               <Text style={styles.cardName}>📖  {item.name}</Text>
-              <Pressable style={styles.delBtn} onPress={() => handleDelete(item)}>
+              <Pressable style={[styles.delBtn, !item?.id && styles.delBtnDisabled]} onPress={() => handleDelete(item)}>
                 <Text style={styles.delTxt}>🗑</Text>
               </Pressable>
             </View>
@@ -180,6 +197,7 @@ const styles = StyleSheet.create({
   },
   cardName: { flex: 1, fontSize: 15, fontWeight: '600', color: '#1F2937' },
   delBtn:   { padding: 6 },
+  delBtnDisabled: { opacity: 0.35 },
   delTxt:   { fontSize: 18 },
 
   empty:    { alignItems: 'center', marginTop: 60 },

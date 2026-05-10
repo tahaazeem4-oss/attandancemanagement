@@ -294,16 +294,43 @@ export async function handleNotifications(
   // ── GET /notifications/sent ──────────────────────────────────
   if (path === "/notifications/sent" && method === "GET") {
     try {
+      // Step 1: fetch raw notifications (no relational join — avoids FK resolution issues)
       let q = db
         .from("notifications")
-        .select(`*, classes(class_name), sections(section_name), students(first_name, last_name)`)
+        .select("*")
         .eq("school_id", schoolId)
         .order("created_at", { ascending: false });
-
       if (role === "teacher") q = q.eq("sender_id", userId);
+      const { data: notifs, error: notifErr } = await q;
+      if (notifErr) throw notifErr;
 
-      const { data } = await q;
-      return json(data || []);
+      const rows = notifs || [];
+
+      // Step 2: batch-fetch related names
+      const classIds   = [...new Set(rows.map((n: Record<string, unknown>) => n.class_id).filter(Boolean))];
+      const sectionIds = [...new Set(rows.map((n: Record<string, unknown>) => n.section_id).filter(Boolean))];
+      const studentIds = [...new Set(rows.map((n: Record<string, unknown>) => n.student_id).filter(Boolean))];
+
+      const [classRes, sectionRes, studentRes] = await Promise.all([
+        classIds.length   ? db.from("classes").select("id, class_name").in("id", classIds)     : { data: [] },
+        sectionIds.length ? db.from("sections").select("id, section_name").in("id", sectionIds) : { data: [] },
+        studentIds.length ? db.from("students").select("id, first_name, last_name").in("id", studentIds) : { data: [] },
+      ]);
+
+      const classMap   = Object.fromEntries(((classRes.data   || []) as Record<string, unknown>[]).map((c) => [c.id, c.class_name]));
+      const sectionMap = Object.fromEntries(((sectionRes.data || []) as Record<string, unknown>[]).map((s) => [s.id, s.section_name]));
+      const studentMap = Object.fromEntries(((studentRes.data || []) as Record<string, unknown>[]).map((s) => [s.id, s]));
+
+      // Step 3: merge into flat response matching frontend field names
+      const result = rows.map((n: Record<string, unknown>) => ({
+        ...n,
+        class_name:   n.class_id   ? classMap[n.class_id as number]                              : null,
+        section_name: n.section_id ? sectionMap[n.section_id as number]                          : null,
+        st_first:     n.student_id ? (studentMap[n.student_id as number] as Record<string, unknown>)?.first_name : null,
+        st_last:      n.student_id ? (studentMap[n.student_id as number] as Record<string, unknown>)?.last_name  : null,
+      }));
+
+      return json(result);
     } catch (err) {
       console.error("[notifications/sent]", err);
       return json({ message: "Server error" }, 500);

@@ -31,6 +31,21 @@ const BASE_URL = api.defaults.baseURL;
 export default function LectureListScreen({ navigation }) {
   const { user } = useAuth();
 
+  const belongsToCurrentTeacher = useCallback((lecture) => {
+    if (!user || user.role !== 'teacher') return true;
+
+    // Primary ownership check (preferred once API returns teacher_id)
+    if (lecture?.teacher_id != null) {
+      return String(lecture.teacher_id) === String(user.id);
+    }
+
+    // Fallback for legacy rows where teacher_id is missing in payload.
+    const uploader = String(lecture?.uploaded_by || '').trim().toLowerCase();
+    const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim().toLowerCase();
+    const email = String(user.email || '').trim().toLowerCase();
+    return uploader !== '' && (uploader === fullName || uploader === email);
+  }, [user]);
+
   const [classes,     setClasses]     = useState([]);
   const [sections,    setSections]    = useState([]);
   const [lectures,    setLectures]    = useState([]);
@@ -38,6 +53,7 @@ export default function LectureListScreen({ navigation }) {
   const [deleting,    setDeleting]    = useState(null);
 
   const [search,        setSearch]        = useState('');
+  const [filtersOpen,   setFiltersOpen]   = useState(false);
   const [filterCls,     setFilterCls]     = useState('');
   const [filterSec,     setFilterSec]     = useState('');
   const [filterType,    setFilterType]    = useState('');
@@ -109,13 +125,17 @@ export default function LectureListScreen({ navigation }) {
     setLoading(true);
     try {
       const { data } = await api.get('/lectures');
-      setLectures(data);
+      const list = Array.isArray(data) ? data : [];
+      const scoped = user?.role === 'teacher'
+        ? list.filter(belongsToCurrentTeacher)
+        : list;
+      setLectures(scoped);
     } catch {
       Alert.alert('Error', 'Could not load lectures');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user, belongsToCurrentTeacher]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -174,7 +194,7 @@ export default function LectureListScreen({ navigation }) {
         <Pressable style={styles.viewBtn} onPress={() => openLecture(item)}>
           <Text style={styles.viewBtnTxt}>⬇ View / Download</Text>
         </Pressable>
-        {(item.teacher_id === user?.id || (user?.role === 'admin' && item.teacher_id == null)) && (
+        {(belongsToCurrentTeacher(item) || (user?.role === 'admin' && item.teacher_id == null)) && (
           <Pressable style={styles.delBtn} onPress={() => confirmDelete(item)} disabled={deleting === item.id}>
             {deleting === item.id
               ? <ActivityIndicator size="small" color="#DC2626" />
@@ -187,84 +207,103 @@ export default function LectureListScreen({ navigation }) {
 
   const ListHeader = (
     <View style={styles.filterCard}>
-      <Pressable
-        style={{ backgroundColor: C.primary, borderRadius: 10, paddingVertical: 11, alignItems: 'center', marginBottom: 14 }}
-        onPress={() => navigation.navigate('UploadLecture')}
-      >
-        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>⬆ Upload Lecture</Text>
-      </Pressable>
-      <Text style={styles.filterLabel}>Search</Text>
-      <TextInput
-        style={styles.searchInput}
-        placeholder="Lecture name or subject…"
-        placeholderTextColor={C.textLight}
-        value={search}
-        onChangeText={setSearch}
-        returnKeyType="search"
-      />
-
-      <Text style={styles.filterLabel}>Class</Text>
-      <PickerField
-        label="Class"
-        value={filterCls}
-        onChange={setFilterCls}
-        placeholder="All Classes"
-        items={[{ label: 'All Classes', value: '' }, ...classes.map(c => ({ label: c.class_name, value: String(c.id) }))]}
-      />
-
-      <Text style={styles.filterLabel}>Section</Text>
-      <PickerField
-        label="Section"
-        value={filterSec}
-        onChange={setFilterSec}
-        placeholder="All Sections"
-        disabled={!filterCls}
-        items={[{ label: 'All Sections', value: '' }, ...sections.map(s => ({ label: `Sec ${s.section_name}`, value: String(s.id) }))]}
-      />
-
-      <Text style={styles.filterLabel}>Subject</Text>
-      <PickerField
-        label="Subject"
-        value={filterSubject}
-        onChange={setFilterSubject}
-        placeholder="All Subjects"
-        items={[{ label: 'All Subjects', value: '' }, ...subjects.map(s => ({ label: s, value: s }))]}
-      />
-
-      <Text style={styles.filterLabel}>Year</Text>
-      <PickerField
-        label="Year"
-        value={filterYear}
-        onChange={setFilterYear}
-        placeholder="Any Year"
-        items={availableYears}
-      />
-
-      <Text style={styles.filterLabel}>Month</Text>
-      <PickerField
-        label="Month"
-        value={filterMonth}
-        onChange={setFilterMonth}
-        placeholder="Any Month"
-        items={availableMonths}
-      />
-
-      <Text style={styles.filterLabel}>Type</Text>
-      <View style={styles.chipRow}>
-        {[
-          { value: '',          label: 'All' },
-          { value: 'classwork', label: '📖 Classwork' },
-          { value: 'homework',  label: '📝 Homework' },
-        ].map(t => (
-          <Pressable
-            key={t.value}
-            style={[styles.chip, filterType === t.value && styles.chipActive]}
-            onPress={() => setFilterType(t.value)}
-          >
-            <Text style={[styles.chipTxt, filterType === t.value && styles.chipTxtActive]}>{t.label}</Text>
-          </Pressable>
-        ))}
+      <View style={styles.searchHeaderRow}>
+        <TextInput
+          style={styles.searchInputCompact}
+          placeholder="Search by title or subject"
+          placeholderTextColor={C.textLight}
+          value={search}
+          onChangeText={setSearch}
+          returnKeyType="search"
+        />
+        <Pressable
+          style={({ pressed }) => [styles.filterToggleBtn, pressed && { opacity: 0.8 }]}
+          onPress={() => setFiltersOpen(v => !v)}
+        >
+          <Text style={styles.filterToggleTxt}>{filtersOpen ? 'Hide' : 'Filters'}</Text>
+        </Pressable>
       </View>
+
+      {filtersOpen && (
+        <View style={styles.advancedFiltersWrap}>
+          <Text style={styles.filterLabel}>Class</Text>
+          <PickerField
+            label="Class"
+            value={filterCls}
+            onChange={setFilterCls}
+            placeholder="All Classes"
+            items={[{ label: 'All Classes', value: '' }, ...classes.map(c => ({ label: c.class_name, value: String(c.id) }))]}
+          />
+
+          <Text style={styles.filterLabel}>Section</Text>
+          <PickerField
+            label="Section"
+            value={filterSec}
+            onChange={setFilterSec}
+            placeholder="All Sections"
+            disabled={!filterCls}
+            items={[{ label: 'All Sections', value: '' }, ...sections.map(s => ({ label: `Sec ${s.section_name}`, value: String(s.id) }))]}
+          />
+
+          <Text style={styles.filterLabel}>Subject</Text>
+          <PickerField
+            label="Subject"
+            value={filterSubject}
+            onChange={setFilterSubject}
+            placeholder="All Subjects"
+            items={[{ label: 'All Subjects', value: '' }, ...subjects.map(s => ({ label: s, value: s }))]}
+          />
+
+          <Text style={styles.filterLabel}>Year</Text>
+          <PickerField
+            label="Year"
+            value={filterYear}
+            onChange={setFilterYear}
+            placeholder="Any Year"
+            items={availableYears}
+          />
+
+          <Text style={styles.filterLabel}>Month</Text>
+          <PickerField
+            label="Month"
+            value={filterMonth}
+            onChange={setFilterMonth}
+            placeholder="Any Month"
+            items={availableMonths}
+          />
+
+          <Text style={styles.filterLabel}>Type</Text>
+          <View style={styles.chipRow}>
+            {[
+              { value: '',          label: 'All' },
+              { value: 'classwork', label: '📖 Classwork' },
+              { value: 'homework',  label: '📝 Homework' },
+            ].map(t => (
+              <Pressable
+                key={t.value}
+                style={[styles.chip, filterType === t.value && styles.chipActive]}
+                onPress={() => setFilterType(t.value)}
+              >
+                <Text style={[styles.chipTxt, filterType === t.value && styles.chipTxtActive]}>{t.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+
+          <Pressable
+            style={({ pressed }) => [styles.clearBtn, pressed && { opacity: 0.8 }]}
+            onPress={() => {
+              setFilterCls('');
+              setFilterSec('');
+              setFilterSubject('');
+              setFilterMonth('');
+              setFilterYear('');
+              setFilterType('');
+            }}
+          >
+            <Text style={styles.clearBtnTxt}>Clear Filters</Text>
+          </Pressable>
+        </View>
+      )}
 
       {!loading && (
         <Text style={styles.resultCount}>
@@ -276,7 +315,7 @@ export default function LectureListScreen({ navigation }) {
 
   return (
     <View style={styles.root}>
-      <AppHeader title="All Lectures" navigation={navigation} />
+      <AppHeader title={user?.role === 'teacher' ? 'My Lectures' : 'All Lectures'} navigation={navigation} />
 
       {loading ? (
         <ActivityIndicator color={C.primary} style={{ flex: 1, marginTop: 40 }} size="large" />
@@ -316,6 +355,28 @@ const styles = StyleSheet.create({
     borderRadius: 16, padding: 16,
     elevation: 2, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 6,
   },
+  searchHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  searchInputCompact: {
+    flex: 1,
+    backgroundColor: C.bg,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: C.border,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    fontSize: 14,
+    color: C.text,
+  },
+  filterToggleBtn: {
+    backgroundColor: C.primaryLight,
+    borderColor: '#BFDBFE',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+  },
+  filterToggleTxt: { color: C.primary, fontSize: 13, fontWeight: '800' },
+  advancedFiltersWrap: { marginTop: 12, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 6 },
   filterLabel: { fontSize: 12, fontWeight: '700', color: C.textMed, marginBottom: 5, marginTop: 10 },
   searchInput: {
     backgroundColor: C.bg, borderRadius: 10, borderWidth: 1.5, borderColor: C.border,
@@ -329,6 +390,17 @@ const styles = StyleSheet.create({
   chipActive:    { backgroundColor: C.primaryLight, borderColor: C.primary },
   chipTxt:       { fontSize: 13, fontWeight: '600', color: C.textMed },
   chipTxtActive: { color: C.primary, fontWeight: '800' },
+  clearBtn: {
+    alignSelf: 'flex-end',
+    marginTop: 12,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  clearBtnTxt: { fontSize: 12, color: '#334155', fontWeight: '700' },
   resultCount:   { fontSize: 12, color: C.textLight, marginTop: 12, textAlign: 'right' },
 
   listContent: { paddingBottom: 40 },

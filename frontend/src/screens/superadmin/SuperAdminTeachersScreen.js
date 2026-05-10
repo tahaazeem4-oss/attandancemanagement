@@ -1,12 +1,11 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View, Text, FlatList, Pressable, TextInput, Modal, ScrollView,
-  StyleSheet, ActivityIndicator, StatusBar, Alert,
+  StyleSheet, ActivityIndicator, Alert,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
+import AppHeader from '../../components/AppHeader';
 
 // ── Searchable Picker Modal ───────────────────────────────────
 function SearchPickerModal({ visible, title, items, labelKey = 'name', onSelect, onClose, emptyText = 'No items found' }) {
@@ -415,8 +414,7 @@ function EditTeacherModal({ visible, schoolId, teacher, classes, onClose, onSave
 }
 
 // ── Main Screen ───────────────────────────────────────────────
-export default function SuperAdminTeachersScreen() {
-  const insets = useSafeAreaInsets();
+export default function SuperAdminTeachersScreen({ navigation }) {
   const [schools,         setSchools]         = useState([]);
   const [selectedSchool,  setSelectedSchool]  = useState(null);
   const [classes,         setClasses]         = useState([]);
@@ -501,10 +499,7 @@ export default function SuperAdminTeachersScreen() {
   return (
     <View style={styles.container}>
 
-      {/* Header */}
-      <LinearGradient colors={['#1E3A8A', '#2563EB']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <Text style={styles.headerTitle}>Manage Teachers</Text>
-      </LinearGradient>
+      <AppHeader title="Teachers" navigation={navigation} />
 
       {/* Filters */}
       <View style={styles.filterSection}>
@@ -629,7 +624,7 @@ export default function SuperAdminTeachersScreen() {
                       {!!item.phone && <Text style={styles.cardSub}>{item.phone}</Text>}
                     </View>
                     <View style={styles.eyeBtn}>
-                      <Text style={styles.eyeIcon}>›</Text>
+                      <Text style={styles.eyeIcon}>Edit</Text>
                     </View>
                   </Pressable>
                 )}
@@ -706,8 +701,6 @@ export default function SuperAdminTeachersScreen() {
 // ── Styles ────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container:     { flex: 1, backgroundColor: C.bg },
-  header:        { paddingHorizontal: 16, paddingBottom: 16 },
-  headerTitle:   { color: '#fff', fontSize: 20, fontWeight: '800' },
   addBtn:        { backgroundColor: C.primary, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 11, height: 42, justifyContent: 'center' },
   addBtnTxt:     { color: '#fff', fontWeight: '700', fontSize: 13 },
 
@@ -735,8 +728,8 @@ const styles = StyleSheet.create({
   cardSub:     { fontSize: 12, color: C.textMed, marginTop: 1 },
   rolePill:    { borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
   rolePillTxt: { fontSize: 10, fontWeight: '700' },
-  eyeBtn:      { width: 30, height: 30, borderRadius: 10, backgroundColor: C.primary, justifyContent: 'center', alignItems: 'center' },
-  eyeIcon:     { fontSize: 20, color: '#fff', fontWeight: '700', lineHeight: 22 },
+  eyeBtn:      { borderRadius: 8, backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 7 },
+  eyeIcon:     { fontSize: 12, color: C.primary, fontWeight: '700' },
 });
 
 const modal = StyleSheet.create({

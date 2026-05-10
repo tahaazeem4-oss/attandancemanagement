@@ -13,15 +13,14 @@ import { C } from '../../config/theme';
 const ACTIONS = [
   { key: 'StudentHistory',      icon: 'calendar-outline',      label: 'Attendance History',  sub: 'View your full attendance record',    tint: '#2563EB', bg: '#EFF6FF' },
   { key: 'StudentLeaves',       icon: 'document-text-outline', label: 'Leave Applications',  sub: 'Apply for leave or check status',     tint: '#F59E0B', bg: '#FFFBEB' },
-  { key: 'StudentLectures',     icon: 'book-open-outline',     label: 'Lectures & Notes',    sub: 'Browse classwork, homework & PDFs',   tint: '#7C3AED', bg: '#F5F3FF' },
-  { key: 'StudentNotifications',icon: 'notifications-outline', label: 'Notifications',       sub: 'School, class & personal notices',    tint: '#10B981', bg: '#ECFDF5' },
+  { key: 'StudentClasswork',    icon: 'book-outline',          label: 'Class Work',          sub: 'Browse class work files',             tint: '#4F46E5', bg: '#EEF2FF' },
+  { key: 'StudentHomework',     icon: 'clipboard-outline',     label: 'Homework',            sub: 'Browse homework files',               tint: '#D97706', bg: '#FFFBEB' },
 ];
 
 export default function StudentHomeScreen({ navigation }) {
   const { user, school, logout } = useAuth();
-  const [stats,       setStats]       = useState(null);
-  const [loading,     setLoading]     = useState(true);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [stats,   setStats]   = useState(null);
+  const [loading, setLoading] = useState(true);
 
   const fadeAnims  = useRef(ACTIONS.map(() => new Animated.Value(0))).current;
   const slideAnims = useRef(ACTIONS.map(() => new Animated.Value(20))).current;
@@ -32,10 +31,6 @@ export default function StudentHomeScreen({ navigation }) {
       .then(({ data }) => setStats(data.stats))
       .catch(() => {})
       .finally(() => setLoading(false));
-
-    api.get('/notifications/me/unread-count')
-      .then(({ data }) => setUnreadCount(data.count || 0))
-      .catch(() => {});
 
     Animated.stagger(80, ACTIONS.map((_, i) =>
       Animated.parallel([
@@ -114,7 +109,6 @@ export default function StudentHomeScreen({ navigation }) {
             <Pressable
               style={({ pressed }) => [styles.navCard, pressed && styles.navCardPressed]}
               onPress={() => {
-                if (key === 'StudentNotifications') setUnreadCount(0);
                 navigation.navigate(key);
               }}
             >
@@ -122,11 +116,6 @@ export default function StudentHomeScreen({ navigation }) {
                 <Ionicons name={icon} size={24} color={tint} />
               </View>
               <Text style={styles.navLabel}>{label}</Text>
-              {key === 'StudentNotifications' && unreadCount > 0 && (
-                <View style={styles.badge}>
-                  <Text style={styles.badgeTxt}>{unreadCount}</Text>
-                </View>
-              )}
             </Pressable>
           </Animated.View>
         ))}
@@ -163,12 +152,13 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 11, fontWeight: '700', color: C.textLight, marginHorizontal: 20, marginTop: 28, marginBottom: 14, textTransform: 'uppercase', letterSpacing: 1 },
 
   // ── Grid ──
-  grid:     { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 14, gap: 12 },
-  cardWrap: { width: '30%', flexGrow: 1 },
+  grid:     { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 14, justifyContent: 'space-between', rowGap: 12 },
+  cardWrap: { width: '48%' },
   navCard: {
     backgroundColor: '#fff',
     borderRadius: 16,
-    padding: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
     alignItems: 'center',
     shadowColor: '#94A3B8',
     shadowOpacity: 0.12,
@@ -176,12 +166,12 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     elevation: 2,
     position: 'relative',
-    minHeight: 100,
+    minHeight: 118,
     justifyContent: 'center',
   },
   navCardPressed: { opacity: 0.75 },
-  iconBox:  { width: 52, height: 52, borderRadius: 14, justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
-  navLabel: { color: C.textDark, fontSize: 12, fontWeight: '700', textAlign: 'center', lineHeight: 16 },
+  iconBox:  { width: 50, height: 50, borderRadius: 14, justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
+  navLabel: { color: C.textDark, fontSize: 12, fontWeight: '700', textAlign: 'center', lineHeight: 16, minHeight: 32 },
 
   // ── Badge ──
   badge:    { position: 'absolute', top: -5, right: -5, backgroundColor: '#EF4444', borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4, borderWidth: 2, borderColor: '#fff' },

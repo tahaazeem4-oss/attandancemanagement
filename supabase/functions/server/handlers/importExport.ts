@@ -231,6 +231,76 @@ export async function handleImportExport(
 
   // ── CLASSES ───────────────────────────────────────────────────
 
+  // ── SUBJECTS ──────────────────────────────────────────────────
+
+  if (path === "/import-export/subjects/template" && method === "GET") {
+    const sample = [
+      { name: "Mathematics" },
+      { name: "English" },
+      { name: "Computer Science" },
+    ];
+    return xlsxResponse(toXlsx(sample, "Subjects"), "subjects_template.xlsx");
+  }
+
+  if (path === "/import-export/subjects/export" && method === "GET") {
+    try {
+      const { data } = await db
+        .from("subjects")
+        .select("name, created_at")
+        .eq("school_id", schoolId)
+        .order("name");
+      return xlsxResponse(toXlsx(data || [], "Subjects"), "subjects_export.xlsx");
+    } catch (err) {
+      console.error("[import-export/subjects/export]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  if (path === "/import-export/subjects/import" && method === "POST") {
+    try {
+      const formData = await req.formData();
+      const file = formData.get("file") as File | null;
+      if (!file) return json({ message: "No file uploaded" }, 400);
+
+      const rows = parseUpload(await file.arrayBuffer());
+      const errors: string[] = [];
+      let created = 0;
+
+      const { data: existing } = await db
+        .from("subjects")
+        .select("name")
+        .eq("school_id", schoolId);
+      const existingNames = new Set(
+        (existing || []).map((s: Record<string, unknown>) => String(s.name || "").trim().toLowerCase()).filter(Boolean),
+      );
+
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        const rowNum = i + 2;
+        const nameRaw = String(r.name || "").trim();
+        if (!nameRaw) {
+          errors.push(`Row ${rowNum}: name is required`);
+          continue;
+        }
+
+        const key = nameRaw.toLowerCase();
+        if (existingNames.has(key)) {
+          errors.push(`Row ${rowNum}: subject "${nameRaw}" already exists — skipped`);
+          continue;
+        }
+
+        await db.from("subjects").insert({ school_id: schoolId, name: nameRaw });
+        existingNames.add(key);
+        created++;
+      }
+
+      return json({ message: `Import complete. Created: ${created}, Skipped: ${errors.length}`, created, errors });
+    } catch (err) {
+      console.error("[import-export/subjects/import]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
   if (path === "/import-export/classes/template" && method === "GET") {
     const sample = [
       { class_name: "Grade 1", section_name: "A" },

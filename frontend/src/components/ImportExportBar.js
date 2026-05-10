@@ -52,21 +52,21 @@ export default function ImportExportBar({
         <Pressable style={[styles.btn, styles.templateBtn]} onPress={doTemplate} disabled={!!loading}>
           {loading === 'template'
             ? <ActivityIndicator size="small" color={C.primary} />
-            : <Text style={styles.templateTxt}>⬇ Template</Text>}
+            : <Text style={styles.templateTxt}>Template</Text>}
         </Pressable>
       )}
       {importPath && (
         <Pressable style={[styles.btn, styles.importBtn]} onPress={doImport} disabled={!!loading}>
           {loading === 'import'
             ? <ActivityIndicator size="small" color="#fff" />
-            : <Text style={styles.importTxt}>⬆ Import</Text>}
+            : <Text style={styles.importTxt}>Import</Text>}
         </Pressable>
       )}
       {exportPath && (
         <Pressable style={[styles.btn, styles.exportBtn]} onPress={doExport} disabled={!!loading}>
           {loading === 'export'
             ? <ActivityIndicator size="small" color="#fff" />
-            : <Text style={styles.exportTxt}>⬇ Export</Text>}
+            : <Text style={styles.exportTxt}>Export</Text>}
         </Pressable>
       )}
     </View>
@@ -75,19 +75,24 @@ export default function ImportExportBar({
 
 const styles = StyleSheet.create({
   bar: {
-    flexDirection: 'row', gap: 8,
-    paddingHorizontal: 16, paddingVertical: 8,
-    backgroundColor: C.cardAlt,
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: C.card,
     borderBottomWidth: 1, borderBottomColor: C.border,
   },
   btn: {
-    flex: 1, paddingVertical: 8, borderRadius: 10,
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
     alignItems: 'center', justifyContent: 'center',
   },
-  templateBtn: { borderWidth: 1.5, borderColor: C.primary, backgroundColor: C.primaryLight },
-  importBtn:   { backgroundColor: '#10B981' },
-  exportBtn:   { backgroundColor: C.primary },
-  templateTxt: { fontSize: 12, fontWeight: '700', color: C.primary },
-  importTxt:   { fontSize: 12, fontWeight: '700', color: '#fff' },
-  exportTxt:   { fontSize: 12, fontWeight: '700', color: '#fff' },
+  templateBtn: { borderColor: '#BFDBFE', backgroundColor: '#EFF6FF' },
+  importBtn:   { borderColor: '#86EFAC', backgroundColor: '#16A34A' },
+  exportBtn:   { borderColor: '#93C5FD', backgroundColor: C.primary },
+  templateTxt: { fontSize: 13, fontWeight: '800', color: C.primary },
+  importTxt:   { fontSize: 13, fontWeight: '800', color: '#fff' },
+  exportTxt:   { fontSize: 13, fontWeight: '800', color: '#fff' },
 });

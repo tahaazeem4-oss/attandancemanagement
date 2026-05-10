@@ -71,6 +71,9 @@ export default function StudentAttendanceDetailScreen({ route, navigation }) {
             {student.roll_no ? `  •  Roll #${student.roll_no}` : ''}
           </Text>
         </View>
+        <Pressable onPress={handleNotify} style={st.notifyHeaderBtn}>
+          <Ionicons name="send-outline" size={20} color="#fff" />
+        </Pressable>
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
@@ -154,6 +157,7 @@ const st = StyleSheet.create({
 
   header:     { backgroundColor: C.primary, flexDirection: 'row', alignItems: 'center', paddingTop: 52, paddingBottom: 18, paddingHorizontal: 16, gap: 12 },
   backBtn:    { padding: 4 },
+  notifyHeaderBtn: { padding: 8, marginLeft: 4 },
   headerName: { color: '#fff', fontSize: 17, fontWeight: '900' },
   headerSub:  { color: 'rgba(255,255,255,0.75)', fontSize: 12, marginTop: 2 },
 

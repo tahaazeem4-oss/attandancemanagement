@@ -8,7 +8,6 @@ import {
   View, Text, TextInput, FlatList, Pressable,
   StyleSheet, Alert, ActivityIndicator,
 } from 'react-native';
-import { Linking } from 'react-native';
 import api from '../../services/api';
 import { C } from '../../config/theme';
 import PickerField from '../../components/PickerField';
@@ -24,15 +23,21 @@ const MONTH_NAMES = {
   '09': 'September','10': 'October', '11': 'November', '12': 'December',
 };
 
-export default function StudentLecturesScreen({ navigation }) {
+export default function StudentLecturesScreen({ navigation, route }) {
+  const fixedType = route?.params?.fixedType || '';
+  const screenTitle = route?.params?.title || 'Lectures';
   const [lectures,      setLectures]      = useState([]);
   const [loading,       setLoading]       = useState(true);
   const [search,        setSearch]        = useState('');
+  const [filtersOpen,   setFiltersOpen]   = useState(false);
   const [filterMonth,   setFilterMonth]   = useState('');
   const [filterYear,    setFilterYear]    = useState('');
-  const [filterType,    setFilterType]    = useState('');
+  const [filterType,    setFilterType]    = useState(fixedType);
   const [filterSubject, setFilterSubject] = useState('');
-  const [downloading,   setDownloading]   = useState(null); // kept for UI indicator
+
+  useEffect(() => {
+    setFilterType(fixedType);
+  }, [fixedType]);
 
   const subjects = useMemo(() =>
     ['', ...Array.from(new Set(lectures.map(l => l.subject_name).filter(Boolean))).sort()]
@@ -83,22 +88,10 @@ export default function StudentLecturesScreen({ navigation }) {
 
   useEffect(() => { load(); }, [load]);
 
-  // ── Open / View PDF ────────────────────────────────────────
-  const openLecture = async (lecture) => {
-    const url = lecture.file_url;
-    if (!url) { Alert.alert('Error', 'No file URL available'); return; }
-    const canOpen = await Linking.canOpenURL(url);
-    if (canOpen) {
-      await Linking.openURL(url);
-    } else {
-      Alert.alert('Error', 'Cannot open file on this device');
-    }
-  };
-
   const renderItem = ({ item }) => (
     <Pressable
       style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]}
-      onPress={() => openLecture(item)}
+      onPress={() => navigation.navigate('StudentLectureDetail', { lecture: item })}
     >
       <View style={styles.cardTop}>
         <View style={[styles.typePill, { backgroundColor: TYPE_BG[item.type] }]}>
@@ -126,70 +119,99 @@ export default function StudentLecturesScreen({ navigation }) {
 
   const ListHeader = (
     <View style={styles.filterCard}>
-      {/* Search */}
-      <Text style={styles.filterLabel}>Search</Text>
-      <TextInput
-        style={[styles.searchInput, { marginBottom: 2 }]}
-        placeholder="Lecture name or subject…"
-        placeholderTextColor="#94A3B8"
-        value={search}
-        onChangeText={setSearch}
-        returnKeyType="search"
-      />
-
-      {/* Subject */}
-      <Text style={styles.filterLabel}>Subject</Text>
-      <PickerField
-        label="Subject"
-        value={filterSubject}
-        onChange={setFilterSubject}
-        placeholder="All Subjects"
-        items={subjects.map(s => ({ label: s === '' ? 'All Subjects' : s, value: s }))}
-      />
-
-      {/* Month */}
-      <Text style={styles.filterLabel}>Month</Text>
-      <PickerField
-        label="Month"
-        value={filterMonth}
-        onChange={setFilterMonth}
-        placeholder="Any Month"
-        items={availableMonths}
-      />
-
-      {/* Year */}
-      <Text style={styles.filterLabel}>Year</Text>
-      <PickerField
-        label="Year"
-        value={filterYear}
-        onChange={setFilterYear}
-        placeholder="Any Year"
-        items={availableYears}
-      />
-
-      {/* Type chips */}
-      <Text style={styles.filterLabel}>Type</Text>
-      <View style={styles.chipRow}>
-        {[
-          { value: '',          label: 'All' },
-          { value: 'classwork', label: '📖 Classwork' },
-          { value: 'homework',  label: '📝 Homework' },
-        ].map(t => (
-          <Pressable
-            key={t.value}
-            style={[styles.chip, filterType === t.value && styles.chipActive]}
-            onPress={() => setFilterType(t.value)}
-          >
-            <Text style={[styles.chipTxt, filterType === t.value && styles.chipTxtActive]}>
-              {t.label}
-            </Text>
-          </Pressable>
-        ))}
+      <View style={styles.searchHeaderRow}>
+        <TextInput
+          style={styles.searchInputCompact}
+          placeholder="Search by title or subject"
+          placeholderTextColor="#94A3B8"
+          value={search}
+          onChangeText={setSearch}
+          returnKeyType="search"
+        />
+        <Pressable
+          style={({ pressed }) => [styles.filterToggleBtn, pressed && { opacity: 0.8 }]}
+          onPress={() => setFiltersOpen(v => !v)}
+        >
+          <Text style={styles.filterToggleTxt}>{filtersOpen ? 'Hide' : 'Filters'}</Text>
+        </Pressable>
       </View>
+
+      {filtersOpen && (
+        <View style={styles.advancedFiltersWrap}>
+          <Text style={styles.filterLabel}>Subject</Text>
+          <PickerField
+            label="Subject"
+            value={filterSubject}
+            onChange={setFilterSubject}
+            placeholder="All Subjects"
+            items={subjects.map(s => ({ label: s === '' ? 'All Subjects' : s, value: s }))}
+          />
+
+          <Text style={styles.filterLabel}>Month</Text>
+          <PickerField
+            label="Month"
+            value={filterMonth}
+            onChange={setFilterMonth}
+            placeholder="Any Month"
+            items={availableMonths}
+          />
+
+          <Text style={styles.filterLabel}>Year</Text>
+          <PickerField
+            label="Year"
+            value={filterYear}
+            onChange={setFilterYear}
+            placeholder="Any Year"
+            items={availableYears}
+          />
+
+          {!fixedType ? (
+            <>
+              <Text style={styles.filterLabel}>Type</Text>
+              <View style={styles.chipRow}>
+                {[
+                  { value: '',          label: 'All' },
+                  { value: 'classwork', label: '📖 Classwork' },
+                  { value: 'homework',  label: '📝 Homework' },
+                ].map(t => (
+                  <Pressable
+                    key={t.value}
+                    style={[styles.chip, filterType === t.value && styles.chipActive]}
+                    onPress={() => setFilterType(t.value)}
+                  >
+                    <Text style={[styles.chipTxt, filterType === t.value && styles.chipTxtActive]}>
+                      {t.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={styles.filterLabel}>Type</Text>
+              <View style={styles.typeLockedRow}>
+                <Text style={styles.typeLockedText}>{TYPE_LABEL[fixedType] || fixedType}</Text>
+              </View>
+            </>
+          )}
+
+          <Pressable
+            style={({ pressed }) => [styles.clearBtn, pressed && { opacity: 0.8 }]}
+            onPress={() => {
+              setFilterSubject('');
+              setFilterMonth('');
+              setFilterYear('');
+              if (!fixedType) setFilterType('');
+            }}
+          >
+            <Text style={styles.clearBtnTxt}>Clear Filters</Text>
+          </Pressable>
+        </View>
+      )}
 
       {!loading && (
         <Text style={styles.resultCount}>
-          {filtered.length} lecture{filtered.length !== 1 ? 's' : ''} found
+          {filtered.length} item{filtered.length !== 1 ? 's' : ''} found
         </Text>
       )}
     </View>
@@ -197,7 +219,7 @@ export default function StudentLecturesScreen({ navigation }) {
 
   return (
     <View style={styles.root}>
-      <AppHeader title="Lectures" navigation={navigation} />
+      <AppHeader title={screenTitle} navigation={navigation} />
 
       {loading ? (
         <ActivityIndicator color="#4F46E5" style={{ flex: 1, marginTop: 60 }} size="large" />
@@ -237,6 +259,28 @@ const styles = StyleSheet.create({
     borderRadius: 16, padding: 16,
     elevation: 2, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 6,
   },
+  searchHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  searchInputCompact: {
+    flex: 1,
+    backgroundColor: '#F8FAFF',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    fontSize: 14,
+    color: '#1E293B',
+  },
+  filterToggleBtn: {
+    backgroundColor: '#EEF2FF',
+    borderColor: '#C7D2FE',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+  },
+  filterToggleTxt: { color: '#4338CA', fontSize: 13, fontWeight: '800' },
+  advancedFiltersWrap: { marginTop: 12, borderTopWidth: 1, borderTopColor: '#E2E8F0', paddingTop: 6 },
   filterLabel: { fontSize: 12, fontWeight: '700', color: '#475569', marginBottom: 5, marginTop: 10 },
   searchRow:   { flexDirection: 'row', gap: 8 },
   searchInput: {
@@ -255,6 +299,27 @@ const styles = StyleSheet.create({
   chipActive:   { backgroundColor: '#EEF2FF', borderColor: '#4F46E5' },
   chipTxt:      { fontSize: 13, fontWeight: '600', color: '#475569' },
   chipTxtActive:{ color: '#4F46E5', fontWeight: '800' },
+  typeLockedRow: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  typeLockedText: { fontSize: 13, fontWeight: '800', color: '#4338CA' },
+  clearBtn: {
+    alignSelf: 'flex-end',
+    marginTop: 12,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  clearBtnTxt: { fontSize: 12, color: '#334155', fontWeight: '700' },
 
   resultCount:  { fontSize: 12, color: '#94A3B8', marginTop: 12, textAlign: 'right' },
 

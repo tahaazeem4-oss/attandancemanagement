@@ -396,10 +396,21 @@ export async function handleSuperAdmin(
       if (classId) q = q.eq("class_id", classId);
       if (sectionId) q = q.eq("section_id", sectionId);
       const { data } = await q;
+
+      const studentIds = (data || []).map((s: Record<string, unknown>) => s.id);
+      const { data: accounts } = studentIds.length
+        ? await db.from("student_accounts").select("student_id, email").in("student_id", studentIds)
+        : { data: [] };
+      const accMap = new Map(
+        (accounts || []).map((a: Record<string, unknown>) => [a.student_id as number, a.email as string]),
+      );
+
       const result = (data || []).map((s: Record<string, unknown>) => ({
         ...s,
         class_name: (s.classes as Record<string, unknown>).class_name,
         section_name: (s.sections as Record<string, unknown>).section_name,
+        has_account: accMap.has(s.id as number),
+        account_email: accMap.get(s.id as number) || null,
       }));
       return json(result);
     } catch (err) {

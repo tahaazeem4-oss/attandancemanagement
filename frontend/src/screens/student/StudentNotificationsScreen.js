@@ -70,12 +70,19 @@ export default function StudentNotificationsScreen({ navigation }) {
   // ── Mark single as read ────────────────────────────────────
   const markRead = async (notif) => {
     if (notif.is_read) return;
+
+    // Optimistic update so unread highlight clears immediately on tap.
+    setNotifications(prev =>
+      prev.map(n => n.id === notif.id ? { ...n, is_read: true } : n)
+    );
+
     try {
       await api.post(`/notifications/${notif.id}/read`);
+    } catch {
       setNotifications(prev =>
-        prev.map(n => n.id === notif.id ? { ...n, is_read: true } : n)
+        prev.map(n => n.id === notif.id ? { ...n, is_read: false } : n)
       );
-    } catch {}
+    }
   };
 
   // ── Toggle expand ──────────────────────────────────────────

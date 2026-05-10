@@ -30,7 +30,6 @@ export default function HomeScreen({ navigation }) {
   const [marking,          setMarking]          = useState(false);
   const [assignments,      setAssignments]      = useState(null);
   const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
-  const [notifUnread,      setNotifUnread]      = useState(0);
 
   const teacherRole = assignments === null ? null
     : assignments.length === 0 ? 'subject_teacher'
@@ -57,9 +56,6 @@ export default function HomeScreen({ navigation }) {
       const pendingWithdrawals = data.filter(l => l.withdrawal_status === 'pending').length;
       setPendingLeaveCount(pendingLeaves + pendingWithdrawals);
     }).catch(() => {});
-    api.get('/notifications/inbox/unread-count')
-      .then(({ data }) => setNotifUnread(data.count || 0))
-      .catch(() => {});
     Animated.stagger(100, aO.map((o, i) =>
       Animated.parallel([
         Animated.timing(o, { toValue: 1, duration: 380, useNativeDriver: true }),
@@ -71,9 +67,6 @@ export default function HomeScreen({ navigation }) {
   // Re-fetch unread count and pending leave count whenever this screen comes into focus
   useFocusEffect(
     useCallback(() => {
-      api.get('/notifications/inbox/unread-count')
-        .then(({ data }) => setNotifUnread(data.count || 0))
-        .catch(() => {});
       api.get('/teachers/leaves').then(({ data }) => {
         const pendingLeaves      = data.filter(l => l.status === 'pending' && !l.withdrawal_status).length;
         const pendingWithdrawals = data.filter(l => l.withdrawal_status === 'pending').length;
@@ -247,11 +240,6 @@ export default function HomeScreen({ navigation }) {
             i: 5, icon: 'notifications-outline', label: 'Send Notification',
             tint: '#0EA5E9', bg: '#F0F9FF',
             locked: false, badge: 0, onPress: () => navigation.navigate('SendNotification'),
-          },
-          {
-            i: 6, icon: 'notifications', label: 'My Inbox',
-            tint: '#8B5CF6', bg: '#F5F3FF',
-            locked: false, badge: notifUnread, onPress: () => navigation.navigate('StaffNotifications'),
           },
         ].map(({ i, icon, label, tint, bg, locked, badge, onPress }) => (
           <Animated.View key={i} style={[styles.cardWrap, { opacity: aO[i], transform: [{ translateY: aY[i] }, { scale: sc[i] }] }]}>

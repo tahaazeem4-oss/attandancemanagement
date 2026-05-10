@@ -1,10 +1,11 @@
-﻿import React from 'react';
-import { View, Text, StyleSheet, Platform } from 'react-native';
+﻿import React, { useState, useEffect, useCallback } from 'react';
+import { View, StyleSheet } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator }   from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
+import api from '../services/api';
 
 // Auth screens
 import SignUpScreen          from '../screens/SignUpScreen';
@@ -48,6 +49,7 @@ import StudentHomeScreen          from '../screens/student/StudentHomeScreen';
 import StudentHistoryScreen       from '../screens/student/StudentHistoryScreen';
 import StudentLeaveScreen         from '../screens/student/StudentLeaveScreen';
 import StudentLecturesScreen      from '../screens/student/StudentLecturesScreen';
+import StudentLectureDetailScreen from '../screens/student/StudentLectureDetailScreen';
 import StudentNotificationsScreen from '../screens/student/StudentNotificationsScreen';
 
 const Stack = createNativeStackNavigator();
@@ -88,6 +90,25 @@ function tabIcon(focused, name, nameOutline, size = 24) {
   return <Ionicons name={focused ? name : nameOutline} size={size} color={focused ? '#fff' : 'rgba(255,255,255,0.45)'} />;
 }
 
+function notificationBadgeValue(unread) {
+  if (!unread || unread <= 0) return undefined;
+  return unread > 99 ? '99+' : String(unread);
+}
+
+function notificationTabIcon({ focused, unread }) {
+  const hasUnread = unread > 0;
+  return (
+    <View style={[styles.notifIconWrap, hasUnread && styles.notifIconWrapUnread]}>
+      <Ionicons
+        name={focused ? 'notifications' : 'notifications-outline'}
+        size={24}
+        color={focused || hasUnread ? '#fff' : 'rgba(255,255,255,0.45)'}
+      />
+      {hasUnread && <View style={styles.notifDot} />}
+    </View>
+  );
+}
+
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // TEACHER TABS
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -111,6 +132,14 @@ function TeacherHomeStack() {
 
 function TeacherTabs() {
   const tabBarOptions = useTabBarOptions();
+  const [notifUnread, setNotifUnread] = useState(0);
+  const fetchUnread = useCallback(() => {
+    api.get('/notifications/inbox/unread-count')
+      .then(({ data }) => setNotifUnread(data.count || 0))
+      .catch(() => {});
+  }, []);
+  useEffect(() => { fetchUnread(); }, [fetchUnread]);
+
   return (
     <Tab.Navigator screenOptions={{ ...tabBarOptions, headerShown: false }} initialRouteName="HomeTab">
       <Tab.Screen
@@ -126,7 +155,13 @@ function TeacherTabs() {
       <Tab.Screen
         name="NotifTab"
         component={StaffNotificationsScreen}
-        options={{ title: 'Notifications', tabBarIcon: ({ focused }) => tabIcon(focused, 'notifications', 'notifications-outline') }}
+        listeners={{ tabPress: fetchUnread }}
+        options={{
+          title: 'Notifications',
+          tabBarBadge: notificationBadgeValue(notifUnread),
+          tabBarBadgeStyle: { backgroundColor: '#EF4444', color: '#fff', fontSize: 10, minWidth: 18, height: 18, lineHeight: 18 },
+          tabBarIcon: ({ focused }) => notificationTabIcon({ focused, unread: notifUnread }),
+        }}
       />
     </Tab.Navigator>
   );
@@ -158,6 +193,14 @@ function AdminHomeStack() {
 
 function AdminTabs() {
   const tabBarOptions = useTabBarOptions();
+  const [notifUnread, setNotifUnread] = useState(0);
+  const fetchUnread = useCallback(() => {
+    api.get('/notifications/inbox/unread-count')
+      .then(({ data }) => setNotifUnread(data.count || 0))
+      .catch(() => {});
+  }, []);
+  useEffect(() => { fetchUnread(); }, [fetchUnread]);
+
   return (
     <Tab.Navigator screenOptions={{ ...tabBarOptions, headerShown: false }} initialRouteName="HomeTab">
       <Tab.Screen
@@ -173,7 +216,13 @@ function AdminTabs() {
       <Tab.Screen
         name="NotifTab"
         component={StaffNotificationsScreen}
-        options={{ title: 'Notifications', tabBarIcon: ({ focused }) => tabIcon(focused, 'notifications', 'notifications-outline') }}
+        listeners={{ tabPress: fetchUnread }}
+        options={{
+          title: 'Notifications',
+          tabBarBadge: notificationBadgeValue(notifUnread),
+          tabBarBadgeStyle: { backgroundColor: '#EF4444', color: '#fff', fontSize: 10, minWidth: 18, height: 18, lineHeight: 18 },
+          tabBarIcon: ({ focused }) => notificationTabIcon({ focused, unread: notifUnread }),
+        }}
       />
     </Tab.Navigator>
   );
@@ -226,7 +275,19 @@ function StudentHomeStack() {
       <Stack.Screen name="StudentHome"          component={StudentHomeScreen}     options={{ headerShown: false }} />
       <Stack.Screen name="StudentHistory"       component={StudentHistoryScreen}  options={{ headerShown: false }} />
       <Stack.Screen name="StudentLeaves"        component={StudentLeaveScreen}    options={{ headerShown: false }} />
-      <Stack.Screen name="StudentLectures"       component={StudentLecturesScreen}       options={{ headerShown: false }} />
+      <Stack.Screen
+        name="StudentClasswork"
+        component={StudentLecturesScreen}
+        initialParams={{ fixedType: 'classwork', title: 'Class Work' }}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="StudentHomework"
+        component={StudentLecturesScreen}
+        initialParams={{ fixedType: 'homework', title: 'Homework' }}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen name="StudentLectureDetail" component={StudentLectureDetailScreen} options={{ headerShown: false }} />
       <Stack.Screen name="StudentNotifications" component={StudentNotificationsScreen}  options={{ headerShown: false }} />
     </Stack.Navigator>
   );
@@ -234,6 +295,14 @@ function StudentHomeStack() {
 
 function StudentTabs() {
   const tabBarOptions = useTabBarOptions();
+  const [notifUnread, setNotifUnread] = useState(0);
+  const fetchUnread = useCallback(() => {
+    api.get('/notifications/me/unread-count')
+      .then(({ data }) => setNotifUnread(data.count || 0))
+      .catch(() => {});
+  }, []);
+  useEffect(() => { fetchUnread(); }, [fetchUnread]);
+
   return (
     <Tab.Navigator screenOptions={{ ...tabBarOptions, headerShown: false }} initialRouteName="HomeTab">
       <Tab.Screen
@@ -249,7 +318,13 @@ function StudentTabs() {
       <Tab.Screen
         name="NotifTab"
         component={StudentNotificationsScreen}
-        options={{ title: 'Notifications', tabBarIcon: ({ focused }) => tabIcon(focused, 'notifications', 'notifications-outline') }}
+        listeners={{ tabPress: fetchUnread }}
+        options={{
+          title: 'Notifications',
+          tabBarBadge: notificationBadgeValue(notifUnread),
+          tabBarBadgeStyle: { backgroundColor: '#EF4444', color: '#fff', fontSize: 10, minWidth: 18, height: 18, lineHeight: 18 },
+          tabBarIcon: ({ focused }) => notificationTabIcon({ focused, unread: notifUnread }),
+        }}
       />
     </Tab.Navigator>
   );
@@ -282,4 +357,27 @@ export default function AppNavigator() {
   );
 }
 
-const styles = StyleSheet.create({});
+const styles = StyleSheet.create({
+  notifIconWrap: {
+    width: 34,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  notifIconWrapUnread: {
+    backgroundColor: 'rgba(239,68,68,0.35)',
+  },
+  notifDot: {
+    position: 'absolute',
+    top: 2,
+    right: 5,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#F87171',
+    borderWidth: 1,
+    borderColor: '#fff',
+  },
+});

@@ -1,12 +1,12 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View, Text, FlatList, Pressable, TextInput, Modal, ScrollView,
-  StyleSheet, ActivityIndicator, StatusBar, Alert,
+  StyleSheet, ActivityIndicator, Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
+import AppHeader from '../../components/AppHeader';
 
 // ── Searchable Picker Modal ───────────────────────────────────
 function SearchPickerModal({ visible, title, items, labelKey = 'name', onSelect, onClose, emptyText = 'No items found' }) {
@@ -354,6 +354,14 @@ function EditStudentModal({ visible, schoolId, student, classes, onClose, onSave
               onClassChange={v => setF('class_id', v)}
               onSectionChange={v => setF('section_id', v)}
             />
+
+            <View style={modal.idMapBox}>
+              <Text style={modal.idMapTitle}>Mapped Account</Text>
+              <View style={modal.idMapRow}>
+                <Text style={modal.idMapText}>Email: {student?.account_email || 'No portal account mapped'}</Text>
+              </View>
+            </View>
+
             <Pressable style={[tm.primaryBtn, loading && { opacity: 0.7 }]} onPress={handleSave} disabled={loading}>
               {loading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={tm.primaryBtnTxt}>Save Changes</Text>}
             </Pressable>
@@ -394,8 +402,7 @@ function EditStudentModal({ visible, schoolId, student, classes, onClose, onSave
 }
 
 // ── Main Screen ───────────────────────────────────────────────
-export default function SuperAdminStudentsScreen() {
-  const insets = useSafeAreaInsets();
+export default function SuperAdminStudentsScreen({ navigation }) {
   const [schools,          setSchools]          = useState([]);
   const [selectedSchool,   setSelectedSchool]   = useState(null);
   const [classes,          setClasses]          = useState([]);
@@ -481,10 +488,7 @@ export default function SuperAdminStudentsScreen() {
   return (
     <View style={styles.container}>
 
-      {/* Header */}
-      <LinearGradient colors={['#1E3A8A', '#2563EB']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <Text style={styles.headerTitle}>Manage Students</Text>
-      </LinearGradient>
+      <AppHeader title="Students" navigation={navigation} />
 
       {/* Filters */}
       <View style={styles.filterSection}>
@@ -597,7 +601,7 @@ export default function SuperAdminStudentsScreen() {
                       {!!item.roll_no && <Text style={styles.cardSub}>Roll #{item.roll_no}</Text>}
                     </View>
                     <View style={styles.eyeBtn}>
-                      <Text style={styles.eyeIcon}>›</Text>
+                      <Text style={styles.eyeIcon}>Edit</Text>
                     </View>
                   </Pressable>
                 )}
@@ -665,8 +669,6 @@ export default function SuperAdminStudentsScreen() {
 // ── Styles ────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container:     { flex: 1, backgroundColor: C.bg },
-  header:        { paddingHorizontal: 20, paddingBottom: 16 },
-  headerTitle:   { color: '#fff', fontSize: 20, fontWeight: '800' },
   addBtn:        { backgroundColor: C.primary, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 11, height: 42, justifyContent: 'center' },
   addBtnTxt:     { color: '#fff', fontWeight: '700', fontSize: 13 },
 
@@ -689,8 +691,8 @@ const styles = StyleSheet.create({
   avatarTxt:    { color: '#EA580C', fontWeight: '800', fontSize: 13 },
   cardName:     { fontSize: 14, fontWeight: '700', color: C.textDark },
   cardSub:      { fontSize: 12, color: C.textMed, marginTop: 1 },
-  eyeBtn:       { width: 30, height: 30, borderRadius: 10, backgroundColor: C.primary, justifyContent: 'center', alignItems: 'center' },
-  eyeIcon:      { fontSize: 20, color: '#fff', fontWeight: '700', lineHeight: 22 },
+  eyeBtn:       { borderRadius: 8, backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 7 },
+  eyeIcon:      { fontSize: 12, color: C.primary, fontWeight: '700' },
 });
 
 const modal = StyleSheet.create({
@@ -701,6 +703,10 @@ const modal = StyleSheet.create({
   close:        { fontSize: 20, color: C.textMed, padding: 4 },
   error:        { color: '#DC2626', fontSize: 13, marginBottom: 10, backgroundColor: '#FEF2F2', padding: 10, borderRadius: 8 },
   row2:         { flexDirection: 'row', gap: 10 },
+  idMapBox:     { marginTop: 10, backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: C.border, borderRadius: 10, padding: 10 },
+  idMapTitle:   { fontSize: 11, color: C.textMed, fontWeight: '800', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.4 },
+  idMapRow:     { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  idMapText:    { fontSize: 12, color: C.textDark, fontWeight: '700' },
   divider:      { height: 1, backgroundColor: C.border, marginVertical: 18 },
   sectionLabel: { fontSize: 13, fontWeight: '700', color: C.textMed, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
 });

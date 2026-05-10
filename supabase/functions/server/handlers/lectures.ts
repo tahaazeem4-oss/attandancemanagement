@@ -113,7 +113,7 @@ export async function handleLectures(
     try {
       let q = db
         .from("lectures")
-        .select(`id, subject_name, lecture_name, type, date, file_path, uploaded_by, created_at, class_id, section_id,
+        .select(`id, teacher_id, subject_name, lecture_name, type, date, file_path, uploaded_by, created_at, class_id, section_id,
                  classes!inner(class_name), sections(section_name)`)
         .eq("school_id", schoolId)
         .order("date", { ascending: false });

@@ -21,15 +21,13 @@ const CARDS = [
   { key: 'UploadLecture',      icon: 'cloud-upload-outline',  label: 'Upload',         tint: '#0891B2', bg: '#F0F9FF' },
   { key: 'LectureList',        icon: 'videocam-outline',      label: 'Lectures',       tint: '#2563EB', bg: '#EFF6FF' },
   { key: 'AdminSubjects',           icon: 'book-outline',          label: 'Subjects',         tint: '#7C3AED', bg: '#F5F3FF' },
-  { key: 'StaffNotifications',      icon: 'notifications',         label: 'My Inbox',         tint: '#8B5CF6', bg: '#F5F3FF' },
   { key: 'AdminTeacherAttendance',  icon: 'calendar-outline',      label: 'Teacher Report',   tint: '#10B981', bg: '#ECFDF5' },
 ];
 
 export default function AdminHomeScreen({ navigation }) {
   const { user, school, logout } = useAuth();
-  const [stats,         setStats]        = useState(null);
-  const [loading,       setLoading]      = useState(true);
-  const [notifUnread,   setNotifUnread]  = useState(0);
+  const [stats,   setStats]   = useState(null);
+  const [loading, setLoading] = useState(true);
 
   const fadeAnims  = useRef(CARDS.map(() => new Animated.Value(0))).current;
   const slideAnims = useRef(CARDS.map(() => new Animated.Value(20))).current;
@@ -39,10 +37,6 @@ export default function AdminHomeScreen({ navigation }) {
       .then(({ data }) => setStats(data))
       .catch(() => {})
       .finally(() => setLoading(false));
-
-    api.get('/notifications/inbox/unread-count')
-      .then(({ data }) => setNotifUnread(data.count || 0))
-      .catch(() => {});
 
     Animated.stagger(55, CARDS.map((_, i) =>
       Animated.parallel([
@@ -55,9 +49,6 @@ export default function AdminHomeScreen({ navigation }) {
   // Re-fetch unread count and stats when screen comes back into focus
   useFocusEffect(
     useCallback(() => {
-      api.get('/notifications/inbox/unread-count')
-        .then(({ data }) => setNotifUnread(data.count || 0))
-        .catch(() => {});
       api.get('/admin/stats')
         .then(({ data }) => setStats(data))
         .catch(() => {});
@@ -142,12 +133,7 @@ export default function AdminHomeScreen({ navigation }) {
                   <Text style={styles.badgeTxt}>{stats.pending_leaves}</Text>
                 </View>
               )}
-              {/* Unread inbox badge */}
-              {card.key === 'StaffNotifications' && notifUnread > 0 && (
-                <View style={styles.badge}>
-                  <Text style={styles.badgeTxt}>{notifUnread > 99 ? '99+' : notifUnread}</Text>
-                </View>
-              )}
+
             </Pressable>
           </Animated.View>
         ))}
