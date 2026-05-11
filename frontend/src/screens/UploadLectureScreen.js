@@ -74,22 +74,22 @@ export default function UploadLectureScreen({ navigation }) {
     setForm(p => ({ ...p, section_id: '' }));
   }, [form.class_id, classes]);
 
-  // ── Duplicate check (debounced 400ms) ────────────────────────
+  // ── Duplicate check (debounced 400ms, now by lecture_name/class/section) ──
   useEffect(() => {
-    const { subject_name, date, class_id } = form;
-    if (!subject_name || !date || !class_id) { setDuplicate(null); return; }
+    const { lecture_name, class_id } = form;
+    if (!lecture_name || !class_id) { setDuplicate(null); return; }
     const timer = setTimeout(async () => {
       setCheckingDup(true);
       try {
         const { data } = await api.get('/lectures/check-duplicate', {
-          params: { subject_name, date, class_id, section_id: form.section_id || '' },
+          params: { lecture_name, class_id, section_id: form.section_id || '' },
         });
         setDuplicate(data.exists ? data.lecture : null);
       } catch { setDuplicate(null); }
       finally  { setCheckingDup(false); }
     }, 400);
     return () => clearTimeout(timer);
-  }, [form.subject_name, form.date, form.class_id, form.section_id]);
+  }, [form.lecture_name, form.class_id, form.section_id]);
 
   const F = (key, val) => setForm(p => ({ ...p, [key]: val }));
 

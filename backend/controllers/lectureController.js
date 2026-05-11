@@ -134,7 +134,12 @@ exports.getLectures = async (req, res) => {
       q += ' ORDER BY l.date DESC, l.created_at DESC';
 
       const [rows] = await db.query(q, params);
-      return res.json(rows);
+      // Attach file_url for each lecture
+      const lectures = rows.map(l => ({
+        ...l,
+        file_url: `/lectures/${l.id}/file`
+      }));
+      return res.json(lectures);
     }
 
     // Teacher / Admin
@@ -164,7 +169,12 @@ exports.getLectures = async (req, res) => {
     q += ' ORDER BY l.date DESC, l.created_at DESC';
 
     const [rows] = await db.query(q, params);
-    res.json(rows);
+    // Attach file_url for each lecture
+    const lectures = rows.map(l => ({
+      ...l,
+      file_url: `/lectures/${l.id}/file`
+    }));
+    res.json(lectures);
   } catch (err) {
     console.error('[getLectures]', err);
     res.status(500).json({ message: 'Server error' });
@@ -292,17 +302,17 @@ exports.getSubjects = async (req, res) => {
 exports.checkDuplicate = async (req, res) => {
   try {
     const { school_id } = req.user;
-    const { subject_name, date, class_id, section_id } = req.query;
-    if (!subject_name || !date || !class_id) return res.json({ exists: false });
+    const { lecture_name, class_id, section_id } = req.query;
+    if (!lecture_name || !class_id) return res.json({ exists: false });
 
     const secId = section_id && section_id !== '' && section_id !== '0'
       ? Number(section_id) : null;
 
     let q = `SELECT id, lecture_name FROM lectures
-             WHERE school_id = $1 AND LOWER(subject_name) = LOWER($2) AND date = $3 AND class_id = $4`;
-    const params = [school_id, subject_name, date, class_id];
+             WHERE school_id = $1 AND LOWER(lecture_name) = LOWER($2) AND class_id = $3`;
+    const params = [school_id, lecture_name, class_id];
 
-    if (secId) { q += ` AND section_id = $5`; params.push(secId); }
+    if (secId) { q += ` AND section_id = $4`; params.push(secId); }
     else        { q += ` AND section_id IS NULL`; }
 
     q += ' LIMIT 1';
@@ -312,6 +322,17 @@ exports.checkDuplicate = async (req, res) => {
     console.error('[checkDuplicate]', err);
     res.status(500).json({ message: 'Server error' });
   }
+    // Duplicate name check (unique per class/section, case-insensitive)
+    let dupQ = `SELECT id FROM lectures WHERE school_id = $1 AND LOWER(lecture_name) = LOWER($2) AND class_id = $3`;
+    const dupParams = [school_id, lecture_name, class_id];
+    if (secId) { dupQ += ' AND section_id = $4'; dupParams.push(secId); }
+    else       { dupQ += ' AND section_id IS NULL'; }
+    dupQ += ' LIMIT 1';
+    const [dupRows] = await db.query(dupQ, dupParams);
+    if (dupRows.length > 0) {
+      fs.unlinkSync(req.file.path);
+      return res.status(409).json({ message: 'A lecture with this name already exists for this class/section.' });
+    }
 };
 
 // ── GET /api/lectures/classes ─────────────────────────────────
