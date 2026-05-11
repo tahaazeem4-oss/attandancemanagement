@@ -7,6 +7,8 @@ import api from '../../services/api';
 import { C, S } from '../../config/theme';
 import AppHeader from '../../components/AppHeader';
 
+import { LinearGradient } from 'expo-linear-gradient';
+
 // ── Searchable Picker Modal ───────────────────────────────────
 function SearchPickerModal({ visible, title, items, labelKey = 'name', onSelect, onClose, emptyText = 'No items found' }) {
   const [query, setQuery] = useState('');
