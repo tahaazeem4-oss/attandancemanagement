@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, Pressable, TextInput, Modal, Image,
   StyleSheet, ActivityIndicator, StatusBar, Alert, Platform,
@@ -7,66 +7,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
-
-// ── OrgFormModal — add/edit an organization (school) ─────────
-function OrgFormModal({ visible, org, onClose, onSaved }) {
-  const [name,    setName]    = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState('');
-
-  useEffect(() => {
-    setName(org ? org.name : '');
-    setError('');
-  }, [org, visible]);
-
-  const handleSave = async () => {
-    if (!name.trim()) { setError('School name is required.'); return; }
-    setLoading(true);
-    try {
-      if (org) {
-        await api.put(`/super-admin/organizations/${org.id}`, { name: name.trim() });
-      } else {
-        await api.post('/super-admin/organizations', { name: name.trim() });
-      }
-      onSaved();
-    } catch (e) {
-      setError(e?.response?.data?.message || 'Failed to save.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={modal.overlay}>
-        <View style={modal.sheet}>
-          <Text style={modal.title}>{org ? 'Edit School' : 'Add New School'}</Text>
-          {!!error && <View style={modal.errorBox}><Text style={modal.errorText}>{error}</Text></View>}
-          <Text style={S.label}>School Name *</Text>
-          <TextInput
-            style={S.input}
-            placeholder="e.g. Sunrise Academy"
-            placeholderTextColor={C.textLight}
-            value={name}
-            onChangeText={setName}
-          />
-          <View style={modal.btnRow}>
-            <Pressable style={modal.cancelBtn} onPress={onClose}>
-              <Text style={modal.cancelText}>Cancel</Text>
-            </Pressable>
-            <Pressable style={modal.saveBtn} onPress={handleSave} disabled={loading}>
-              {loading ? <ActivityIndicator color="#fff" /> : <Text style={modal.saveText}>{org ? 'Update' : 'Add School'}</Text>}
-            </Pressable>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
-}
+import AppHeader from '../../components/AppHeader';
+import PickerField from '../../components/PickerField';
 
 // ── CampusFormModal — add/edit a campus (with branding) ───────
-function CampusFormModal({ visible, campus, orgId, onClose, onSaved }) {
+function CampusFormModal({ visible, campus, orgId, orgs = [], onClose, onSaved }) {
   const [form,      setForm]      = useState({ name: '', tagline: '', initials: '', logo_url: '', primary_color: '#2563EB', accent_color: '#1D4ED8' });
+  const [selectedOrgId, setSelectedOrgId] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState('');
@@ -81,8 +28,10 @@ function CampusFormModal({ visible, campus, orgId, onClose, onSaved }) {
         primary_color: campus.primary_color || '#2563EB',
         accent_color:  campus.accent_color  || '#1D4ED8',
       });
+      setSelectedOrgId(campus.org_id || orgId || null);
     } else {
       setForm({ name: '', tagline: '', initials: '', logo_url: '', primary_color: '#2563EB', accent_color: '#1D4ED8' });
+      setSelectedOrgId(orgId || null);
     }
     setError('');
   }, [campus, visible]);
@@ -131,12 +80,13 @@ function CampusFormModal({ visible, campus, orgId, onClose, onSaved }) {
 
   const handleSave = async () => {
     if (!form.name.trim()) { setError('Campus name is required.'); return; }
+    if (!selectedOrgId) { setError('Please select an organization.'); return; }
     setLoading(true);
     try {
       if (campus) {
-        await api.put(`/super-admin/schools/${campus.id}`, form);
+        await api.put(`/super-admin/schools/${campus.id}`, { ...form, org_id: selectedOrgId });
       } else {
-        await api.post('/super-admin/schools', { ...form, org_id: orgId });
+        await api.post('/super-admin/schools', { ...form, org_id: selectedOrgId });
       }
       onSaved();
     } catch (e) {
@@ -150,6 +100,20 @@ function CampusFormModal({ visible, campus, orgId, onClose, onSaved }) {
         <ScrollView style={modal.sheet} contentContainerStyle={{ paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
           <Text style={modal.title}>{campus ? 'Edit Campus' : 'Add New Campus'}</Text>
           {!!error && <View style={modal.errorBox}><Text style={modal.errorText}>{error}</Text></View>}
+
+          {/* Org picker — always shown so campus can be assigned/reassigned */}
+          {orgs.length > 0 && (
+            <>
+              <Text style={S.label}>Organization *</Text>
+              <PickerField
+                label="Organization"
+                value={selectedOrgId}
+                onChange={setSelectedOrgId}
+                items={orgs.map(o => ({ label: o.name, value: o.id }))}
+                placeholder="Select organization"
+              />
+            </>
+          )}
 
           <Text style={S.label}>Campus Name *</Text>
           <TextInput style={S.input} placeholder="e.g. Main Campus" placeholderTextColor={C.textLight}
@@ -363,7 +327,7 @@ function EditAdminModal({ visible, admin, campusId, onClose, onSaved }) {
 }
 
 // ── CampusCard ────────────────────────────────────────────────
-function CampusCard({ campus, admins, onEditCampus, onDeleteCampus, onAddAdmin, onEditAdmin, onDeleteAdmin }) {
+function CampusCard({ campus, admins, orgName, onEditCampus, onDeleteCampus, onAddAdmin, onEditAdmin, onDeleteAdmin }) {
   return (
     <View style={styles.campusCard}>
       {/* Campus header */}
@@ -384,6 +348,7 @@ function CampusCard({ campus, admins, onEditCampus, onDeleteCampus, onAddAdmin, 
           <Text style={styles.campusMeta}>
             {campus.teacher_count ?? 0} teachers · {campus.student_count ?? 0} students · {campus.admin_count ?? 0} admins
           </Text>
+          {!!orgName && <View style={styles.orgBadge}><Text style={styles.orgBadgeTxt}>{orgName}</Text></View>}
         </View>
       </View>
 
@@ -437,21 +402,19 @@ function CampusCard({ campus, admins, onEditCampus, onDeleteCampus, onAddAdmin, 
 }
 
 // ── Main Screen ───────────────────────────────────────────────
-export default function SuperAdminSchoolsScreen() {
-  const [orgs,        setOrgs]        = useState([]);
-  const [campusesMap, setCampusesMap] = useState({});   // orgId → [campus]
-  const [adminsMap,   setAdminsMap]   = useState({});   // campusId → [admin]
-  const [loading,     setLoading]     = useState(true);
+export default function SuperAdminSchoolsScreen({ navigation }) {
+  const [orgs,       setOrgs]       = useState([]);
+  const [campuses,   setCampuses]   = useState([]);
+  const [adminsMap,  setAdminsMap]  = useState({});   // campusId → [admin]
+  const [loading,    setLoading]    = useState(true);
 
   // Modals
-  const [orgModal,    setOrgModal]    = useState({ open: false, org: null });
-  const [campusModal, setCampusModal] = useState({ open: false, campus: null, orgId: null });
+  const [campusModal, setCampusModal] = useState({ open: false, campus: null });
   const [adminModal,  setAdminModal]  = useState({ open: false, campusId: null });
   const [editAdmin,   setEditAdmin]   = useState({ open: false, campusId: null, admin: null });
 
   // Delete confirms
-  const [deleteOrgPending,    setDeleteOrgPending]    = useState(null); // org
-  const [deleteCampusPending, setDeleteCampusPending] = useState(null); // campus
+  const [deleteCampusPending, setDeleteCampusPending] = useState(null);
   const [deleteAdminPending,  setDeleteAdminPending]  = useState(null); // {campusId, admin}
   const [deleting, setDeleting] = useState(false);
 
@@ -469,40 +432,18 @@ export default function SuperAdminSchoolsScreen() {
         api.get('/super-admin/organizations'),
         api.get('/super-admin/schools'),
       ]);
-
-      // Group campuses by org_id
-      const map = {};
-      orgsData.forEach(o => { map[o.id] = []; });
-      // Campuses without an org go into a catch-all (shouldn't happen after migration)
-      schoolsData.forEach(s => {
-        if (s.org_id && map[s.org_id]) {
-          map[s.org_id].push(s);
-        }
-      });
-
       setOrgs(orgsData);
-      setCampusesMap(map);
-
-      // Load admins for all campuses
+      setCampuses(schoolsData);
       schoolsData.forEach(s => loadAdmins(s.id));
-    } catch { } finally { setLoading(false); }
+    } catch {
+      Alert.alert('Error', 'Could not load campuses.');
+    } finally { setLoading(false); }
   }, [loadAdmins]);
 
   useEffect(() => { loadData(); }, []);
 
-  // Delete org
-  const confirmDeleteOrg = async () => {
-    if (!deleteOrgPending) return;
-    setDeleting(true);
-    try {
-      await api.delete(`/super-admin/organizations/${deleteOrgPending.id}`);
-      setDeleteOrgPending(null);
-      loadData();
-    } catch (e) {
-      setDeleteOrgPending(null);
-      Alert.alert('Error', e?.response?.data?.message || 'Failed to delete school.');
-    } finally { setDeleting(false); }
-  };
+  // Build a map from orgId → org name for badge labels
+  const orgNameMap = Object.fromEntries(orgs.map(o => [o.id, o.name]));
 
   // Delete campus
   const confirmDeleteCampus = async () => {
@@ -527,7 +468,6 @@ export default function SuperAdminSchoolsScreen() {
       await api.delete(`/super-admin/schools/${campusId}/admins/${admin.id}`);
       setAdminsMap(p => ({ ...p, [campusId]: p[campusId].filter(a => a.id !== admin.id) }));
       setDeleteAdminPending(null);
-      loadData();
     } catch (e) {
       setDeleteAdminPending(null);
       Alert.alert('Error', e?.response?.data?.message || 'Failed to remove admin.');
@@ -535,86 +475,46 @@ export default function SuperAdminSchoolsScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
+    <View style={styles.container}>
+      <AppHeader title="Schools / Campuses" navigation={navigation} />
       <StatusBar barStyle="dark-content" />
 
-      <View style={styles.topBar}>
-        <Text style={styles.pageTitle}>Schools</Text>
-        <Pressable style={styles.addBtn} onPress={() => setOrgModal({ open: true, org: null })}>
-          <Text style={styles.addBtnText}>+ Add School</Text>
-        </Pressable>
-      </View>
+      <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+        <View style={styles.topBar}>
+          <Text style={styles.subtitle}>{campuses.length} campus{campuses.length !== 1 ? 'es' : ''}</Text>
+          <Pressable style={styles.addBtn} onPress={() => setCampusModal({ open: true, campus: null })}>
+            <Text style={styles.addBtnText}>+ Add Campus</Text>
+          </Pressable>
+        </View>
 
-      {loading
-        ? <ActivityIndicator size="large" color={C.primary} style={{ marginTop: 40 }} />
-        : orgs.length === 0
-          ? <Text style={styles.empty}>No schools yet. Tap "Add School" to create the first one.</Text>
-          : orgs.map(org => (
-            <View key={org.id} style={styles.orgCard}>
-              {/* Org header */}
-              <View style={styles.orgHeader}>
-                <View style={styles.orgIcon}>
-                  <Text style={styles.orgIconText}>🏫</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.orgName}>{org.name}</Text>
-                  <Text style={styles.orgMeta}>{(campusesMap[org.id] || []).length} campus(es)</Text>
-                </View>
-                <View style={styles.orgActions}>
-                  <Pressable style={styles.orgEditBtn} onPress={() => setOrgModal({ open: true, org })}>
-                    <Text style={styles.orgEditBtnText}>✏️</Text>
-                  </Pressable>
-                  <Pressable style={styles.orgDeleteBtn} onPress={() => setDeleteOrgPending(org)}>
-                    <Text style={styles.orgDeleteBtnText}>🗑</Text>
-                  </Pressable>
-                </View>
-              </View>
-
-              {/* Campuses */}
-              <View style={styles.campusesContainer}>
-                <View style={styles.campusesTitleRow}>
-                  <Text style={styles.campusesLabel}>CAMPUSES</Text>
-                  <Pressable
-                    style={styles.addCampusBtn}
-                    onPress={() => setCampusModal({ open: true, campus: null, orgId: org.id })}
-                  >
-                    <Text style={styles.addCampusBtnText}>+ Add Campus</Text>
-                  </Pressable>
-                </View>
-
-                {(campusesMap[org.id] || []).length === 0
-                  ? <Text style={styles.noCampuses}>No campuses yet. Tap "+ Add Campus" to add one.</Text>
-                  : (campusesMap[org.id] || []).map(campus => (
-                    <CampusCard
-                      key={campus.id}
-                      campus={campus}
-                      admins={adminsMap[campus.id]}
-                      onEditCampus={(c) => setCampusModal({ open: true, campus: c, orgId: org.id })}
-                      onDeleteCampus={(c) => setDeleteCampusPending(c)}
-                      onAddAdmin={(id) => setAdminModal({ open: true, campusId: id })}
-                      onEditAdmin={(id, adm) => setEditAdmin({ open: true, campusId: id, admin: adm })}
-                      onDeleteAdmin={(id, adm) => setDeleteAdminPending({ campusId: id, admin: adm })}
-                    />
-                  ))
-                }
-              </View>
-            </View>
-          ))
-      }
+        {loading
+          ? <ActivityIndicator size="large" color={C.primary} style={{ marginTop: 40 }} />
+          : campuses.length === 0
+            ? <Text style={styles.empty}>No campuses yet. Tap "+ Add Campus" to create the first one.</Text>
+            : campuses.map(campus => (
+              <CampusCard
+                key={campus.id}
+                campus={campus}
+                admins={adminsMap[campus.id]}
+                orgName={orgNameMap[campus.org_id]}
+                onEditCampus={(c) => setCampusModal({ open: true, campus: c })}
+                onDeleteCampus={(c) => setDeleteCampusPending(c)}
+                onAddAdmin={(id) => setAdminModal({ open: true, campusId: id })}
+                onEditAdmin={(id, adm) => setEditAdmin({ open: true, campusId: id, admin: adm })}
+                onDeleteAdmin={(id, adm) => setDeleteAdminPending({ campusId: id, admin: adm })}
+              />
+            ))
+        }
+      </ScrollView>
 
       {/* Modals */}
-      <OrgFormModal
-        visible={orgModal.open}
-        org={orgModal.org}
-        onClose={() => setOrgModal({ open: false, org: null })}
-        onSaved={() => { setOrgModal({ open: false, org: null }); loadData(); }}
-      />
       <CampusFormModal
         visible={campusModal.open}
         campus={campusModal.campus}
-        orgId={campusModal.orgId}
-        onClose={() => setCampusModal({ open: false, campus: null, orgId: null })}
-        onSaved={() => { setCampusModal({ open: false, campus: null, orgId: null }); loadData(); }}
+        orgId={campusModal.campus?.org_id || null}
+        orgs={orgs}
+        onClose={() => setCampusModal({ open: false, campus: null })}
+        onSaved={() => { setCampusModal({ open: false, campus: null }); loadData(); }}
       />
       <AddAdminModal
         visible={adminModal.open}
@@ -641,14 +541,6 @@ export default function SuperAdminSchoolsScreen() {
 
       {/* Delete confirms */}
       <ConfirmModal
-        visible={!!deleteOrgPending}
-        title="Delete School"
-        message={deleteOrgPending ? `Delete "${deleteOrgPending.name}"? All campuses must be deleted first.` : ''}
-        loading={deleting}
-        onCancel={() => setDeleteOrgPending(null)}
-        onConfirm={confirmDeleteOrg}
-      />
-      <ConfirmModal
         visible={!!deleteCampusPending}
         title="Delete Campus"
         message={deleteCampusPending ? `Delete campus "${deleteCampusPending.name}"? This cannot be undone.` : ''}
@@ -659,77 +551,58 @@ export default function SuperAdminSchoolsScreen() {
       <ConfirmModal
         visible={!!deleteAdminPending}
         title="Remove Admin"
-        message={deleteAdminPending ? `Remove ${deleteAdminPending.admin?.first_name} ${deleteAdminPending.admin?.last_name}? This cannot be undone.` : ''}
+        message={deleteAdminPending ? `Remove ${deleteAdminPending.admin?.first_name} ${deleteAdminPending.admin?.last_name}?` : ''}
         confirmLabel="Remove"
         loading={deleting}
         onCancel={() => setDeleteAdminPending(null)}
         onConfirm={confirmDeleteAdmin}
       />
-    </ScrollView>
+    </View>
   );
 }
 
 // ── Styles ────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container:     { flex: 1, backgroundColor: C.bg },
-  topBar:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8 },
-  pageTitle:     { fontSize: 22, fontWeight: '800', color: C.textDark },
-  addBtn:        { backgroundColor: C.primary, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 8 },
-  addBtnText:    { color: '#fff', fontWeight: '700', fontSize: 14 },
+  topBar:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14 },
+  subtitle:      { fontSize: 13, color: C.textLight, fontWeight: '600' },
+  addBtn:        { backgroundColor: C.primary, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 9 },
+  addBtnText:    { color: '#fff', fontWeight: '700', fontSize: 13 },
   empty:         { textAlign: 'center', color: C.textLight, marginTop: 60, fontSize: 14, paddingHorizontal: 40 },
 
-  // Org card
-  orgCard:       { marginHorizontal: 16, marginBottom: 16, borderRadius: 18, backgroundColor: C.card, shadowColor: C.shadow, shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 4, overflow: 'hidden' },
-  orgHeader:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10, gap: 10 },
-  orgIcon:       { width: 42, height: 42, borderRadius: 12, backgroundColor: '#EFF6FF', justifyContent: 'center', alignItems: 'center' },
-  orgIconText:   { fontSize: 22 },
-  orgName:       { fontSize: 17, fontWeight: '800', color: C.textDark },
-  orgMeta:       { fontSize: 12, color: C.textLight, marginTop: 2 },
-  orgActions:    { flexDirection: 'row', gap: 6 },
-  orgEditBtn:    { width: 34, height: 34, borderRadius: 10, backgroundColor: C.cardAlt, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: C.border },
-  orgEditBtnText:{ fontSize: 14 },
-  orgDeleteBtn:  { width: 34, height: 34, borderRadius: 10, backgroundColor: '#FEF2F2', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FECACA' },
-  orgDeleteBtnText: { fontSize: 14 },
-
-  // Campuses container
-  campusesContainer: { borderTopWidth: 1, borderTopColor: C.border, paddingHorizontal: 12, paddingTop: 12, paddingBottom: 4 },
-  campusesTitleRow:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  campusesLabel:     { fontSize: 11, fontWeight: '700', color: C.textLight, textTransform: 'uppercase', letterSpacing: 0.8 },
-  addCampusBtn:      { backgroundColor: C.primaryLight, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
-  addCampusBtnText:  { color: C.primary, fontSize: 12, fontWeight: '700' },
-  noCampuses:        { color: C.textLight, fontSize: 13, fontStyle: 'italic', paddingBottom: 10 },
-
-  // Campus card (nested)
-  campusCard:        { backgroundColor: C.cardAlt, borderRadius: 14, marginBottom: 10, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
-  campusHeader:      { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 10 },
-  campusInitialsBadge: { width: 38, height: 38, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  campusInitialsText:  { color: '#fff', fontSize: 14, fontWeight: '900', letterSpacing: 0.5 },
-  campusLogo:        { width: 38, height: 38, borderRadius: 10, resizeMode: 'cover' },
-  campusName:        { fontSize: 15, fontWeight: '700', color: C.textDark },
+  // Campus card (top-level)
+  campusCard:        { marginHorizontal: 16, marginBottom: 14, backgroundColor: C.card, borderRadius: 18, shadowColor: C.shadow, shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 4, overflow: 'hidden' },
+  campusHeader:      { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12 },
+  campusInitialsBadge: { width: 42, height: 42, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  campusInitialsText:  { color: '#fff', fontSize: 15, fontWeight: '900', letterSpacing: 0.5 },
+  campusLogo:        { width: 42, height: 42, borderRadius: 12, resizeMode: 'cover' },
+  campusName:        { fontSize: 16, fontWeight: '700', color: C.textDark },
   campusMeta:        { fontSize: 11, color: C.textLight, marginTop: 1 },
-  campusActions:     { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingBottom: 10 },
+  orgBadge:          { marginTop: 4, alignSelf: 'flex-start', backgroundColor: '#F0FDF4', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2, borderWidth: 1, borderColor: '#BBF7D0' },
+  orgBadgeTxt:       { color: '#15803D', fontSize: 10, fontWeight: '600' },
+  campusActions:     { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingBottom: 10 },
 
-  // Buttons (reused for campus)
-  editBtn:           { flex: 1, paddingVertical: 8, borderRadius: 10, backgroundColor: C.card, alignItems: 'center', borderWidth: 1, borderColor: C.border },
+  // Buttons (campus)
+  editBtn:           { flex: 1, paddingVertical: 8, borderRadius: 10, backgroundColor: C.cardAlt, alignItems: 'center', borderWidth: 1, borderColor: C.border },
   editBtnText:       { color: C.textMed, fontSize: 12, fontWeight: '600' },
   deleteBtn:         { flex: 1, paddingVertical: 8, borderRadius: 10, backgroundColor: '#FEF2F2', alignItems: 'center', borderWidth: 1, borderColor: '#FECACA' },
   deleteBtnText:     { color: '#DC2626', fontSize: 12, fontWeight: '600' },
 
   // Admins section (inside campus card)
-  adminsSection:     { borderTopWidth: 1, borderTopColor: C.border, paddingHorizontal: 12, paddingVertical: 12 },
+  adminsSection:     { borderTopWidth: 1, borderTopColor: C.border, paddingHorizontal: 14, paddingVertical: 12 },
   adminsTitleRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  adminsTitle:       { fontSize: 11, fontWeight: '700', color: C.textMed, textTransform: 'uppercase', letterSpacing: 0.5 },
+  adminsTitle:       { fontSize: 10, fontWeight: '700', color: C.textLight, textTransform: 'uppercase', letterSpacing: 0.8 },
   addAdminBtn:       { backgroundColor: C.primaryLight, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
   addAdminText:      { color: C.primary, fontSize: 12, fontWeight: '700' },
   noAdmins:          { color: C.textLight, fontSize: 12, fontStyle: 'italic' },
-  adminCard:         { backgroundColor: C.card, borderRadius: 10, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: C.border },
+  adminCard:         { backgroundColor: C.cardAlt, borderRadius: 10, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: C.border },
   adminRow:          { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
   adminAvatar:       { width: 32, height: 32, borderRadius: 9, backgroundColor: C.primaryLight, justifyContent: 'center', alignItems: 'center' },
   adminAvatarText:   { color: C.primary, fontSize: 12, fontWeight: '800' },
   adminName:         { fontSize: 13, fontWeight: '600', color: C.textDark },
   adminEmail:        { fontSize: 11, color: C.textLight },
   adminActionRow:    { flexDirection: 'row', gap: 8 },
-  adminEditBtnFull:  { flex: 1, paddingVertical: 6, borderRadius: 8, backgroundColor: C.cardAlt, alignItems: 'center', borderWidth: 1, borderColor: C.border },
+  adminEditBtnFull:  { flex: 1, paddingVertical: 6, borderRadius: 8, backgroundColor: C.card, alignItems: 'center', borderWidth: 1, borderColor: C.border },
   adminEditBtnFullText: { color: C.textMed, fontSize: 11, fontWeight: '600' },
   adminDeleteBtn:    { flex: 1, paddingVertical: 6, borderRadius: 8, backgroundColor: '#FEF2F2', alignItems: 'center', borderWidth: 1, borderColor: '#FECACA' },
   adminDeleteBtnText:{ color: '#DC2626', fontSize: 11, fontWeight: '600' },

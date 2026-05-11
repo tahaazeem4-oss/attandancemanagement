@@ -11,9 +11,10 @@ import api from '../../services/api';
 import { C } from '../../config/theme';
 
 const ACTIONS = [
-  { key: 'SuperAdminSchools',  icon: 'business-outline', label: 'Schools',  sub: 'Add, edit and manage schools · assign admins',       tint: '#2563EB', bg: '#EFF6FF' },
-  { key: 'SuperAdminTeachers', icon: 'people-outline',   label: 'Teachers', sub: 'Add, edit, delete teachers · reset passwords',        tint: '#10B981', bg: '#ECFDF5' },
-  { key: 'SuperAdminStudents', icon: 'school-outline',   label: 'Students', sub: 'Add, edit, delete students · reset portal passwords', tint: '#F59E0B', bg: '#FFFBEB' },
+  { key: 'SuperAdminOrganizations', icon: 'layers-outline',   label: 'Organizations', sub: 'Manage organizations · assign org admins',              tint: '#7C3AED', bg: '#F5F3FF' },
+  { key: 'SuperAdminSchools',       icon: 'business-outline', label: 'Schools',       sub: 'Add, edit campuses · assign campus admins',              tint: '#2563EB', bg: '#EFF6FF' },
+  { key: 'SuperAdminTeachers',      icon: 'people-outline',   label: 'Teachers',      sub: 'Add, edit, delete teachers · reset passwords',           tint: '#10B981', bg: '#ECFDF5' },
+  { key: 'SuperAdminStudents',      icon: 'school-outline',   label: 'Students',      sub: 'Add, edit, delete students · reset portal passwords',    tint: '#F59E0B', bg: '#FFFBEB' },
 ];
 
 export default function SuperAdminHomeScreen({ navigation }) {
@@ -71,8 +72,8 @@ export default function SuperAdminHomeScreen({ navigation }) {
           {loading
             ? <ActivityIndicator color="rgba(255,255,255,0.6)" />
             : [
+                { label: 'Orgs',     value: stats?.organizations ?? stats?.schools, color: '#C4B5FD' },
                 { label: 'Schools',  value: stats?.schools,  color: '#93C5FD' },
-                { label: 'Admins',   value: stats?.admins,   color: '#C4B5FD' },
                 { label: 'Teachers', value: stats?.teachers, color: '#6EE7B7' },
                 { label: 'Students', value: stats?.students, color: '#FDE68A' },
               ].map(s => (

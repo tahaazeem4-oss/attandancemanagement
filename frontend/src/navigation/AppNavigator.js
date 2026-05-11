@@ -40,10 +40,23 @@ import AdminParentsScreen               from '../screens/admin/AdminParentsScree
 import AdminTeacherAttendanceScreen       from '../screens/admin/AdminTeacherAttendanceScreen';
 
 // Super admin screens
-import SuperAdminHomeScreen     from '../screens/superadmin/SuperAdminHomeScreen';
-import SuperAdminSchoolsScreen  from '../screens/superadmin/SuperAdminSchoolsScreen';
-import SuperAdminTeachersScreen from '../screens/superadmin/SuperAdminTeachersScreen';
-import SuperAdminStudentsScreen from '../screens/superadmin/SuperAdminStudentsScreen';
+import SuperAdminHomeScreen          from '../screens/superadmin/SuperAdminHomeScreen';
+import SuperAdminOrganizationsScreen from '../screens/superadmin/SuperAdminOrganizationsScreen';
+import SuperAdminSchoolsScreen       from '../screens/superadmin/SuperAdminSchoolsScreen';
+import SuperAdminTeachersScreen      from '../screens/superadmin/SuperAdminTeachersScreen';
+import SuperAdminStudentsScreen      from '../screens/superadmin/SuperAdminStudentsScreen';
+
+// Org admin screens
+import OrgAdminHomeScreen          from '../screens/orgadmin/OrgAdminHomeScreen';
+import OrgAdminCampusesScreen      from '../screens/orgadmin/OrgAdminCampusesScreen';
+import OrgAdminAdminsScreen        from '../screens/orgadmin/OrgAdminAdminsScreen';
+import OrgAdminTeachersScreen      from '../screens/orgadmin/OrgAdminTeachersScreen';
+import OrgAdminStudentsScreen      from '../screens/orgadmin/OrgAdminStudentsScreen';
+import OrgAdminClassesScreen       from '../screens/orgadmin/OrgAdminClassesScreen';
+import OrgAdminParentsScreen       from '../screens/orgadmin/OrgAdminParentsScreen';
+import OrgAdminLeavesScreen        from '../screens/orgadmin/OrgAdminLeavesScreen';
+import OrgAdminNotificationsScreen from '../screens/orgadmin/OrgAdminNotificationsScreen';
+import OrgAdminSubjectsScreen      from '../screens/orgadmin/OrgAdminSubjectsScreen';
 
 // Student screens
 import StudentHomeScreen          from '../screens/student/StudentHomeScreen';
@@ -234,14 +247,59 @@ function AdminTabs() {
   );
 }
 
+// =============================================================
+// ORG ADMIN TABS
+// =============================================================
+function OrgAdminHomeStack() {
+  return (
+    <Stack.Navigator screenOptions={headerStyle}>
+      <Stack.Screen name="OrgAdminHome"          component={OrgAdminHomeScreen}          options={{ headerShown: false }} />
+      <Stack.Screen name="OrgAdminCampuses"      component={OrgAdminCampusesScreen}      options={{ headerShown: false }} />
+      <Stack.Screen name="OrgAdminAdmins"        component={OrgAdminAdminsScreen}        options={{ headerShown: false }} />
+      <Stack.Screen name="OrgAdminTeachers"      component={OrgAdminTeachersScreen}      options={{ headerShown: false }} />
+      <Stack.Screen name="OrgAdminStudents"      component={OrgAdminStudentsScreen}      options={{ headerShown: false }} />
+      <Stack.Screen name="OrgAdminClasses"       component={OrgAdminClassesScreen}       options={{ headerShown: false }} />
+      <Stack.Screen name="OrgAdminParents"       component={OrgAdminParentsScreen}       options={{ headerShown: false }} />
+      <Stack.Screen name="OrgAdminLeaves"        component={OrgAdminLeavesScreen}        options={{ headerShown: false }} />
+      <Stack.Screen name="OrgAdminNotifications" component={OrgAdminNotificationsScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="OrgAdminSubjects"       component={OrgAdminSubjectsScreen}       options={{ headerShown: false }} />
+      <Stack.Screen name="StaffNotifications"    component={StaffNotificationsScreen}    options={{ headerShown: false }} />
+    </Stack.Navigator>
+  );
+}
+
+function OrgAdminTabs() {
+  const tabBarOptions = useTabBarOptions();
+  return (
+    <Tab.Navigator screenOptions={{ ...tabBarOptions, headerShown: false }} initialRouteName="HomeTab">
+      <Tab.Screen
+        name="ProfileTab"
+        component={ProfileScreen}
+        options={{ title: 'Profile', tabBarIcon: ({ focused }) => tabIcon(focused, 'person', 'person-outline') }}
+      />
+      <Tab.Screen
+        name="HomeTab"
+        component={OrgAdminHomeStack}
+        options={{ title: 'Home', tabBarIcon: ({ focused }) => tabIcon(focused, 'home', 'home-outline', 26) }}
+      />
+      <Tab.Screen
+        name="NotifTab"
+        component={StaffNotificationsScreen}
+        options={{ title: 'Notifications', tabBarIcon: ({ focused }) => tabIcon(focused, 'notifications', 'notifications-outline') }}
+      />
+    </Tab.Navigator>
+  );
+}
+
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // SUPER ADMIN TABS
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function SuperAdminHomeStack() {
   return (
     <Stack.Navigator screenOptions={headerStyle}>
-      <Stack.Screen name="SuperAdminHome"     component={SuperAdminHomeScreen}     options={{ headerShown: false }} />
-      <Stack.Screen name="SuperAdminSchools"  component={SuperAdminSchoolsScreen}  options={{ title: 'Manage Schools' }} />
+      <Stack.Screen name="SuperAdminHome"          component={SuperAdminHomeScreen}          options={{ headerShown: false }} />
+      <Stack.Screen name="SuperAdminOrganizations" component={SuperAdminOrganizationsScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="SuperAdminSchools"       component={SuperAdminSchoolsScreen}       options={{ headerShown: false }} />
       <Stack.Screen name="SuperAdminTeachers" component={SuperAdminTeachersScreen} options={{ headerShown: false }} />
       <Stack.Screen name="SuperAdminStudents"  component={SuperAdminStudentsScreen}  options={{ headerShown: false }} />
       <Stack.Screen name="StaffNotifications"  component={StaffNotificationsScreen}  options={{ headerShown: false }} />
@@ -535,6 +593,8 @@ export default function AppNavigator() {
         </>
       ) : user.role === 'super_admin' ? (
         <Stack.Screen name="SuperAdminTabs" component={SuperAdminTabs} />
+      ) : user.role === 'org_admin' ? (
+        <Stack.Screen name="OrgAdminTabs" component={OrgAdminTabs} />
       ) : user.role === 'admin' ? (
         <Stack.Screen name="AdminTabs" component={AdminTabs} />
       ) : user.role === 'student' ? (

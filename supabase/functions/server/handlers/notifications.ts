@@ -38,10 +38,12 @@ export async function handleNotifications(
     // super_admin has no school_id — return empty inbox
     if (!schoolId) return json([]);
     try {
+      const specificType = role === "admin" ? "specific_admin" : "specific_teacher";
       const { data: notifs } = await db
         .from("notifications")
         .select("*")
         .eq("school_id", schoolId)
+        .or(`target_type.not.in.(specific_admin,specific_teacher),and(target_type.eq.${specificType},target_user_id.eq.${userId})`)
         .order("created_at", { ascending: false });
 
       const notifIds = (notifs || []).map((n: Record<string, unknown>) => n.id);
@@ -99,10 +101,12 @@ export async function handleNotifications(
       return json({ message: "Forbidden" }, 403);
     if (!schoolId) return json({ count: 0 });
     try {
+      const specificType = role === "admin" ? "specific_admin" : "specific_teacher";
       const { data: notifs } = await db
         .from("notifications")
         .select("id")
-        .eq("school_id", schoolId);
+        .eq("school_id", schoolId)
+        .or(`target_type.not.in.(specific_admin,specific_teacher),and(target_type.eq.${specificType},target_user_id.eq.${userId})`);
       const notifIds = (notifs || []).map((n: Record<string, unknown>) => n.id);
       if (!notifIds.length) return json({ count: 0 });
 
@@ -339,11 +343,16 @@ export async function handleNotifications(
 
   // ── POST /notifications ──────────────────────────────────────
   if (path === "/notifications" && method === "POST") {
-    if (role !== "teacher" && role !== "admin" && role !== "super_admin")
+    if (role !== "teacher" && role !== "admin" && role !== "super_admin" && role !== "org_admin")
       return json({ message: "Forbidden" }, 403);
     try {
-      const { target_type, class_id, section_id, student_id, category, title, message } =
+      const { target_type, class_id, section_id, student_id, category, title, message, school_id: bodySchoolId } =
         await req.json();
+
+      // org_admin must supply a school_id in the request body
+      const resolvedSchoolId = (role === "org_admin" ? bodySchoolId : schoolId) as number;
+      if (!resolvedSchoolId)
+        return json({ message: "school_id is required for this role" }, 400);
 
       const VALID_TARGETS = ["school", "class", "section", "student"];
       const VALID_CATS = ["general", "holiday", "complaint", "announcement", "homework", "exam"];
@@ -358,7 +367,7 @@ export async function handleNotifications(
       const { data: notif, error } = await db
         .from("notifications")
         .insert({
-          school_id: schoolId,
+          school_id: resolvedSchoolId,
           sender_id: userId,
           sender_name: senderName,
           sender_role: role,
@@ -383,23 +392,23 @@ export async function handleNotifications(
         );
       } else if (target_type === "section" && class_id && section_id) {
         Promise.all([
-          tokensForClassStudents(db, schoolId, class_id, section_id),
+          tokensForClassStudents(db, resolvedSchoolId, class_id, section_id),
           tokensForClassTeachers(db, class_id, section_id),
         ]).then(([s, t]) =>
           sendPush([...new Set([...s, ...t])], title.trim(), message.trim(), pushData)
         );
       } else if (target_type === "class" && class_id) {
         Promise.all([
-          tokensForClassStudents(db, schoolId, class_id, null),
-          tokensForSchoolAdmins(db, schoolId),
+          tokensForClassStudents(db, resolvedSchoolId, class_id, null),
+          tokensForSchoolAdmins(db, resolvedSchoolId),
         ]).then(([s, a]) =>
           sendPush([...new Set([...s, ...a])], title.trim(), message.trim(), pushData)
         );
       } else if (target_type === "school") {
         Promise.all([
-          tokensForSchoolStudents(db, schoolId),
-          tokensForSchoolAdmins(db, schoolId),
-          tokensForSchoolTeachers(db, schoolId),
+          tokensForSchoolStudents(db, resolvedSchoolId),
+          tokensForSchoolAdmins(db, resolvedSchoolId),
+          tokensForSchoolTeachers(db, resolvedSchoolId),
         ]).then(([s, a, t]) =>
           sendPush([...new Set([...s, ...a, ...t])], title.trim(), message.trim(), pushData)
         );

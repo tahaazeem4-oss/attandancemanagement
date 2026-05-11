@@ -35,10 +35,14 @@ async function request(method, path, data, config = {}) {
 
   const headers = {
     apikey: SUPABASE_ANON_KEY,
+    // Always send anon key to the Supabase gateway — it only accepts anon/service-role JWTs.
+    // Our custom user JWT (role: teacher/admin/etc.) goes in X-User-Token so the gateway
+    // never sees it and our edge function picks it up via verifyToken.
+    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
   };
 
   const authToken = defaults.headers.common['Authorization'];
-  if (authToken) headers['Authorization'] = authToken;
+  if (authToken) headers['X-User-Token'] = authToken;
 
   // Detect FormData uploads — don't set Content-Type (fetch adds boundary)
   const isFormData =
@@ -86,7 +90,9 @@ async function request(method, path, data, config = {}) {
   console.log(`[API] ${res.status} ${url.pathname}`, typeof responseData !== 'object' ? responseData : '');
 
   if (res.status === 401) {
-    if (_onUnauthorized && !url.pathname.includes('/login')) _onUnauthorized();
+    const isLoginPath = url.pathname.includes('/login');
+    const isPushToken = url.pathname.includes('/push-token');
+    if (_onUnauthorized && !isLoginPath && !isPushToken) _onUnauthorized();
     throw { response: { status: 401, data: responseData } };
   }
 

@@ -148,7 +148,32 @@ export async function handleAuth(
         return json({ token, role: "student", user, school });
       }
 
-      // 5. Parent
+      // 5. Org Admin
+      try {
+        const { data: orgAdmins } = await db
+          .from("org_admins")
+          .select("*")
+          .eq("email", e);
+        if (orgAdmins?.length) {
+          const oa = orgAdmins[0];
+          if (!(await comparePassword(password, oa.password)))
+            return json({ message: "Invalid credentials" }, 401);
+          const user = {
+            id: oa.id,
+            first_name: oa.first_name,
+            last_name: oa.last_name,
+            email: oa.email,
+            role: "org_admin",
+            org_id: oa.org_id,
+          };
+          const token = await signJwt(user);
+          return json({ token, role: "org_admin", user, school: null });
+        }
+      } catch (_orgAdminErr) {
+        // org_admins table may not exist yet — skip silently
+      }
+
+      // 6. Parent
       const { data: parents } = await db
         .from("parents")
         .select("*")

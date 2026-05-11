@@ -17,6 +17,8 @@ import { handleUpload } from "./handlers/upload.ts";
 import { handleImportExport } from "./handlers/importExport.ts";
 import { handleSchools } from "./handlers/schools.ts";
 import { handleParent, handleAdminParents } from "./handlers/parents.ts";
+import { handleOrgAdmin } from "./handlers/orgAdmin.ts";
+import { handleOrgAdminImportExport } from "./handlers/orgAdmin.ts";
 
 Deno.serve(async (req: Request) => {
   // CORS preflight
@@ -40,6 +42,8 @@ Deno.serve(async (req: Request) => {
     if (path.startsWith("/students"))        return await handleStudents(req, path, url);
     if (path.startsWith("/classes") || path.startsWith("/sections"))
                                              return await handleClasses(req, path, url);
+    if (path.startsWith("/org-admin/import-export")) return await handleOrgAdminImportExport(req, path, url);
+    if (path.startsWith("/org-admin"))        return await handleOrgAdmin(req, path, url);
     if (path.startsWith("/admin/parents"))   return await handleAdminParents(req, path, url);
     if (path.startsWith("/admin"))           return await handleAdmin(req, path, url);
     if (path.startsWith("/super-admin"))     return await handleSuperAdmin(req, path, url);

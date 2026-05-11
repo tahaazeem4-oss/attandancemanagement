@@ -7,7 +7,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 export const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-user-token",
   "Access-Control-Allow-Methods": "POST, GET, PUT, DELETE, PATCH, OPTIONS",
 };
 
@@ -77,6 +77,18 @@ export async function signJwt(
 export async function verifyToken(
   req: Request,
 ): Promise<Record<string, unknown>> {
+  // User JWT is sent in X-User-Token (Authorization always carries the anon key for gateway auth)
+  const userTokenRaw =
+    req.headers.get("X-User-Token") || req.headers.get("x-user-token");
+  if (userTokenRaw) {
+    // Strip "Bearer " prefix if present — the header value may be "Bearer <jwt>" or raw "<jwt>"
+    const userToken = userTokenRaw.startsWith("Bearer ")
+      ? userTokenRaw.slice(7)
+      : userTokenRaw;
+    const key = await getJwtKey("verify");
+    return (await verify(userToken, key)) as Record<string, unknown>;
+  }
+  // Fallback: check Authorization for backwards compatibility
   const auth =
     req.headers.get("Authorization") || req.headers.get("authorization");
   if (!auth?.startsWith("Bearer ")) throw new Error("Unauthorized");

@@ -557,5 +557,98 @@ export async function handleSuperAdmin(
     }
   }
 
+  // ── GET /super-admin/organizations/:id/org-admins ────────────
+  const orgAdminsMatch = path.match(/^\/super-admin\/organizations\/(\d+)\/org-admins$/);
+  if (orgAdminsMatch && method === "GET") {
+    const orgId = parseInt(orgAdminsMatch[1]);
+    try {
+      const { data } = await db
+        .from("org_admins")
+        .select("id, first_name, last_name, email, created_at")
+        .eq("org_id", orgId)
+        .order("last_name");
+      return json(data || []);
+    } catch (err) {
+      console.error("[super-admin/organizations/:id/org-admins GET]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── POST /super-admin/organizations/:id/org-admins ────────────
+  if (orgAdminsMatch && method === "POST") {
+    const orgId = parseInt(orgAdminsMatch[1]);
+    try {
+      const { first_name, last_name, email, password } = await req.json();
+      if (!first_name || !last_name || !email || !password)
+        return json({ message: "first_name, last_name, email and password are required" }, 400);
+      const hashed = await hashPassword(password);
+      const { data, error } = await db
+        .from("org_admins")
+        .insert({
+          org_id: orgId,
+          first_name: first_name.trim(),
+          last_name: last_name.trim(),
+          email: email.trim().toLowerCase(),
+          password: hashed,
+        })
+        .select()
+        .single();
+      if (error) {
+        if (error.code === "23505") return json({ message: "Email already exists" }, 409);
+        throw error;
+      }
+      return json({ message: "Org admin created", id: data.id }, 201);
+    } catch (err) {
+      console.error("[super-admin/organizations/:id/org-admins POST]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── PUT /super-admin/organizations/:orgId/org-admins/:adminId ─
+  const orgAdminIdMatch = path.match(/^\/super-admin\/organizations\/(\d+)\/org-admins\/(\d+)$/);
+  if (orgAdminIdMatch && method === "PUT") {
+    const adminId = parseInt(orgAdminIdMatch[2]);
+    try {
+      const { first_name, last_name, email } = await req.json();
+      await db
+        .from("org_admins")
+        .update({ first_name, last_name, email: email?.trim().toLowerCase() })
+        .eq("id", adminId);
+      return json({ message: "Org admin updated" });
+    } catch (err) {
+      console.error("[super-admin/organizations/:id/org-admins PUT]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── DELETE /super-admin/organizations/:orgId/org-admins/:adminId
+  if (orgAdminIdMatch && method === "DELETE") {
+    const adminId = parseInt(orgAdminIdMatch[2]);
+    try {
+      await db.from("org_admins").delete().eq("id", adminId);
+      return json({ message: "Org admin deleted" });
+    } catch (err) {
+      console.error("[super-admin/organizations/:id/org-admins DELETE]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── POST /super-admin/organizations/:orgId/org-admins/:adminId/reset-password
+  const orgAdminResetMatch = path.match(
+    /^\/super-admin\/organizations\/(\d+)\/org-admins\/(\d+)\/reset-password$/,
+  );
+  if (orgAdminResetMatch && method === "POST") {
+    const adminId = parseInt(orgAdminResetMatch[2]);
+    try {
+      const { new_password } = await req.json();
+      const hashed = await hashPassword(new_password);
+      await db.from("org_admins").update({ password: hashed }).eq("id", adminId);
+      return json({ message: "Password reset" });
+    } catch (err) {
+      console.error("[super-admin/organizations/:id/org-admins/reset-password]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
   return json({ message: "Not found" }, 404);
 }

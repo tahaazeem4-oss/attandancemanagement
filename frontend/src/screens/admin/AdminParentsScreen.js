@@ -7,10 +7,14 @@ import { Ionicons } from "@expo/vector-icons";
 import api from "../../services/api";
 import { C, S } from "../../config/theme";
 import AppHeader from "../../components/AppHeader";
+import { useAuth } from "../../context/AuthContext";
 
 const EMPTY_FORM = { email: "", password: "", first_name: "", last_name: "", phone: "" };
 
 export default function AdminParentsScreen({ navigation }) {
+  const { user } = useAuth();
+  const mySchoolId = user?.school_id;
+
   // ── List state ────────────────────────────────────────────────
   const [parents, setParents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -20,6 +24,11 @@ export default function AdminParentsScreen({ navigation }) {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+
+  // ── Link existing parent modal ────────────────────────────────
+  const [linkModal, setLinkModal] = useState(false);
+  const [linkEmail, setLinkEmail] = useState("");
+  const [linking2, setLinking2] = useState(false);
 
   // ── Children modal ────────────────────────────────────────────
   const [childModal, setChildModal] = useState(false);
@@ -98,6 +107,21 @@ export default function AdminParentsScreen({ navigation }) {
         },
       },
     ]);
+  };
+
+  // ── Link existing parent by email ─────────────────────────────
+  const handleLinkExisting = async () => {
+    const email = linkEmail.trim().toLowerCase();
+    if (!email) return Alert.alert("Validation", "Enter the parent's email address.");
+    setLinking2(true);
+    try {
+      await api.post("/admin/parents/link-existing", { email });
+      setLinkModal(false);
+      setLinkEmail("");
+      load();
+    } catch (err) {
+      Alert.alert("Error", (err.response && err.response.data && err.response.data.message) || "Could not link parent.");
+    } finally { setLinking2(false); }
   };
 
   // ── Open children modal ───────────────────────────────────────
@@ -222,10 +246,46 @@ export default function AdminParentsScreen({ navigation }) {
         )
       }
 
-      {/* FAB */}
-      <Pressable style={styles.fab} onPress={openAdd}>
-        <Text style={styles.fabText}>+ Add Parent</Text>
-      </Pressable>
+      {/* FAB row */}
+      <View style={styles.fabRow}>
+        <Pressable style={[styles.fab, styles.fabSecondary]} onPress={function() { setLinkEmail(""); setLinkModal(true); }}>
+          <Ionicons name="link-outline" size={16} color={C.primary} />
+          <Text style={[styles.fabText, { color: C.primary }]}>Link Existing</Text>
+        </Pressable>
+        <Pressable style={styles.fab} onPress={openAdd}>
+          <Text style={styles.fabText}>+ Add Parent</Text>
+        </Pressable>
+      </View>
+
+      {/* ── Link Existing Modal ────────────────────────────────── */}
+      <Modal visible={linkModal} transparent animationType="slide" onRequestClose={function() { setLinkModal(false); }}>
+        <View style={styles.overlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Link Existing Parent</Text>
+            <Text style={{ color: "#64748B", fontSize: 13, marginBottom: 14, lineHeight: 19 }}>
+              If a parent was created by another campus, enter their email to link them to your campus so you can assign their children.
+            </Text>
+            <Text style={S.label}>Parent Email *</Text>
+            <TextInput
+              style={S.input}
+              placeholder="parent@email.com"
+              value={linkEmail}
+              onChangeText={setLinkEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoFocus
+            />
+            <View style={styles.modalBtns}>
+              <Pressable style={[styles.modalBtn, styles.cancelBtn]} onPress={function() { setLinkModal(false); }}>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={[styles.modalBtn, styles.saveBtn]} onPress={handleLinkExisting} disabled={linking2}>
+                {linking2 ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveBtnText}>Link</Text>}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* ── Add/Edit Modal ─────────────────────────────────────── */}
       <Modal visible={modal} transparent animationType="slide" onRequestClose={function() { setModal(false); }}>
@@ -308,18 +368,26 @@ export default function AdminParentsScreen({ navigation }) {
                 <Text style={styles.empty2}>No children linked yet</Text>
               ) : (
                 children.map(function(c) {
+                  var isOwnCampus = c.school_id === mySchoolId;
                   return (
                     <View key={c.student_id} style={styles.childRow}>
-                      <View style={styles.childAvatar}>
+                      <View style={[styles.childAvatar, !isOwnCampus && { backgroundColor: "#F1F5F9" }]}>
                         <Text style={styles.avatarText}>{(c.first_name || "?")[0].toUpperCase()}</Text>
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.name}>{c.first_name} {c.last_name}</Text>
-                        <Text style={styles.sub}>{c.relationship || "parent"}</Text>
+                        <Text style={styles.sub}>{c.relationship || "parent"}{!isOwnCampus ? " · Other campus" : ""}</Text>
                       </View>
-                      <Pressable onPress={function() { onUnlink(c.student_id, c.first_name + " " + c.last_name); }}>
-                        <Ionicons name="close-circle" size={22} color="#DC2626" />
-                      </Pressable>
+                      {isOwnCampus ? (
+                        <Pressable onPress={function() { onUnlink(c.student_id, c.first_name + " " + c.last_name); }}>
+                          <Ionicons name="close-circle" size={22} color="#DC2626" />
+                        </Pressable>
+                      ) : (
+                        <View style={styles.lockedBadge}>
+                          <Ionicons name="lock-closed" size={12} color="#94A3B8" />
+                          <Text style={styles.lockedBadgeTxt}>Locked</Text>
+                        </View>
+                      )}
                     </View>
                   );
                 })
@@ -442,10 +510,18 @@ const styles = StyleSheet.create({
   empty: { textAlign: "center", color: C.textLight, marginTop: 40, fontSize: 15 },
   empty2: { fontSize: 13, color: C.textLight, textAlign: "center", marginVertical: 8 },
   // ── FAB ────────────────────────────────────────────────────────
+  fabRow: {
+    position: "absolute", bottom: 24, right: 16, left: 16,
+    flexDirection: "row", justifyContent: "flex-end", gap: 10,
+  },
   fab: {
-    position: "absolute", bottom: 24, right: 20, backgroundColor: C.primary,
-    borderRadius: 14, paddingHorizontal: 20, paddingVertical: 14,
+    backgroundColor: C.primary,
+    borderRadius: 14, paddingHorizontal: 18, paddingVertical: 14,
     elevation: 6, shadowColor: C.primary, shadowOpacity: 0.4, shadowRadius: 10, shadowOffset: { width: 0, height: 4 },
+    flexDirection: "row", alignItems: "center", gap: 6,
+  },
+  fabSecondary: {
+    backgroundColor: "#EFF6FF", elevation: 3, shadowColor: "#000", shadowOpacity: 0.1,
   },
   fabText: { color: "#fff", fontWeight: "800", fontSize: 14 },
   // ── Modals ─────────────────────────────────────────────────────
@@ -487,4 +563,6 @@ const styles = StyleSheet.create({
   linkBtnTxt: { fontSize: 13, fontWeight: "700", color: "#fff" },
   linkedBadge: { backgroundColor: "#D1FAE5", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
   linkedBadgeTxt: { fontSize: 12, fontWeight: "600", color: "#059669" },
+  lockedBadge: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#F1F5F9", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+  lockedBadgeTxt: { fontSize: 12, fontWeight: "600", color: "#94A3B8" },
 });

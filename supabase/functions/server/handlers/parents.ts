@@ -2,6 +2,7 @@
 import {
   json,
   getDb,
+  verifyToken,
   verifyTokenString,
   hashPassword,
   comparePassword,
@@ -56,15 +57,15 @@ export async function handleParent(
     }
   }
 
+  // All routes below require a valid parent JWT in X-User-Token
+  let parentUser: Record<string, unknown>;
+  try { parentUser = await verifyToken(req); } catch { return json({ message: "Unauthorized" }, 401); }
+  if (!parentUser || parentUser.role !== "parent") return json({ message: "Unauthorized" }, 401);
+
   // GET /parent/dashboard
   if (path === "/parent/dashboard" && method === "GET") {
     try {
-      const auth = req.headers.get("authorization");
-      const tok = auth?.replace("Bearer ", "");
-      if (!tok) return json({ message: "Unauthorized" }, 401);
-      const user = await verifyTokenString(tok);
-      if (!user || user.role !== "parent") return json({ message: "Unauthorized" }, 401);
-
+      const user = parentUser;
       const { data: children, error } = await db
         .from("parent_student")
         .select("student_id, relationship, students(id, first_name, last_name, age, class_id, section_id, roll_no, school_id)")
@@ -108,11 +109,7 @@ export async function handleParent(
   // POST /parent/children/link
   if (path === "/parent/children/link" && method === "POST") {
     try {
-      const auth = req.headers.get("authorization");
-      const tok = auth?.replace("Bearer ", "");
-      if (!tok) return json({ message: "Unauthorized" }, 401);
-      const user = await verifyTokenString(tok);
-      if (!user || user.role !== "parent") return json({ message: "Unauthorized" }, 401);
+      const user = parentUser;
 
       const { student_id, relationship } = await req.json();
       if (!student_id) return json({ message: "student_id required" }, 400);
@@ -124,6 +121,11 @@ export async function handleParent(
       const { data: existing } = await db.from("parent_student").select("id")
         .eq("parent_id", user.id).eq("student_id", student_id).single();
       if (existing) return json({ message: "Child already linked" }, 409);
+
+      // A student can only be linked to one parent
+      const { data: otherLink } = await db.from("parent_student")
+        .select("parent_id").eq("student_id", student_id).neq("parent_id", user.id as number).maybeSingle();
+      if (otherLink) return json({ message: "This student is already linked to another parent" }, 409);
 
       const { data: link, error } = await db.from("parent_student")
         .insert({ parent_id: user.id, student_id, relationship: relationship || "parent", verified: true })
@@ -139,11 +141,7 @@ export async function handleParent(
   // GET /parent/children/:studentId/attendance
   if (path.match(/^\/parent\/children\/\d+\/attendance$/) && method === "GET") {
     try {
-      const auth = req.headers.get("authorization");
-      const tok = auth?.replace("Bearer ", "");
-      if (!tok) return json({ message: "Unauthorized" }, 401);
-      const user = await verifyTokenString(tok);
-      if (!user || user.role !== "parent") return json({ message: "Unauthorized" }, 401);
+      const user = parentUser;
       const studentId = parseInt(path.split("/")[3]);
       const { data: link } = await db.from("parent_student").select("id")
         .eq("parent_id", user.id).eq("student_id", studentId).single();
@@ -180,18 +178,14 @@ export async function handleParent(
   // GET /parent/children/:studentId/lectures
   if (path.match(/^\/parent\/children\/\d+\/lectures$/) && method === "GET") {
     try {
-      const auth = req.headers.get("authorization");
-      const tok = auth?.replace("Bearer ", "");
-      if (!tok) return json({ message: "Unauthorized" }, 401);
-      const user = await verifyTokenString(tok);
-      if (!user || user.role !== "parent") return json({ message: "Unauthorized" }, 401);
+      const user = parentUser;
       const studentId = parseInt(path.split("/")[3]);
       const { data: link } = await db.from("parent_student").select("id")
         .eq("parent_id", user.id).eq("student_id", studentId).single();
       if (!link) return json({ message: "Access denied" }, 403);
       const { data: student } = await db
         .from("students")
-        .select("class_id, section_id")
+        .select("class_id, section_id, school_id")
         .eq("id", studentId)
         .single();
       if (!student) return json({ message: "Student not found" }, 404);
@@ -200,7 +194,7 @@ export async function handleParent(
         .from("lectures")
         .select(`id, teacher_id, subject_name, lecture_name, type, date, file_path, uploaded_by, created_at, class_id, section_id,
                  classes!inner(class_name), sections(section_name)`)
-        .eq("school_id", user.school_id)
+        .eq("school_id", (student as any).school_id)
         .eq("class_id", (student as any).class_id)
         .or(`section_id.eq.${(student as any).section_id},section_id.is.null`)
         .order("date", { ascending: false });
@@ -223,29 +217,26 @@ export async function handleParent(
   // GET /parent/children/:studentId/notifications
   if (path.match(/^\/parent\/children\/\d+\/notifications$/) && method === "GET") {
     try {
-      const auth = req.headers.get("authorization");
-      const tok = auth?.replace("Bearer ", "");
-      if (!tok) return json({ message: "Unauthorized" }, 401);
-      const user = await verifyTokenString(tok);
-      if (!user || user.role !== "parent") return json({ message: "Unauthorized" }, 401);
+      const user = parentUser;
       const studentId = parseInt(path.split("/")[3]);
       const { data: link } = await db.from("parent_student").select("id")
         .eq("parent_id", user.id).eq("student_id", studentId).single();
       if (!link) return json({ message: "Access denied" }, 403);
       const { data: student } = await db
         .from("students")
-        .select("id, class_id, section_id")
+        .select("id, class_id, section_id, school_id")
         .eq("id", studentId)
         .single();
       if (!student) return json({ message: "Student not found" }, 404);
 
       const classId = (student as any).class_id;
       const sectionId = (student as any).section_id;
+      const studentSchoolId = (student as any).school_id;
 
       const { data: notifs } = await db
         .from("notifications")
         .select("*")
-        .eq("school_id", user.school_id)
+        .eq("school_id", studentSchoolId)
         .or(
           `target_type.eq.school,` +
           `and(target_type.eq.class,class_id.eq.${classId}),` +
@@ -276,11 +267,7 @@ export async function handleParent(
   const parentNotifReadMatch = path.match(/^\/parent\/children\/(\d+)\/notifications\/(\d+)\/read$/);
   if (parentNotifReadMatch && method === "POST") {
     try {
-      const auth = req.headers.get("authorization");
-      const tok = auth?.replace("Bearer ", "");
-      if (!tok) return json({ message: "Unauthorized" }, 401);
-      const user = await verifyTokenString(tok);
-      if (!user || user.role !== "parent") return json({ message: "Unauthorized" }, 401);
+      const user = parentUser;
 
       const studentId = parseInt(parentNotifReadMatch[1]);
       const notifId = parseInt(parentNotifReadMatch[2]);
@@ -304,11 +291,7 @@ export async function handleParent(
   // GET /parent/children/:studentId/leaves
   if (path.match(/^\/parent\/children\/\d+\/leaves$/) && method === "GET") {
     try {
-      const auth = req.headers.get("authorization");
-      const tok = auth?.replace("Bearer ", "");
-      if (!tok) return json({ message: "Unauthorized" }, 401);
-      const user = await verifyTokenString(tok);
-      if (!user || user.role !== "parent") return json({ message: "Unauthorized" }, 401);
+      const user = parentUser;
       const studentId = parseInt(path.split("/")[3]);
       const { data: link } = await db.from("parent_student").select("id")
         .eq("parent_id", user.id).eq("student_id", studentId).single();
@@ -321,7 +304,7 @@ export async function handleParent(
 
       const grouped: Record<string, any> = {};
       for (const row of leaves || []) {
-        const gid = (row as any).group_id;
+        const gid = String((row as any).group_id || (row as any).id);
         if (!grouped[gid]) {
           grouped[gid] = {
             group_id: gid,
@@ -348,11 +331,7 @@ export async function handleParent(
   // POST /parent/children/:studentId/leaves
   if (path.match(/^\/parent\/children\/\d+\/leaves$/) && method === "POST") {
     try {
-      const auth = req.headers.get("authorization");
-      const tok = auth?.replace("Bearer ", "");
-      if (!tok) return json({ message: "Unauthorized" }, 401);
-      const user = await verifyTokenString(tok);
-      if (!user || user.role !== "parent") return json({ message: "Unauthorized" }, 401);
+      const user = parentUser;
 
       const studentId = parseInt(path.split("/")[3]);
       const { data: link } = await db.from("parent_student").select("id")
@@ -416,11 +395,7 @@ export async function handleParent(
   const parentWithdrawMatch = path.match(/^\/parent\/children\/(\d+)\/leaves\/group\/([^/]+)\/withdraw$/);
   if (parentWithdrawMatch && method === "PUT") {
     try {
-      const auth = req.headers.get("authorization");
-      const tok = auth?.replace("Bearer ", "");
-      if (!tok) return json({ message: "Unauthorized" }, 401);
-      const user = await verifyTokenString(tok);
-      if (!user || user.role !== "parent") return json({ message: "Unauthorized" }, 401);
+      const user = parentUser;
 
       const studentId = parseInt(parentWithdrawMatch[1]);
       const groupId = parentWithdrawMatch[2];
@@ -492,21 +467,73 @@ export async function handleAdminParents(
   const db = getDb();
 
   try {
-    const auth = req.headers.get("authorization");
-    const tok = auth?.replace("Bearer ", "");
-    if (!tok) return json({ message: "Unauthorized" }, 401);
-    const adminUser = await verifyTokenString(tok);
+    let adminUser: Record<string, unknown>;
+    try { adminUser = await verifyToken(req); } catch { return json({ message: "Unauthorized" }, 401); }
     if (!adminUser || adminUser.role !== "admin")
       return json({ message: "Unauthorized" }, 401);
 
+    const mySchoolId = adminUser.school_id as number;
+
+    // Helper: collect all parent IDs accessible to this admin campus
+    const accessibleIds = async (): Promise<number[]> => {
+      // Get students in this school to find parents by child link
+      const { data: schoolStudents } = await db.from("students").select("id").eq("school_id", mySchoolId);
+      const studentIds = (schoolStudents || []).map((s: any) => s.id as number);
+
+      const [{ data: direct }, { data: access }, { data: byChild }] = await Promise.all([
+        db.from("parents").select("id").eq("school_id", mySchoolId),
+        db.from("parent_school_access").select("parent_id").eq("school_id", mySchoolId),
+        studentIds.length
+          ? db.from("parent_student").select("parent_id").in("student_id", studentIds)
+          : Promise.resolve({ data: [] as any[] }),
+      ]);
+      return [...new Set([
+        ...(direct || []).map((p: any) => p.id as number),
+        ...(access || []).map((r: any) => r.parent_id as number),
+        ...(byChild || []).map((r: any) => r.parent_id as number),
+      ])];
+    };
+
+    // Helper: is a specific parent accessible to this admin campus?
+    const canAccessParent = async (parentId: number): Promise<boolean> => {
+      const { data: schoolStudents } = await db.from("students").select("id").eq("school_id", mySchoolId);
+      const studentIds = (schoolStudents || []).map((s: any) => s.id as number);
+
+      const [{ data: direct }, { data: access }, { data: byChild }] = await Promise.all([
+        db.from("parents").select("id").eq("id", parentId).eq("school_id", mySchoolId).maybeSingle(),
+        db.from("parent_school_access").select("parent_id").eq("parent_id", parentId).eq("school_id", mySchoolId).maybeSingle(),
+        studentIds.length
+          ? db.from("parent_student").select("parent_id").eq("parent_id", parentId).in("student_id", studentIds).maybeSingle()
+          : Promise.resolve({ data: null }),
+      ]);
+      return !!(direct || access || byChild);
+    };
+
     // GET /admin/parents
     if (path === "/admin/parents" && method === "GET") {
+      const ids = await accessibleIds();
+      if (!ids.length) return json({ parents: [] }, 200);
       const { data: parents, error } = await db.from("parents")
         .select("id, email, first_name, last_name, phone, school_id, created_at")
-        .eq("school_id", adminUser.school_id)
+        .in("id", ids)
         .order("created_at", { ascending: false });
       if (error) throw error;
       return json({ parents: parents || [] }, 200);
+    }
+
+    // POST /admin/parents/link-existing — link an existing parent (from any campus) to this campus
+    if (path === "/admin/parents/link-existing" && method === "POST") {
+      const { email } = await req.json();
+      if (!email) return json({ message: "email is required" }, 400);
+      const { data: parent } = await db.from("parents").select("id, email, first_name, last_name, phone, school_id")
+        .eq("email", email.trim().toLowerCase()).maybeSingle();
+      if (!parent) return json({ message: "No parent account found with that email" }, 404);
+      // Already accessible?
+      if (await canAccessParent((parent as any).id)) return json({ message: "Parent already in your campus", parent }, 200);
+      const { error } = await db.from("parent_school_access")
+        .insert({ parent_id: (parent as any).id, school_id: mySchoolId });
+      if (error && error.code !== "23505") throw error;
+      return json({ message: "Parent linked to your campus", parent }, 200);
     }
 
     // POST /admin/parents
@@ -519,13 +546,17 @@ export async function handleAdminParents(
         .insert({
           email: email.trim().toLowerCase(), password: hashed,
           first_name: first_name || null, last_name: last_name || null,
-          phone: phone || null, school_id: adminUser.school_id,
+          phone: phone || null, school_id: mySchoolId,
         }).select().single();
       if (error) {
         if (error.code === "23505")
-          return json({ message: "Email already exists in this school" }, 409);
+          return json({ message: "Email already exists" }, 409);
         throw error;
       }
+      // Register access in junction table
+      await db.from("parent_school_access")
+        .insert({ parent_id: parent.id, school_id: mySchoolId })
+        .then(() => {}).catch(() => {});
       return json({ message: "Parent account created",
         parent: { id: parent.id, email: parent.email, first_name: parent.first_name,
           last_name: parent.last_name, phone: parent.phone } }, 201);
@@ -533,24 +564,27 @@ export async function handleAdminParents(
 
     // PUT /admin/parents/:id
     if (path.match(/^\/admin\/parents\/\d+$/) && method === "PUT") {
-      const parentId = path.split("/")[3];
+      const parentId = parseInt(path.split("/")[3]);
+      if (!(await canAccessParent(parentId))) return json({ message: "Parent not found" }, 404);
       const { email, first_name, last_name, phone, password } = await req.json();
-      const { data: existing } = await db.from("parents").select("id")
-        .eq("id", parentId).eq("school_id", adminUser.school_id).single();
-      if (!existing) return json({ message: "Parent not found" }, 404);
       const upd: any = {};
       if (email) {
         const trimmed = email.trim().toLowerCase();
-        // Check uniqueness within same school (excluding current record)
         const { data: dup } = await db.from("parents").select("id")
-          .eq("email", trimmed).eq("school_id", adminUser.school_id).neq("id", parentId).maybeSingle();
-        if (dup) return json({ message: "Email already in use by another parent in this school" }, 409);
+          .eq("email", trimmed).neq("id", parentId).maybeSingle();
+        if (dup) return json({ message: "Email already in use by another parent" }, 409);
         upd.email = trimmed;
       }
       if (first_name !== undefined) upd.first_name = first_name;
       if (last_name !== undefined) upd.last_name = last_name;
       if (phone !== undefined) upd.phone = phone;
-      if (password) upd.password = await hashPassword(password);
+      if (password) {
+        // Only the admin who originally created the parent account can change the password
+        const { data: parentRow } = await db.from("parents").select("school_id").eq("id", parentId).single();
+        if (!parentRow || (parentRow as any).school_id !== mySchoolId)
+          return json({ message: "Only the admin who created this parent account can change the password" }, 403);
+        upd.password = await hashPassword(password);
+      }
       const { data: updated, error } = await db.from("parents")
         .update(upd).eq("id", parentId).select().single();
       if (error) throw error;
@@ -561,48 +595,60 @@ export async function handleAdminParents(
 
     // DELETE /admin/parents/:id
     if (path.match(/^\/admin\/parents\/\d+$/) && method === "DELETE") {
-      const parentId = path.split("/")[3];
-      const { data: existing } = await db.from("parents").select("id")
-        .eq("id", parentId).eq("school_id", adminUser.school_id).single();
-      if (!existing) return json({ message: "Parent not found" }, 404);
-      const { error } = await db.from("parents").delete().eq("id", parentId);
-      if (error) throw error;
-      return json({ message: "Parent deleted" }, 200);
+      const parentId = parseInt(path.split("/")[3]);
+      if (!(await canAccessParent(parentId))) return json({ message: "Parent not found" }, 404);
+      // Remove this campus's access link
+      await db.from("parent_school_access").delete()
+        .eq("parent_id", parentId).eq("school_id", mySchoolId);
+      // Check if parent still has other campus associations or is owned by another campus
+      const { data: otherAccess } = await db.from("parent_school_access")
+        .select("parent_id").eq("parent_id", parentId).limit(1);
+      const { data: parentRow } = await db.from("parents").select("school_id").eq("id", parentId).single();
+      const ownedElsewhere = parentRow && (parentRow as any).school_id !== mySchoolId;
+      if (!otherAccess?.length && !ownedElsewhere) {
+        // Sole owner — delete entirely
+        await db.from("parents").delete().eq("id", parentId);
+      }
+      return json({ message: "Parent removed" }, 200);
     }
 
     // GET /admin/parents/:id/children
     if (path.match(/^\/admin\/parents\/\d+\/children$/) && method === "GET") {
-      const parentId = path.split("/")[3];
-      const { data: parent } = await db.from("parents").select("id")
-        .eq("id", parentId).eq("school_id", adminUser.school_id).single();
-      if (!parent) return json({ message: "Parent not found" }, 404);
+      const parentId = parseInt(path.split("/")[3]);
+      if (!(await canAccessParent(parentId))) return json({ message: "Parent not found" }, 404);
       const { data: children, error } = await db.from("parent_student")
-        .select("student_id, relationship, students(id, first_name, last_name)")
+        .select("student_id, relationship, students(id, first_name, last_name, school_id)")
         .eq("parent_id", parentId);
       if (error) throw error;
       return json({ children: (children || []).map((c: any) => ({
         student_id: c.student_id, first_name: c.students?.first_name,
         last_name: c.students?.last_name, relationship: c.relationship,
+        school_id: c.students?.school_id,
       })) }, 200);
     }
 
     // POST /admin/parents/:id/link-child
     if (path.match(/^\/admin\/parents\/\d+\/link-child$/) && method === "POST") {
       const parentId = parseInt(path.split("/")[3]);
-      const { data: parent } = await db.from("parents").select("id")
-        .eq("id", parentId).eq("school_id", adminUser.school_id).single();
-      if (!parent) return json({ message: "Parent not found" }, 404);
+      if (!(await canAccessParent(parentId))) return json({ message: "Parent not found" }, 404);
       const { student_id, relationship } = await req.json();
       if (!student_id) return json({ message: "student_id is required" }, 400);
-      // Verify student belongs to this school
       const { data: student } = await db.from("students").select("id, first_name, last_name")
-        .eq("id", student_id).eq("school_id", adminUser.school_id).single();
-      if (!student) return json({ message: "Student not found in this school" }, 404);
+        .eq("id", student_id).eq("school_id", mySchoolId).single();
+      if (!student) return json({ message: "Student not found in this campus" }, 404);
+      // A student can only be linked to one parent
+      const { data: existingLink } = await db.from("parent_student")
+        .select("parent_id").eq("student_id", student_id).neq("parent_id", parentId).maybeSingle();
+      if (existingLink) return json({ message: "This student is already linked to another parent" }, 409);
       const { error } = await db.from("parent_student").upsert(
         { parent_id: parentId, student_id, relationship: relationship || null, verified: true },
         { onConflict: "parent_id,student_id" }
       );
       if (error) throw error;
+      // Ensure parent has access to this campus
+      await db.from("parent_school_access")
+        .upsert({ parent_id: parentId, school_id: mySchoolId }, { onConflict: "parent_id,school_id" })
+        .then(() => {}).catch(() => {});
       return json({ message: "Child linked", student: { id: student.id, first_name: student.first_name, last_name: student.last_name } }, 200);
     }
 
@@ -611,9 +657,10 @@ export async function handleAdminParents(
       const parts = path.split("/");
       const parentId = parseInt(parts[3]);
       const studentId = parseInt(parts[5]);
-      const { data: parent } = await db.from("parents").select("id")
-        .eq("id", parentId).eq("school_id", adminUser.school_id).single();
-      if (!parent) return json({ message: "Parent not found" }, 404);
+      if (!(await canAccessParent(parentId))) return json({ message: "Parent not found" }, 404);
+      // Only allow unlinking students that belong to this campus
+      const { data: student } = await db.from("students").select("id").eq("id", studentId).eq("school_id", mySchoolId).maybeSingle();
+      if (!student) return json({ message: "Student not in your campus" }, 403);
       const { error } = await db.from("parent_student")
         .delete().eq("parent_id", parentId).eq("student_id", studentId);
       if (error) throw error;
