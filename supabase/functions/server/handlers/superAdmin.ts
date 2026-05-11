@@ -435,6 +435,13 @@ export async function handleSuperAdmin(
         if (dup?.length)
           return json({ message: `Roll number ${body.roll_no} is already taken in this class/section.` }, 409);
       }
+
+      // Cross-table email uniqueness check
+      if (body.email) {
+        const exists = await emailExistsAnywhere(db, body.email);
+        if (exists) return json({ message: `Email already exists as a ${exists}` }, 409);
+      }
+
       const { data, error } = await db
         .from("students")
         .insert({ school_id: schoolId, ...body })

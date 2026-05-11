@@ -597,19 +597,23 @@ export async function handleAdminParents(
     if (path.match(/^\/admin\/parents\/\d+$/) && method === "DELETE") {
       const parentId = parseInt(path.split("/")[3]);
       if (!(await canAccessParent(parentId))) return json({ message: "Parent not found" }, 404);
+
       // Remove this campus's access link
       await db.from("parent_school_access").delete()
         .eq("parent_id", parentId).eq("school_id", mySchoolId);
-      // Check if parent still has other campus associations or is owned by another campus
-      const { data: otherAccess } = await db.from("parent_school_access")
-        .select("parent_id").eq("parent_id", parentId).limit(1);
-      const { data: parentRow } = await db.from("parents").select("school_id").eq("id", parentId).single();
-      const ownedElsewhere = parentRow && (parentRow as any).school_id !== mySchoolId;
-      if (!otherAccess?.length && !ownedElsewhere) {
-        // Sole owner — delete entirely
-        await db.from("parents").delete().eq("id", parentId);
+
+      // Only org_admin or super_admin can delete the parent row itself
+      if (adminUser.role === "org_admin" || adminUser.role === "super_admin") {
+        // Check if parent still has other campus associations
+        const { data: otherAccess } = await db.from("parent_school_access")
+          .select("parent_id").eq("parent_id", parentId).limit(1);
+        if (!otherAccess?.length) {
+          await db.from("parents").delete().eq("id", parentId);
+          return json({ message: "Parent deleted" }, 200);
+        }
       }
-      return json({ message: "Parent removed" }, 200);
+      // For regular admins, or if parent still mapped elsewhere, just confirm removal
+      return json({ message: "Parent unmapped from campus" }, 200);
     }
 
     // GET /admin/parents/:id/children
