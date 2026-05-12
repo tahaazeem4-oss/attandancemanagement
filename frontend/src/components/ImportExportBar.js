@@ -53,50 +53,50 @@ export default function ImportExportBar({
     {
       key: 'template',
       visible: !!templatePath,
-      icon: 'download-outline',
+      icon: 'document-outline',
       label: 'Template',
-      sub: 'Get sample file',
       onPress: doTemplate,
-      loadingColor: C.primary,
+      loadingColor: '#3B82F6',
       style: styles.templateBtn,
       labelStyle: styles.templateTxt,
+      iconColor: '#3B82F6',
     },
     {
       key: 'import',
       visible: !!importPath,
-      icon: 'cloud-upload-outline',
+      icon: 'arrow-up-circle-outline',
       label: 'Import',
-      sub: 'Upload sheet',
       onPress: doImport,
-      loadingColor: '#fff',
+      loadingColor: '#10B981',
       style: styles.importBtn,
       labelStyle: styles.importTxt,
-      subStyle: styles.darkSub,
-      iconColor: '#fff',
+      iconColor: '#10B981',
     },
     {
       key: 'export',
       visible: !!exportPath,
-      icon: 'cloud-download-outline',
+      icon: 'arrow-down-circle-outline',
       label: 'Export',
-      sub: 'Download data',
       onPress: doExport,
-      loadingColor: '#fff',
+      loadingColor: '#F59E0B',
       style: styles.exportBtn,
       labelStyle: styles.exportTxt,
-      subStyle: styles.darkSub,
-      iconColor: '#fff',
+      iconColor: '#F59E0B',
     },
   ].filter(a => a.visible);
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.title}>Template / Import / Export</Text>
       <View style={styles.bar}>
         {ACTIONS.map(action => (
           <Pressable
             key={action.key}
-            style={[styles.btn, action.style, !!loading && loading !== action.key && styles.btnDisabled]}
+            style={({ pressed }) => [
+              styles.btn, 
+              action.style, 
+              pressed && styles.btnPressed,
+              !!loading && loading !== action.key && styles.btnDisabled
+            ]}
             onPress={action.onPress}
             disabled={!!loading}
           >
@@ -104,9 +104,8 @@ export default function ImportExportBar({
               <ActivityIndicator size="small" color={action.loadingColor} />
             ) : (
               <>
-                <Ionicons name={action.icon} size={16} color={action.iconColor || C.primary} />
+                <Ionicons name={action.icon} size={20} color={action.iconColor || C.primary} />
                 <Text style={action.labelStyle}>{action.label}</Text>
-                <Text style={action.subStyle || styles.lightSub}>{action.sub}</Text>
               </>
             )}
           </Pressable>
@@ -118,34 +117,51 @@ export default function ImportExportBar({
 
 const styles = StyleSheet.create({
   wrap: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    backgroundColor: C.card,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderBottomColor: C.border,
+    borderBottomColor: '#E2E8F0',
   },
-  title: { fontSize: 12, fontWeight: '700', color: '#64748B', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.4 },
   bar: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 12,
   },
   btn: {
     flex: 1,
-    minHeight: 64,
-    paddingVertical: 8,
-    borderRadius: 12,
-    borderWidth: 1,
+    minHeight: 56,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 2,
+    gap: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  btnDisabled: { opacity: 0.55 },
-  templateBtn: { borderColor: '#BFDBFE', backgroundColor: '#EFF6FF' },
-  importBtn:   { borderColor: '#86EFAC', backgroundColor: '#16A34A' },
-  exportBtn:   { borderColor: '#93C5FD', backgroundColor: C.primary },
-  templateTxt: { fontSize: 13, fontWeight: '800', color: C.primary },
-  importTxt:   { fontSize: 13, fontWeight: '800', color: '#fff' },
-  exportTxt:   { fontSize: 13, fontWeight: '800', color: '#fff' },
+  btnPressed: { 
+    opacity: 0.85,
+  },
+  btnDisabled: { opacity: 0.6 },
+  templateBtn: { 
+    borderColor: '#DBEAFE', 
+    backgroundColor: '#F0F9FF',
+  },
+  importBtn: { 
+    borderColor: '#DCFCE7', 
+    backgroundColor: '#F0FDF4',
+  },
+  exportBtn: { 
+    borderColor: '#FEF3C7', 
+    backgroundColor: '#FFFBEB',
+  },
+  templateTxt: { fontSize: 13, fontWeight: '700', color: '#3B82F6' },
+  importTxt: { fontSize: 13, fontWeight: '700', color: '#10B981' },
+  exportTxt: { fontSize: 13, fontWeight: '700', color: '#F59E0B' },
   lightSub: { fontSize: 10, color: '#64748B', fontWeight: '600' },
   darkSub: { fontSize: 10, color: '#E2E8F0', fontWeight: '600' },
 });

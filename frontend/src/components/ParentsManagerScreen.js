@@ -41,6 +41,9 @@ export default function ParentsManagerScreen({ navigation, mode }) {
   const [linkModal, setLinkModal] = useState(false);
   const [linkEmail, setLinkEmail] = useState('');
   const [linking2, setLinking2] = useState(false);
+  const [campusModal, setCampusModal] = useState(false);
+  const [campusParent, setCampusParent] = useState(null);
+  const [campusSaving, setCampusSaving] = useState(false);
 
   const [childModal, setChildModal] = useState(false);
   const [selectedParent, setSelectedParent] = useState(null);
@@ -71,11 +74,17 @@ export default function ParentsManagerScreen({ navigation, mode }) {
         setCampuses(filteredCampuses);
         setOrganizations(oRes.data || []);
 
-        if (!filterCampus) {
-          setParents([]);
-        } else {
+        if (filterCampus) {
+          // Specific campus selected — load parents for that campus
           const { data } = await api.get(`/super-admin/schools/${filterCampus}/parents`);
           setParents(data?.parents || data || []);
+        } else if (filterOrg) {
+          // Org selected but no specific campus — load all parents across the org
+          const { data } = await api.get(`/super-admin/organizations/${filterOrg}/parents`);
+          setParents(Array.isArray(data) ? data : []);
+        } else {
+          // Nothing selected
+          setParents([]);
         }
       } else if (isOrg) {
         const params = filterCampus ? { campus_id: filterCampus } : {};
@@ -109,6 +118,14 @@ export default function ParentsManagerScreen({ navigation, mode }) {
 
   const initials = p => `${(p.first_name || '?')[0].toUpperCase()}${(p.last_name || '')[0] ? p.last_name[0].toUpperCase() : ''}`;
 
+  const getCampusIdsFromParent = p => {
+    if (!p) return [];
+    if (Array.isArray(p.campus_ids) && p.campus_ids.length) {
+      return p.campus_ids.map(Number).filter(Boolean);
+    }
+    return p.school_id ? [Number(p.school_id)] : [];
+  };
+
   const toggleCampus = id => {
     setSelectedCampuses(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
   };
@@ -117,7 +134,11 @@ export default function ParentsManagerScreen({ navigation, mode }) {
     setEditing(null);
     setForm({ ...EMPTY_FORM, school_id: filterCampus || '' });
     setShowPw(false);
-    setSelectedCampuses([]);
+    if (isSuper && filterCampus) {
+      setSelectedCampuses([Number(filterCampus)]);
+    } else {
+      setSelectedCampuses([]);
+    }
     setModal(true);
   };
 
@@ -135,7 +156,7 @@ export default function ParentsManagerScreen({ navigation, mode }) {
       const existingIds = campuses.filter(c => p.campus_names?.includes(c.name)).map(c => c.id);
       setSelectedCampuses(existingIds.length ? existingIds : p.school_id ? [p.school_id] : []);
     } else if (isSuper) {
-      setSelectedCampuses([]);
+      setSelectedCampuses(getCampusIdsFromParent(p));
     }
     setShowPw(false);
     setModal(true);
@@ -145,12 +166,12 @@ export default function ParentsManagerScreen({ navigation, mode }) {
     if (!form.email) return Alert.alert('Validation', 'Email is required.');
     if (!editing && !form.password) return Alert.alert('Validation', 'Password is required for new parents.');
     if (isOrg && !selectedCampuses.length) return Alert.alert('Validation', 'Please select at least one campus.');
-    if (isSuper && !form.school_id && !filterCampus) return Alert.alert('Validation', 'Please select a campus.');
+    if (isSuper && !selectedCampuses.length) return Alert.alert('Validation', 'Please select at least one campus.');
 
     setSaving(true);
     try {
       if (isSuper) {
-        const schoolId = editing ? (editing.school_id || form.school_id || filterCampus) : (form.school_id || filterCampus);
+        const schoolId = selectedCampuses[0] || (editing ? (editing.school_id || form.school_id || filterCampus) : (form.school_id || filterCampus));
         if (editing) {
           await api.put(`/super-admin/schools/${schoolId}/parents/${editing.id}`, {
             first_name: form.first_name,
@@ -158,6 +179,7 @@ export default function ParentsManagerScreen({ navigation, mode }) {
             email: form.email,
             phone: form.phone,
             password: form.password || undefined,
+            campus_ids: selectedCampuses,
           });
         } else {
           await api.post(`/super-admin/schools/${schoolId}/parents`, {
@@ -166,6 +188,7 @@ export default function ParentsManagerScreen({ navigation, mode }) {
             first_name: form.first_name,
             last_name: form.last_name,
             phone: form.phone,
+            campus_ids: selectedCampuses,
           });
         }
       } else if (isOrg) {
@@ -237,6 +260,49 @@ export default function ParentsManagerScreen({ navigation, mode }) {
       Alert.alert('Error', err?.response?.data?.message || 'Could not link parent.');
     } finally {
       setLinking2(false);
+    }
+  };
+
+  const openCampusManager = p => {
+    setCampusParent(p);
+    setSelectedCampuses(getCampusIdsFromParent(p));
+    setCampusModal(true);
+  };
+
+  const renderCampusChips = () => (
+    <View style={styles.chipRow}>
+      {campuses.map(c => {
+        const sel = selectedCampuses.includes(c.id);
+        return (
+          <TouchableOpacity key={c.id} style={[styles.chip, sel && styles.chipActive]} onPress={() => toggleCampus(c.id)}>
+            {sel && <Ionicons name="checkmark" size={13} color="#fff" style={{ marginRight: 4 }} />}
+            <Text style={[styles.chipTxt, sel && styles.chipTxtActive]}>{c.name}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+
+  const handleSaveCampuses = async () => {
+    if (!campusParent) return;
+    if (!selectedCampuses.length) return Alert.alert('Validation', 'Please select at least one campus.');
+    setCampusSaving(true);
+    try {
+      const schoolId = selectedCampuses[0] || campusParent.school_id;
+      await api.put(`/super-admin/schools/${schoolId}/parents/${campusParent.id}`, {
+        first_name: campusParent.first_name || '',
+        last_name: campusParent.last_name || '',
+        email: campusParent.email,
+        phone: campusParent.phone || '',
+        campus_ids: selectedCampuses,
+      });
+      setCampusModal(false);
+      setCampusParent(null);
+      await load();
+    } catch (err) {
+      Alert.alert('Error', err?.response?.data?.message || 'Could not update campuses');
+    } finally {
+      setCampusSaving(false);
     }
   };
 
@@ -376,6 +442,18 @@ export default function ParentsManagerScreen({ navigation, mode }) {
           onImportDone={load}
         />
       ) : null}
+      {isSuper ? (
+        filterCampus ? (
+          <ImportExportBar
+            templatePath="/org-admin/import-export/parents/template"
+            importPath="/org-admin/import-export/parents/import"
+            exportPath="/org-admin/import-export/parents/export"
+            exportFilename="parents_export.xlsx"
+            templateFilename="parents_template.xlsx"
+            onImportDone={load}
+          />
+        ) : null
+      ) : null}
       {!isOrg && !isSuper ? (
         <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
           <Pressable style={styles.linkExistingBtn} onPress={() => { setLinkEmail(''); setLinkModal(true); }}>
@@ -392,7 +470,13 @@ export default function ParentsManagerScreen({ navigation, mode }) {
           data={filteredParents}
           keyExtractor={item => String(item.id)}
           contentContainerStyle={{ padding: 14, paddingBottom: 100 }}
-          ListEmptyComponent={<EntityEmptyState icon="people-circle-outline" title="No parent accounts yet" subtitle="Add or import parents to continue" />}
+          ListEmptyComponent={
+            <EntityEmptyState
+              icon="people-circle-outline"
+              title={isSuper && !filterOrg && !filterCampus ? "Select an organization or campus" : "No parent accounts yet"}
+              subtitle={isSuper && !filterOrg && !filterCampus ? "Choose an organization or campus from the filters above to view parents" : "Add or import parents to continue"}
+            />
+          }
           renderItem={({ item }) => (
             <Pressable style={({ pressed }) => [styles.card, pressed && { opacity: 0.88 }]} onPress={() => openEdit(item)}>
               <View style={styles.avatar}><Text style={styles.avatarText}>{initials(item)}</Text></View>
@@ -400,16 +484,21 @@ export default function ParentsManagerScreen({ navigation, mode }) {
                 <Text style={styles.name}>{item.first_name || ''} {item.last_name || ''}</Text>
                 <Text style={styles.sub}>{item.email}</Text>
                 {item.phone ? <Text style={styles.sub}>{item.phone}</Text> : null}
-                {!!((item.campus_names || []).length || item.campus_name || item.school_name) && (
+                {(item.campus_names || []).length > 0 && (
                   <View style={styles.badgeRow}>
-                    {(item.campus_names || [item.campus_name || item.school_name]).filter(Boolean).map((n, i) => (
-                      <View key={i} style={styles.badge}><Text style={styles.badgeTxt}>{n}</Text></View>
+                    {item.campus_names.map((n, i) => (
+                      <View key={i} style={styles.badge}><Text style={styles.badgeTxt}>🏫 {n}</Text></View>
                     ))}
                   </View>
                 )}
               </View>
 
               <View style={styles.actionBtns}>
+                {isSuper ? (
+                  <TouchableOpacity onPress={() => openCampusManager(item)} style={styles.actionBtn}>
+                    <Ionicons name="business-outline" size={17} color="#7C3AED" />
+                  </TouchableOpacity>
+                ) : null}
                 {!isOrg && !isSuper ? (
                   <TouchableOpacity onPress={() => openChildren(item)} style={styles.actionBtn}><Ionicons name="people-outline" size={17} color={C.primary} /></TouchableOpacity>
                 ) : null}
@@ -467,30 +556,14 @@ export default function ParentsManagerScreen({ navigation, mode }) {
               {isOrg && (
                 <>
                   <Text style={styles.label}>Campuses * (select one or more)</Text>
-                  <View style={styles.chipRow}>
-                    {campuses.map(c => {
-                      const sel = selectedCampuses.includes(c.id);
-                      return (
-                        <TouchableOpacity key={c.id} style={[styles.chip, sel && styles.chipActive]} onPress={() => toggleCampus(c.id)}>
-                          {sel && <Ionicons name="checkmark" size={13} color="#fff" style={{ marginRight: 4 }} />}
-                          <Text style={[styles.chipTxt, sel && styles.chipTxtActive]}>{c.name}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
+                  {renderCampusChips()}
                 </>
               )}
 
               {isSuper && (
                 <>
-                  <Text style={styles.label}>Campus *</Text>
-                  <PickerField
-                    label=""
-                    value={form.school_id || filterCampus}
-                    onChange={v => F('school_id', v)}
-                    items={campuses.map(c => ({ label: c.name, value: String(c.id) }))}
-                    placeholder="Select campus"
-                  />
+                  <Text style={styles.label}>Campuses * (select one or more)</Text>
+                  {renderCampusChips()}
                 </>
               )}
 
@@ -507,6 +580,25 @@ export default function ParentsManagerScreen({ navigation, mode }) {
               <ModalFooterActions onCancel={() => setModal(false)} onConfirm={handleSave} loading={saving} />
             </View>
           </ScrollView>
+        </View>
+      </Modal>
+
+      <Modal visible={campusModal} transparent animationType="slide" onRequestClose={() => setCampusModal(false)}>
+        <View style={styles.overlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Manage Campuses</Text>
+            <Text style={styles.helpText}>
+              {campusParent ? `Update campus access for ${campusParent.first_name || ''} ${campusParent.last_name || ''}`.trim() : 'Update campus access'}
+            </Text>
+            <Text style={styles.label}>Campuses * (select one or more)</Text>
+            {renderCampusChips()}
+            <ModalFooterActions
+              onCancel={() => { setCampusModal(false); setCampusParent(null); }}
+              onConfirm={handleSaveCampuses}
+              confirmText="Save Campuses"
+              loading={campusSaving}
+            />
+          </View>
         </View>
       </Modal>
 

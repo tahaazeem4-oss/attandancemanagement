@@ -88,6 +88,33 @@ export async function handleSubjects(
     }
   }
 
+  // PUT /subjects/:id (rename)
+  const editMatch = path.match(/^\/subjects\/(\d+)$/);
+  if (editMatch && method === "PUT") {
+    if (user.role !== "admin" && user.role !== "super_admin")
+      return json({ message: "Forbidden" }, 403);
+    const id = parseInt(editMatch[1]);
+    try {
+      const { name } = await req.json();
+      if (!name?.trim()) return json({ message: "name is required" }, 400);
+      const { data, error } = await db
+        .from("subjects")
+        .update({ name: name.trim() })
+        .eq("id", id)
+        .eq("school_id", schoolId)
+        .select()
+        .single();
+      if (error) {
+        if (error.code === "23505") return json({ message: "Subject already exists" }, 409);
+        throw error;
+      }
+      return json(data);
+    } catch (err) {
+      console.error("[subjects PUT]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
   // DELETE /subjects/:id
   const deleteMatch = path.match(/^\/subjects\/(\d+)$/);
   if (deleteMatch && method === "DELETE") {

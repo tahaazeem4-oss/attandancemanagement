@@ -900,6 +900,28 @@ export async function handleOrgAdmin(
   }
 
   const subjectMatch = path.match(/^\/org-admin\/subjects\/(\d+)$/);
+  if (subjectMatch && method === "PUT") {
+    const id = parseInt(subjectMatch[1]);
+    try {
+      const campusIds = await getCampusIds();
+      const { name, campus_id } = await req.json();
+      if (!name?.trim()) return json({ message: "name is required" }, 400);
+      const { data: sub } = await db.from("subjects").select("school_id").eq("id", id).single();
+      if (!sub || !campusIds.includes(sub.school_id as number))
+        return json({ message: "Not found" }, 404);
+      const updateData: Record<string, unknown> = { name: name.trim() };
+      if (campus_id) updateData.school_id = parseInt(campus_id);
+      const { data, error } = await db.from("subjects").update(updateData).eq("id", id).select().single();
+      if (error) {
+        if (error.code === "23505") return json({ message: "Subject already exists" }, 409);
+        throw error;
+      }
+      return json(data);
+    } catch (err) {
+      console.error("[org-admin/subjects PUT]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
   if (subjectMatch && method === "DELETE") {
     const id = parseInt(subjectMatch[1]);
     try {

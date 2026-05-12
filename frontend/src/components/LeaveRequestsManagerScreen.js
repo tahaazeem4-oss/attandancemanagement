@@ -9,6 +9,7 @@ import { C } from '../config/theme';
 import AppHeader from './AppHeader';
 import PickerField from './PickerField';
 import EntityEmptyState from './EntityEmptyState';
+import ImportExportBar from './ImportExportBar';
 
 const STATUS_COLOR = {
   pending: '#F59E0B', approved: '#10B981',
@@ -311,6 +312,12 @@ export default function LeaveRequestsManagerScreen({ navigation, mode }) {
           </Pressable>
         ))}
       </ScrollView>
+
+      <ImportExportBar
+        exportPath="/import-export/leaves/export"
+        exportFilename="leaves_export.xlsx"
+        onImportDone={load}
+      />
 
       {loading ? (
         <ActivityIndicator color={C.primary} style={{ flex: 1 }} />

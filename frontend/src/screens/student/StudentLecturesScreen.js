@@ -99,7 +99,7 @@ export default function StudentLecturesScreen({ navigation, route }) {
 
   const renderItem = ({ item }) => (
     <Pressable
-      style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]}
+      style={({ pressed }) => [styles.card, pressed && { opacity: 0.88 }]}
       onPress={() => navigation.navigate('StudentLectureDetail', { lecture: item, child: route?.params?.child })}
     >
       <View style={styles.cardTop}>
@@ -108,11 +108,16 @@ export default function StudentLecturesScreen({ navigation, route }) {
             {TYPE_LABEL[item.type]}
           </Text>
         </View>
-        <View style={styles.downloadBtn}>
-          <Text style={styles.downloadIcon}>⬇</Text>
-        </View>
+        {item.file_url ? (
+          <View style={styles.attachBadge}>
+            <Text style={styles.attachBadgeTxt}>📎 PDF</Text>
+          </View>
+        ) : null}
       </View>
       <Text style={styles.lectureName} numberOfLines={2}>{item.lecture_name || item.title || 'Untitled'}</Text>
+      {item.message ? (
+        <Text style={styles.messagePreview} numberOfLines={2}>{item.message}</Text>
+      ) : null}
       <View style={styles.metaRow}>
         <Text style={styles.metaChip}>📚 {item.subject_name || item.subject || 'Subject'}</Text>
         <Text style={styles.metaChip}>📅 {(item.date || item.uploaded_at || '').slice(0, 10)}</Text>
@@ -123,7 +128,7 @@ export default function StudentLecturesScreen({ navigation, route }) {
         </Text>
       )}
       {item.uploaded_by && (
-        <Text style={styles.uploader}>Uploaded by {item.uploaded_by}</Text>
+        <Text style={styles.uploader}>by {item.uploaded_by}</Text>
       )}
     </Pressable>
   );

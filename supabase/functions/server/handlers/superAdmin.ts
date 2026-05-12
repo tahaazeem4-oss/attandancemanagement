@@ -657,5 +657,323 @@ export async function handleSuperAdmin(
     }
   }
 
+  // ── GET /super-admin/organizations/:id/parents ───────────────
+  const orgParentsGetMatch = path.match(/^\/super-admin\/organizations\/(\d+)\/parents$/);
+  if (orgParentsGetMatch && method === "GET") {
+    const orgId = parseInt(orgParentsGetMatch[1]);
+    try {
+      // Get all schools for this org
+      const { data: orgSchools } = await db
+        .from("schools")
+        .select("id, name")
+        .eq("org_id", orgId);
+      const schoolIds = (orgSchools || []).map((s: Record<string, unknown>) => s.id as number);
+      const schoolNameMap: Record<number, string> = {};
+      for (const s of orgSchools || []) {
+        const r = s as Record<string, unknown>;
+        schoolNameMap[r.id as number] = r.name as string;
+      }
+      if (!schoolIds.length) return json([]);
+
+      // All parents directly assigned to these schools
+      const { data: directParents } = await db
+        .from("parents")
+        .select("id, first_name, last_name, email, phone, school_id, created_at")
+        .in("school_id", schoolIds);
+
+      // All parents via junction table for these schools
+      const { data: accessRows } = await db
+        .from("parent_school_access")
+        .select("parent_id, school_id")
+        .in("school_id", schoolIds);
+
+      // Collect all unique parent IDs
+      const allParentIds = new Set<number>();
+      for (const p of directParents || []) allParentIds.add((p as Record<string, unknown>).id as number);
+      for (const r of accessRows || []) allParentIds.add((r as Record<string, unknown>).parent_id as number);
+
+      if (!allParentIds.size) return json([]);
+
+      const { data: allParentsData } = await db
+        .from("parents")
+        .select("id, first_name, last_name, email, phone, school_id, created_at")
+        .in("id", Array.from(allParentIds));
+
+      // Build campus_names for each parent from junction + direct
+      const parentCampusMap: Record<number, Set<number>> = {};
+      for (const r of accessRows || []) {
+        const row = r as Record<string, unknown>;
+        const pid = row.parent_id as number;
+        if (!parentCampusMap[pid]) parentCampusMap[pid] = new Set();
+        parentCampusMap[pid].add(row.school_id as number);
+      }
+      for (const p of directParents || []) {
+        const pr = p as Record<string, unknown>;
+        const pid = pr.id as number;
+        const sid = pr.school_id as number;
+        if (sid && schoolIds.includes(sid)) {
+          if (!parentCampusMap[pid]) parentCampusMap[pid] = new Set();
+          parentCampusMap[pid].add(sid);
+        }
+      }
+
+      const result = (allParentsData || []).map((p: Record<string, unknown>) => {
+        const pid = p.id as number;
+        const campusIds = Array.from(parentCampusMap[pid] || new Set<number>());
+        return {
+          ...p,
+          campus_names: campusIds.map(cid => schoolNameMap[cid]).filter(Boolean),
+          campus_ids: campusIds,
+        };
+      });
+
+      result.sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
+        String(a.last_name || "").localeCompare(String(b.last_name || ""))
+      );
+
+      return json(result);
+    } catch (err) {
+      console.error("[super-admin/organizations/:id/parents GET]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── GET /super-admin/schools/:id/parents ─────────────────────
+  const schoolParentsGetMatch = path.match(/^\/super-admin\/schools\/(\d+)\/parents$/);
+  if (schoolParentsGetMatch && method === "GET") {
+    const schoolId = parseInt(schoolParentsGetMatch[1]);
+    try {
+      // Parents directly on this school
+      const { data: directParents } = await db
+        .from("parents")
+        .select("id, first_name, last_name, email, phone, school_id, created_at")
+        .eq("school_id", schoolId)
+        .order("last_name");
+      // Parents via junction table
+      const { data: accessRows } = await db
+        .from("parent_school_access")
+        .select("parent_id")
+        .eq("school_id", schoolId);
+      const directIds = new Set((directParents || []).map((p: Record<string, unknown>) => p.id as number));
+      const junctionIds = (accessRows || [])
+        .map((r: Record<string, unknown>) => r.parent_id as number)
+        .filter(id => !directIds.has(id));
+      let junctionParents: Record<string, unknown>[] = [];
+      if (junctionIds.length) {
+        const { data } = await db.from("parents")
+          .select("id, first_name, last_name, email, phone, school_id, created_at")
+          .in("id", junctionIds);
+        junctionParents = (data || []) as Record<string, unknown>[];
+      }
+      const allParents = [...(directParents || []) as Record<string, unknown>[], ...junctionParents];
+
+      // Enrich each parent with all campus names + ids they're linked to
+      const allParentIds = allParents.map(p => p.id as number);
+      let campusNames: Record<number, string[]> = {};
+      let campusIdsByParent: Record<number, number[]> = {};
+      if (allParentIds.length) {
+        const { data: allAccess } = await db
+          .from("parent_school_access")
+          .select("parent_id, school_id, schools(name)")
+          .in("parent_id", allParentIds);
+        for (const row of allAccess || []) {
+          const r = row as Record<string, unknown>;
+          const pid = r.parent_id as number;
+          const sid = r.school_id as number;
+          const schoolRow = r.schools as Record<string, unknown> | null;
+          const cname = schoolRow?.name as string | undefined;
+          if (!campusNames[pid]) campusNames[pid] = [];
+          if (!campusIdsByParent[pid]) campusIdsByParent[pid] = [];
+          if (cname && !campusNames[pid].includes(cname)) campusNames[pid].push(cname);
+          if (sid && !campusIdsByParent[pid].includes(sid)) campusIdsByParent[pid].push(sid);
+        }
+        // Also add the parent's direct school_id if not already in access table
+        for (const p of allParents) {
+          const pid = p.id as number;
+          const sid = p.school_id as number | null;
+          if (sid) {
+            if (!campusIdsByParent[pid]) campusIdsByParent[pid] = [];
+            if (!campusIdsByParent[pid].includes(sid)) campusIdsByParent[pid].push(sid);
+            const { data: schoolRow } = await db.from("schools").select("name").eq("id", sid).single();
+            if (schoolRow) {
+              if (!campusNames[pid]) campusNames[pid] = [];
+              const name = (schoolRow as Record<string, unknown>).name as string;
+              if (!campusNames[pid].includes(name)) campusNames[pid].push(name);
+            }
+          }
+        }
+      }
+
+      const result = allParents.map(p => ({
+        ...p,
+        campus_names: campusNames[p.id as number] || [],
+        campus_ids: campusIdsByParent[p.id as number] || [],
+      }));
+      return json(result);
+    } catch (err) {
+      console.error("[super-admin/schools/:id/parents GET]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── POST /super-admin/schools/:id/parents ────────────────────
+  if (schoolParentsGetMatch && method === "POST") {
+    const schoolId = parseInt(schoolParentsGetMatch[1]);
+    try {
+      const { first_name, last_name, email, password, phone, campus_ids } = await req.json();
+      if (!email || !password) return json({ message: "Email and password are required" }, 400);
+      const selectedCampusIds = Array.isArray(campus_ids)
+        ? [...new Set((campus_ids as number[]).map((id: unknown) => Number(id)).filter((id: number) => Number.isFinite(id) && id > 0))]
+        : [];
+      const validCampusIds = selectedCampusIds.length
+        ? selectedCampusIds
+        : [schoolId];
+      const primaryCampusId = validCampusIds[0] || schoolId;
+      const hashed = await hashPassword(password);
+      const { data, error } = await db.from("parents")
+        .insert({ first_name: first_name || null, last_name: last_name || null, email: email.trim().toLowerCase(), password: hashed, phone: phone || null, school_id: primaryCampusId })
+        .select().single();
+      if (error) {
+        if (error.code === "23505") return json({ message: "Email already exists" }, 409);
+        throw error;
+      }
+      await db
+        .from("parent_school_access")
+        .insert(validCampusIds.map((sid: number) => ({ parent_id: data.id, school_id: sid })))
+        .then(() => {})
+        .catch(() => {});
+      return json({ message: "Parent created", id: data.id }, 201);
+    } catch (err) {
+      console.error("[super-admin/schools/:id/parents POST]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── PUT/DELETE /super-admin/schools/:schoolId/parents/:parentId
+  const schoolParentEditMatch = path.match(/^\/super-admin\/schools\/(\d+)\/parents\/(\d+)$/);
+  if (schoolParentEditMatch && method === "PUT") {
+    const parentId = parseInt(schoolParentEditMatch[2]);
+    try {
+      const { first_name, last_name, email, phone, password, campus_ids } = await req.json();
+      const upd: Record<string, unknown> = { first_name: first_name || null, last_name: last_name || null, email: email?.trim().toLowerCase(), phone: phone || null };
+      if (password) upd.password = await hashPassword(password);
+      if (Array.isArray(campus_ids)) {
+        const validCampusIds = [...new Set((campus_ids as number[]).map((id: unknown) => Number(id)).filter((id: number) => Number.isFinite(id) && id > 0))];
+        if (validCampusIds.length) {
+          upd.school_id = validCampusIds[0];
+        }
+      }
+      const { error } = await db.from("parents").update(upd).eq("id", parentId);
+      if (error) {
+        if (error.code === "23505") return json({ message: "Email already exists" }, 409);
+        throw error;
+      }
+      if (Array.isArray(campus_ids)) {
+        const validCampusIds = [...new Set((campus_ids as number[]).map((id: unknown) => Number(id)).filter((id: number) => Number.isFinite(id) && id > 0))];
+        await db.from("parent_school_access").delete().eq("parent_id", parentId);
+        if (validCampusIds.length) {
+          await db
+            .from("parent_school_access")
+            .insert(validCampusIds.map((sid: number) => ({ parent_id: parentId, school_id: sid })))
+            .then(() => {})
+            .catch(() => {});
+        }
+      }
+      return json({ message: "Parent updated" });
+    } catch (err) {
+      console.error("[super-admin/schools/:id/parents PUT]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+  if (schoolParentEditMatch && method === "DELETE") {
+    const parentId = parseInt(schoolParentEditMatch[2]);
+    try {
+      await db.from("parent_school_access").delete().eq("parent_id", parentId);
+      await db.from("parents").delete().eq("id", parentId);
+      return json({ message: "Parent deleted" });
+    } catch (err) {
+      console.error("[super-admin/schools/:id/parents DELETE]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── GET /super-admin/schools/:id/subjects ────────────────────
+  const schoolSubjectsGetMatch = path.match(/^\/super-admin\/schools\/(\d+)\/subjects$/);
+  if (schoolSubjectsGetMatch && method === "GET") {
+    const schoolId = parseInt(schoolSubjectsGetMatch[1]);
+    try {
+      const { data } = await db
+        .from("subjects")
+        .select("id, name")
+        .eq("school_id", schoolId)
+        .order("name");
+      return json(data || []);
+    } catch (err) {
+      console.error("[super-admin/schools/:id/subjects GET]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── POST /super-admin/schools/:id/subjects ───────────────────
+  if (schoolSubjectsGetMatch && method === "POST") {
+    const schoolId = parseInt(schoolSubjectsGetMatch[1]);
+    try {
+      const { name } = await req.json();
+      if (!name?.trim()) return json({ message: "name is required" }, 400);
+      const { data, error } = await db
+        .from("subjects")
+        .insert({ school_id: schoolId, name: name.trim() })
+        .select()
+        .single();
+      if (error) {
+        if (error.code === "23505") return json({ message: "Subject already exists" }, 409);
+        throw error;
+      }
+      return json(data, 201);
+    } catch (err) {
+      console.error("[super-admin/schools/:id/subjects POST]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── PUT /super-admin/schools/:schoolId/subjects/:subjectId ───
+  const schoolSubjectEditMatch = path.match(/^\/super-admin\/schools\/(\d+)\/subjects\/(\d+)$/);
+  if (schoolSubjectEditMatch && method === "PUT") {
+    const schoolId = parseInt(schoolSubjectEditMatch[1]);
+    const subjectId = parseInt(schoolSubjectEditMatch[2]);
+    try {
+      const { name } = await req.json();
+      if (!name?.trim()) return json({ message: "name is required" }, 400);
+      const { data, error } = await db
+        .from("subjects")
+        .update({ name: name.trim() })
+        .eq("id", subjectId)
+        .eq("school_id", schoolId)
+        .select()
+        .single();
+      if (error) {
+        if (error.code === "23505") return json({ message: "Subject already exists" }, 409);
+        throw error;
+      }
+      return json(data);
+    } catch (err) {
+      console.error("[super-admin/schools/:id/subjects PUT]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── DELETE /super-admin/schools/:schoolId/subjects/:subjectId ─
+  if (schoolSubjectEditMatch && method === "DELETE") {
+    const schoolId = parseInt(schoolSubjectEditMatch[1]);
+    const subjectId = parseInt(schoolSubjectEditMatch[2]);
+    try {
+      await db.from("subjects").delete().eq("id", subjectId).eq("school_id", schoolId);
+      return json({ message: "Subject deleted" });
+    } catch (err) {
+      console.error("[super-admin/schools/:id/subjects DELETE]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
   return json({ message: "Not found" }, 404);
 }

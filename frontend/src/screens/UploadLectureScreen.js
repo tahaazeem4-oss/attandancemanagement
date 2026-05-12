@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, Pressable, ScrollView,
   StyleSheet, Alert, ActivityIndicator,
   KeyboardAvoidingView, Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import api from '../services/api';
 import { C } from '../config/theme';
@@ -52,6 +53,7 @@ export default function UploadLectureScreen({ navigation }) {
     date:         TODAY,
     class_id:     '',
     section_id:   '',   // '' means "All Sections"
+    message:      '',
   });
 
   const [pdfFile, setPdfFile] = useState(null);
@@ -120,41 +122,45 @@ export default function UploadLectureScreen({ navigation }) {
 
   // ── Do the upload (may be called directly or after duplicate confirm) ──
   const doUpload = async () => {
-    const { lecture_name, subject_name, type, date, class_id } = form;
-    if (!lecture_name.trim()) return Alert.alert('Required', 'Enter a lecture name');
+    const { lecture_name, subject_name, type, date, class_id, message } = form;
+    if (!lecture_name.trim()) return Alert.alert('Required', 'Enter a lecture / topic name');
     if (!subject_name)        return Alert.alert('Required', 'Select or add a subject');
     if (!class_id)            return Alert.alert('Required', 'Select a class');
-    if (!pdfFile)             return Alert.alert('Required', 'Select a PDF file');
+    if (!message.trim() && !pdfFile)
+      return Alert.alert('Required', 'Add a message or attach a PDF file (or both)');
 
     setUploading(true);
     try {
       if (duplicate) await api.delete(`/lectures/${duplicate.id}`);
 
       const formData = new FormData();
-      formData.append('file',         { uri: pdfFile.uri, name: pdfFile.name, type: pdfFile.mimeType });
+      if (pdfFile) {
+        formData.append('file', { uri: pdfFile.uri, name: pdfFile.name, type: pdfFile.mimeType });
+      }
       formData.append('lecture_name', lecture_name.trim());
       formData.append('subject_name', subject_name);
       formData.append('type',         type);
       formData.append('date',         date);
       formData.append('class_id',     String(class_id));
       formData.append('section_id',   form.section_id || '');
+      if (message.trim()) formData.append('message', message.trim());
 
       await api.post('/lectures', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }, // RN XHR adds boundary automatically
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
 
       if (!subjects.includes(subject_name)) setSubjects(prev => [...prev, subject_name].sort());
       setDuplicate(null);
       Alert.alert(
-        duplicate ? 'Replaced ✅' : 'Uploaded ✅',
-        duplicate ? 'Lecture replaced successfully!' : 'Lecture uploaded successfully!',
+        duplicate ? 'Replaced ✅' : 'Posted ✅',
+        duplicate ? 'Lecture replaced successfully!' : 'Lecture posted successfully!',
         [
-          { text: 'Upload Another', onPress: () => { setForm({ lecture_name: '', subject_name: '', type: 'classwork', date: TODAY, class_id: '', section_id: '' }); setPdfFile(null); setAddingSubject(false); } },
+          { text: 'Post Another', onPress: () => { setForm({ lecture_name: '', subject_name: '', type: 'classwork', date: TODAY, class_id: '', section_id: '', message: '' }); setPdfFile(null); setAddingSubject(false); } },
           { text: 'Go Back', onPress: () => navigation.goBack() },
         ]
       );
     } catch (err) {
-      Alert.alert('Upload Failed', err?.response?.data?.message || 'Please try again');
+      Alert.alert('Failed', err?.response?.data?.message || 'Please try again');
     } finally {
       setUploading(false);
     }
@@ -164,8 +170,8 @@ export default function UploadLectureScreen({ navigation }) {
   const handleSubmit = () => {
     if (duplicate) {
       Alert.alert(
-        '⚠️ Already Uploaded',
-        `A lecture for "${form.subject_name}" on ${form.date} already exists:\n\n"${duplicate.lecture_name}"\n\nDo you want to replace it with the new file?`,
+        '⚠️ Already Exists',
+        `A lecture for "${form.subject_name}" on ${form.date} already exists:\n\n"${duplicate.lecture_name}"\n\nDo you want to replace it?`,
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Replace', style: 'destructive', onPress: doUpload },
@@ -188,61 +194,11 @@ export default function UploadLectureScreen({ navigation }) {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <AppHeader title="Upload Lecture" navigation={navigation} />
+      <AppHeader title="Post Lecture / Work" navigation={navigation} />
       <ScrollView style={styles.root} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 60 }}>
-
         <View style={styles.body}>
 
-          {/* Lecture Name */}
-          <Text style={styles.label}>Lecture / Topic Name *</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g. Chapter 5 – Photosynthesis"
-            placeholderTextColor={C.textLight}
-            value={form.lecture_name}
-            onChangeText={v => F('lecture_name', v)}
-          />
-
-          {/* Subject */}
-          <Text style={styles.label}>Subject *</Text>
-          {!addingSubject ? (
-            <PickerField
-              label="Subject"
-              value={form.subject_name}
-              onChange={v => { if (v === '__new__') { setAddingSubject(true); } else { F('subject_name', v); } }}
-              placeholder="— Select Subject —"
-              items={[
-                { label: '— Select Subject —', value: '' },
-                ...subjects.map(s => ({ label: s, value: s })),
-                { label: '➕  Add New Subject…', value: '__new__' },
-              ]}
-            />
-          ) : (
-            <View style={styles.newSubjectRow}>
-              <TextInput
-                style={[styles.input, { flex: 1, marginTop: 0 }]}
-                placeholder="Type subject name…"
-                placeholderTextColor={C.textLight}
-                value={newSubjectText}
-                onChangeText={setNewSubjectText}
-                autoFocus
-                returnKeyType="done"
-                onSubmitEditing={confirmNewSubject}
-              />
-              <Pressable style={styles.addBtn} onPress={confirmNewSubject}>
-                <Text style={styles.addBtnTxt}>Add</Text>
-              </Pressable>
-              <Pressable style={styles.cancelBtn} onPress={() => { setAddingSubject(false); setNewSubjectText(''); }}>
-                <Text style={styles.cancelBtnTxt}>✕</Text>
-              </Pressable>
-            </View>
-          )}
-          {!!form.subject_name && !addingSubject && (
-            <Text style={styles.selectedHint}>Selected: {form.subject_name}</Text>
-          )}
-
-          {/* Type */}
-          <Text style={styles.label}>Type *</Text>
+          {/* ── Type selector ── */}
           <View style={styles.typeRow}>
             {TYPES.map(t => (
               <Pressable
@@ -257,43 +213,84 @@ export default function UploadLectureScreen({ navigation }) {
             ))}
           </View>
 
-          {/* Date */}
-          <Text style={styles.label}>Date *</Text>
-          <PickerField
-            label="Date"
-            value={form.date}
-            onChange={v => F('date', v)}
-            placeholder="Select date"
-            items={DATE_OPTIONS}
-          />
+          {/* ── Topic Name ── */}
+          <View style={styles.fieldBlock}>
+            <Text style={styles.label}>Topic / Title *</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. Chapter 5 – Photosynthesis"
+              placeholderTextColor={C.textLight}
+              value={form.lecture_name}
+              onChangeText={v => F('lecture_name', v)}
+            />
+          </View>
 
-          {/* Class */}
-          <Text style={styles.label}>Class *</Text>
-          <PickerField
-            label="Class"
-            value={String(form.class_id)}
-            onChange={v => F('class_id', v)}
-            placeholder="— Select Class —"
-            items={[{ label: '— Select Class —', value: '' }, ...classes.map(c => ({ label: c.class_name, value: String(c.id) }))]}
-          />
+          {/* ── Subject ── */}
+          <View style={styles.fieldBlock}>
+            <Text style={styles.label}>Subject *</Text>
+            {!addingSubject ? (
+              <PickerField
+                label="Subject"
+                value={form.subject_name}
+                onChange={v => { if (v === '__new__') { setAddingSubject(true); } else { F('subject_name', v); } }}
+                placeholder="— Select Subject —"
+                items={[
+                  { label: '— Select Subject —', value: '' },
+                  ...subjects.map(s => ({ label: s, value: s })),
+                  { label: '➕  Add New Subject…', value: '__new__' },
+                ]}
+              />
+            ) : (
+              <View style={styles.newSubjectRow}>
+                <TextInput
+                  style={[styles.input, { flex: 1 }]}
+                  placeholder="Type subject name…"
+                  placeholderTextColor={C.textLight}
+                  value={newSubjectText}
+                  onChangeText={setNewSubjectText}
+                  autoFocus
+                  returnKeyType="done"
+                  onSubmitEditing={confirmNewSubject}
+                />
+                <Pressable style={styles.addBtn} onPress={confirmNewSubject}>
+                  <Text style={styles.addBtnTxt}>Add</Text>
+                </Pressable>
+                <Pressable style={styles.cancelBtn} onPress={() => { setAddingSubject(false); setNewSubjectText(''); }}>
+                  <Ionicons name="close" size={18} color={C.textMed} />
+                </Pressable>
+              </View>
+            )}
+            {!!form.subject_name && !addingSubject && (
+              <Text style={styles.selectedHint}>✓ {form.subject_name}</Text>
+            )}
+          </View>
 
-          {/* Section */}
-          <Text style={styles.label}>Section</Text>
-          <PickerField
-            label="Section"
-            value={String(form.section_id)}
-            onChange={v => F('section_id', v)}
-            placeholder="📢  All Sections"
-            disabled={!form.class_id}
-            items={[{ label: '📢  All Sections', value: '' }, ...sections.map(s => ({ label: `Section ${s.section_name}`, value: String(s.id) }))]}
-          />
+          {/* ── Date / Class / Section ── */}
+          <View style={styles.rowTwo}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Date *</Text>
+              <PickerField label="Date" value={form.date} onChange={v => F('date', v)} placeholder="Select date" items={DATE_OPTIONS} />
+            </View>
+          </View>
+
+          <View style={styles.rowTwo}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Class *</Text>
+              <PickerField label="Class" value={String(form.class_id)} onChange={v => F('class_id', v)} placeholder="— Class —"
+                items={[{ label: '— Class —', value: '' }, ...classes.map(c => ({ label: c.class_name, value: String(c.id) }))]} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Section</Text>
+              <PickerField label="Section" value={String(form.section_id)} onChange={v => F('section_id', v)} placeholder="All Sections"
+                disabled={!form.class_id}
+                items={[{ label: 'All Sections', value: '' }, ...sections.map(s => ({ label: `Sec ${s.section_name}`, value: String(s.id) }))]} />
+            </View>
+          </View>
           {form.class_id && !form.section_id && (
-            <Text style={styles.hint}>
-              📢 "All Sections" makes this lecture visible to every section of {selectedClassName}.
-            </Text>
+            <Text style={styles.hint}>All sections of {selectedClassName} will see this.</Text>
           )}
 
-          {/* Duplicate indicator */}
+          {/* ── Duplicate indicator ── */}
           {checkingDup && (
             <View style={styles.dupChecking}>
               <ActivityIndicator size="small" color={C.primary} />
@@ -302,48 +299,87 @@ export default function UploadLectureScreen({ navigation }) {
           )}
           {!checkingDup && duplicate && (
             <View style={styles.dupWarning}>
-              <Text style={styles.dupWarnIcon}>⚠️</Text>
+              <Ionicons name="warning-outline" size={18} color="#D97706" />
               <View style={{ flex: 1 }}>
-                <Text style={styles.dupWarnTitle}>Lecture already uploaded!</Text>
-                <Text style={styles.dupWarnMsg}>"{duplicate.lecture_name}" exists for this subject & date.{"\n"}Tapping Upload will replace it.</Text>
+                <Text style={styles.dupWarnTitle}>Already posted for this date</Text>
+                <Text style={styles.dupWarnMsg}>"{duplicate.lecture_name}" — submitting will replace it.</Text>
               </View>
             </View>
           )}
           {!checkingDup && !duplicate && form.subject_name && form.date && form.class_id && (
             <View style={styles.dupOk}>
-              <Text style={styles.dupOkTxt}>✅  No duplicate — ready to upload</Text>
+              <Ionicons name="checkmark-circle-outline" size={15} color="#059669" />
+              <Text style={styles.dupOkTxt}> No duplicate — good to go</Text>
             </View>
           )}
 
-          {/* PDF Picker */}
-          <Text style={styles.label}>PDF File *</Text>
-          <Pressable style={styles.filePicker} onPress={pickPDF}>
-            {pdfFile ? (
-              <View style={styles.fileSelected}>
-                <Text style={styles.fileIcon}>📄</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.fileName} numberOfLines={2}>{pdfFile.name}</Text>
-                  <Text style={styles.fileHint}>Tap to change</Text>
-                </View>
-              </View>
-            ) : (
-              <View style={styles.fileEmpty}>
-                <Text style={styles.fileEmptyIcon}>⬆</Text>
-                <Text style={styles.fileEmptyTxt}>Tap to select PDF</Text>
-                <Text style={styles.fileEmptyHint}>Max 20 MB</Text>
-              </View>
-            )}
-          </Pressable>
+          {/* ── Message Board ── */}
+          <View style={styles.messageBoardCard}>
+            <View style={styles.messageBoardHeader}>
+              <Ionicons name="create-outline" size={18} color={C.primary} />
+              <Text style={styles.messageBoardTitle}>Message / Instructions</Text>
+            </View>
+            <TextInput
+              style={styles.messageBoardInput}
+              placeholder={
+                form.type === 'homework'
+                  ? 'Write homework instructions here…\ne.g. Complete Ex. 3.1 Q1–5 from the textbook.'
+                  : 'Write classwork notes or instructions here…\ne.g. Today we covered photosynthesis — revise pages 42–48.'
+              }
+              placeholderTextColor="#94A3B8"
+              value={form.message}
+              onChangeText={v => F('message', v)}
+              multiline
+              numberOfLines={5}
+              textAlignVertical="top"
+            />
+          </View>
 
-          {/* Submit */}
+          {/* ── PDF Attachment (Optional) ── */}
+          <View style={styles.fieldBlock}>
+            <View style={styles.attachmentLabelRow}>
+              <Ionicons name="attach-outline" size={16} color={C.textMed} />
+              <Text style={styles.label}>  PDF Attachment</Text>
+              <View style={styles.optionalBadge}><Text style={styles.optionalTxt}>Optional</Text></View>
+            </View>
+            <Pressable style={({ pressed }) => [styles.filePicker, pressed && { opacity: 0.85 }]} onPress={pickPDF}>
+              {pdfFile ? (
+                <View style={styles.fileSelected}>
+                  <View style={styles.fileIconWrap}>
+                    <Ionicons name="document-text-outline" size={22} color="#DC2626" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.fileName} numberOfLines={1}>{pdfFile.name}</Text>
+                    <Text style={styles.fileHint}>Tap to change file</Text>
+                  </View>
+                  <Pressable onPress={() => setPdfFile(null)} hitSlop={8}>
+                    <Ionicons name="close-circle" size={20} color="#94A3B8" />
+                  </Pressable>
+                </View>
+              ) : (
+                <View style={styles.fileEmpty}>
+                  <Ionicons name="cloud-upload-outline" size={28} color={C.primary} />
+                  <Text style={styles.fileEmptyTxt}>Tap to attach a PDF</Text>
+                  <Text style={styles.fileEmptyHint}>Max 20 MB · Students can download it</Text>
+                </View>
+              )}
+            </Pressable>
+          </View>
+
+          {/* ── Submit ── */}
           <Pressable
-            style={[styles.submitBtn, uploading && { opacity: 0.7 }, duplicate && styles.submitBtnReplace]}
+            style={({ pressed }) => [styles.submitBtn, uploading && { opacity: 0.7 }, duplicate && styles.submitBtnReplace, pressed && { opacity: 0.88 }]}
             onPress={handleSubmit}
             disabled={uploading}
           >
-            {uploading
-              ? <ActivityIndicator color="#fff" />
-              : <Text style={styles.submitTxt}>{duplicate ? '🔄  Replace Lecture' : '⬆  Upload Lecture'}</Text>}
+            {uploading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <View style={styles.submitInner}>
+                <Ionicons name={duplicate ? 'refresh-outline' : 'paper-plane-outline'} size={18} color="#fff" />
+                <Text style={styles.submitTxt}>{duplicate ? '  Replace Lecture' : '  Post to Students'}</Text>
+              </View>
+            )}
           </Pressable>
 
         </View>
@@ -353,77 +389,93 @@ export default function UploadLectureScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  root:       { flex: 1, backgroundColor: C.bg },
+  root:  { flex: 1, backgroundColor: C.bg },
+  body:  { padding: 16, gap: 4 },
 
-  // Header
-  header:     { paddingTop: 52, paddingBottom: 28, paddingHorizontal: 20 },
-  backBtn:    { marginBottom: 16, alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 6 },
-  backTxt:    { color: '#fff', fontWeight: '700', fontSize: 13 },
-  headerTitle:{ color: '#E0E7FF', fontSize: 22, fontWeight: '900' },
-  headerSub:  { color: '#A5B4FC', fontSize: 13, marginTop: 4 },
-
-  // Form body
-  body:       { padding: 20 },
-  label:      { fontSize: 13, fontWeight: '700', color: C.textMed, marginBottom: 6, marginTop: 16 },
+  fieldBlock: { marginTop: 14 },
+  label: { fontSize: 12, fontWeight: '700', color: C.textMed, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.4 },
 
   input: {
-    backgroundColor: C.card,
-    borderWidth: 1.5, borderColor: C.border, borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 12,
+    backgroundColor: '#fff',
+    borderWidth: 1.5, borderColor: '#E2E8F0', borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 11,
     fontSize: 15, color: C.text,
   },
 
+  rowTwo: { flexDirection: 'row', gap: 10, marginTop: 14 },
+
   // Type buttons
-  typeRow:    { flexDirection: 'row', gap: 10 },
-  typeBtn:    { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.card, alignItems: 'center' },
+  typeRow:       { flexDirection: 'row', gap: 10, marginTop: 4 },
+  typeBtn:       { flex: 1, paddingVertical: 13, borderRadius: 12, borderWidth: 1.5, borderColor: '#E2E8F0', backgroundColor: '#fff', alignItems: 'center' },
   typeBtnActive: { backgroundColor: C.primaryLight, borderColor: C.primary },
-  typeTxt:    { fontSize: 14, color: C.textMed, fontWeight: '600' },
+  typeTxt:       { fontSize: 14, color: C.textMed, fontWeight: '600' },
   typeTxtActive: { color: C.primary, fontWeight: '800' },
 
   // Subject new-entry row
   newSubjectRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  addBtn:        { backgroundColor: C.primary, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12 },
+  addBtn:        { backgroundColor: C.primary, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11 },
   addBtnTxt:     { color: '#fff', fontWeight: '700', fontSize: 14 },
-  cancelBtn:     { backgroundColor: C.card, borderWidth: 1.5, borderColor: C.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 12 },
-  cancelBtnTxt:  { color: C.textMed, fontWeight: '700', fontSize: 14 },
-  selectedHint:  { fontSize: 12, color: '#059669', fontWeight: '600', marginTop: 4 },
+  cancelBtn:     { backgroundColor: '#F1F5F9', borderRadius: 10, padding: 11, justifyContent: 'center', alignItems: 'center' },
+  selectedHint:  { fontSize: 12, color: '#059669', fontWeight: '600', marginTop: 5 },
 
-  // Picker
-  pickerWrap: { backgroundColor: C.card, borderWidth: 1.5, borderColor: C.border, borderRadius: 12, overflow: 'hidden' },
-  picker:     { height: 50, color: C.text },
-
-  hint: { fontSize: 12, color: '#059669', marginTop: 6, lineHeight: 18 },
+  hint: { fontSize: 12, color: '#6366F1', marginTop: 5, lineHeight: 18 },
 
   // Duplicate indicators
-  dupChecking:    { flexDirection: 'row', alignItems: 'center', marginTop: 10, backgroundColor: C.card, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: C.border },
+  dupChecking:    { flexDirection: 'row', alignItems: 'center', marginTop: 10, backgroundColor: '#F8FAFC', borderRadius: 10, padding: 10, borderWidth: 1, borderColor: '#E2E8F0' },
   dupCheckingTxt: { fontSize: 13, color: C.textMed },
-  dupWarning:     { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginTop: 10, backgroundColor: '#FEF3C7', borderRadius: 12, padding: 12, borderWidth: 1.5, borderColor: '#D97706' },
-  dupWarnIcon:    { fontSize: 20 },
-  dupWarnTitle:   { fontSize: 13, fontWeight: '800', color: '#92400E' },
-  dupWarnMsg:     { fontSize: 12, color: '#78350F', marginTop: 3, lineHeight: 18 },
-  dupOk:          { marginTop: 10, backgroundColor: '#ECFDF5', borderRadius: 10, padding: 10, borderWidth: 1, borderColor: '#6EE7B7' },
+  dupWarning:     { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginTop: 10, backgroundColor: '#FFFBEB', borderRadius: 12, padding: 12, borderWidth: 1.5, borderColor: '#FCD34D' },
+  dupWarnTitle:   { fontSize: 13, fontWeight: '700', color: '#92400E' },
+  dupWarnMsg:     { fontSize: 12, color: '#78350F', marginTop: 2, lineHeight: 18 },
+  dupOk:          { flexDirection: 'row', alignItems: 'center', marginTop: 10, backgroundColor: '#ECFDF5', borderRadius: 10, padding: 10, borderWidth: 1, borderColor: '#6EE7B7' },
   dupOkTxt:       { fontSize: 12, color: '#065F46', fontWeight: '600' },
 
-  // File picker
-  filePicker: {
-    backgroundColor: C.card, borderWidth: 1.5, borderStyle: 'dashed',
-    borderColor: C.primary, borderRadius: 14, overflow: 'hidden',
+  // Message board
+  messageBoardCard: {
+    marginTop: 18,
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#E0E7FF',
+    overflow: 'hidden',
   },
-  fileEmpty:     { alignItems: 'center', padding: 28 },
-  fileEmptyIcon: { fontSize: 32, marginBottom: 8 },
-  fileEmptyTxt:  { fontSize: 15, fontWeight: '700', color: C.primary },
-  fileEmptyHint: { fontSize: 12, color: C.textLight, marginTop: 4 },
-  fileSelected:  { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 },
-  fileIcon:      { fontSize: 32 },
+  messageBoardHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#EEF2FF', paddingHorizontal: 14, paddingVertical: 10,
+    borderBottomWidth: 1, borderBottomColor: '#E0E7FF',
+  },
+  messageBoardTitle: { fontSize: 13, fontWeight: '700', color: C.primary },
+  messageBoardInput: {
+    paddingHorizontal: 14, paddingVertical: 12,
+    fontSize: 14, color: C.text, lineHeight: 22,
+    minHeight: 120,
+  },
+
+  // Attachment
+  attachmentLabelRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
+  optionalBadge: { marginLeft: 8, backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#BBF7D0', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  optionalTxt:   { fontSize: 10, color: '#059669', fontWeight: '700' },
+
+  filePicker: {
+    backgroundColor: '#fff',
+    borderWidth: 1.5, borderStyle: 'dashed', borderColor: '#CBD5E1',
+    borderRadius: 12, overflow: 'hidden',
+  },
+  fileEmpty:     { alignItems: 'center', paddingVertical: 22, gap: 6 },
+  fileEmptyTxt:  { fontSize: 14, fontWeight: '700', color: C.primary },
+  fileEmptyHint: { fontSize: 12, color: '#94A3B8' },
+  fileSelected:  { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12 },
+  fileIconWrap:  { width: 40, height: 40, borderRadius: 10, backgroundColor: '#FEF2F2', alignItems: 'center', justifyContent: 'center' },
   fileName:      { fontSize: 14, fontWeight: '700', color: C.text },
   fileHint:      { fontSize: 12, color: C.textLight, marginTop: 2 },
 
   // Submit
   submitBtn: {
-    marginTop: 28, backgroundColor: C.primary,
+    marginTop: 24,
+    backgroundColor: C.primary,
     borderRadius: 14, paddingVertical: 15, alignItems: 'center',
     elevation: 4, shadowColor: C.primary, shadowOpacity: 0.3, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
   },
   submitBtnReplace: { backgroundColor: '#D97706' },
-  submitTxt:        { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.3 },
+  submitInner: { flexDirection: 'row', alignItems: 'center' },
+  submitTxt:   { color: '#fff', fontSize: 15, fontWeight: '800', letterSpacing: 0.3 },
 });

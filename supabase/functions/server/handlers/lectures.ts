@@ -113,7 +113,7 @@ export async function handleLectures(
     try {
       let q = db
         .from("lectures")
-        .select(`id, teacher_id, subject_name, lecture_name, type, date, file_path, uploaded_by, created_at, class_id, section_id,
+        .select(`id, teacher_id, subject_name, lecture_name, type, date, file_path, message, uploaded_by, created_at, class_id, section_id,
                  classes!inner(class_name), sections(section_name)`)
         .eq("school_id", schoolId)
         .order("date", { ascending: false });
@@ -132,7 +132,7 @@ export async function handleLectures(
         section_name: l.section_id
           ? (l.sections as Record<string, unknown>)?.section_name
           : "All Sections",
-        file_url: publicUrl(l.file_path as string),
+        file_url: l.file_path ? publicUrl(l.file_path as string) : null,
       }));
       return json(result);
     } catch (err) {
@@ -155,26 +155,31 @@ export async function handleLectures(
       const class_id = parseInt(formData.get("class_id") as string);
       const sectionRaw = formData.get("section_id") as string;
       const section_id = sectionRaw && sectionRaw !== "" ? parseInt(sectionRaw) : null;
+      const message = (formData.get("message") as string | null) || null;
 
-      if (!file || !lecture_name || !subject_name || !date || !class_id)
+      if (!lecture_name || !subject_name || !date || !class_id)
         return json({ message: "Missing required fields" }, 400);
-
-      // Upload to Supabase Storage
-      const ext = file.name.split(".").pop() || "pdf";
-      const storagePath = `${schoolId}/${Date.now()}_${lecture_name.replace(/[^a-zA-Z0-9]/g, "_")}.${ext}`;
-      const fileBuffer = await file.arrayBuffer();
-
-      const { error: storageError } = await db.storage
-        .from(BUCKET)
-        .upload(storagePath, fileBuffer, {
-          contentType: file.type || "application/pdf",
-          upsert: false,
-        });
-
-      if (storageError) throw storageError;
 
       const teacherId = user.role === "teacher" ? (user.id as number) : null;
       const uploaderName = `${user.first_name} ${user.last_name}`;
+
+      let storagePath: string | null = null;
+
+      // Upload to Supabase Storage only if file is provided
+      if (file && file.size > 0) {
+        const ext = file.name.split(".").pop() || "pdf";
+        storagePath = `${schoolId}/${Date.now()}_${lecture_name.replace(/[^a-zA-Z0-9]/g, "_")}.${ext}`;
+        const fileBuffer = await file.arrayBuffer();
+
+        const { error: storageError } = await db.storage
+          .from(BUCKET)
+          .upload(storagePath, fileBuffer, {
+            contentType: file.type || "application/pdf",
+            upsert: false,
+          });
+
+        if (storageError) throw storageError;
+      }
 
       const { data: lecture, error: dbError } = await db
         .from("lectures")
@@ -188,6 +193,7 @@ export async function handleLectures(
           type,
           date,
           file_path: storagePath,
+          message,
           uploaded_by: uploaderName,
         })
         .select()
@@ -195,7 +201,7 @@ export async function handleLectures(
 
       if (dbError) {
         // Cleanup orphaned storage file on DB error
-        await db.storage.from(BUCKET).remove([storagePath]);
+        if (storagePath) await db.storage.from(BUCKET).remove([storagePath]);
         throw dbError;
       }
 
@@ -204,7 +210,7 @@ export async function handleLectures(
         sendPush(tokens, "New Lecture", `${subject_name}: ${lecture_name}`, { type: "lecture" })
       );
 
-      return json({ ...lecture, file_url: publicUrl(storagePath) }, 201);
+      return json({ ...lecture, file_url: storagePath ? publicUrl(storagePath) : null }, 201);
     } catch (err) {
       console.error("[lectures POST]", err);
       return json({ message: "Server error" }, 500);
@@ -226,7 +232,7 @@ export async function handleLectures(
       if (data.school_id !== schoolId)
         return json({ message: "Forbidden" }, 403);
 
-      await db.storage.from(BUCKET).remove([data.file_path]);
+      if (data.file_path) await db.storage.from(BUCKET).remove([data.file_path]);
       await db.from("lectures").delete().eq("id", id);
       return json({ message: "Lecture deleted" });
     } catch (err) {
