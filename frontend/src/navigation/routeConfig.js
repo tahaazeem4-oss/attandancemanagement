@@ -3,6 +3,7 @@ import SendNotificationScreen from '../screens/SendNotificationScreen';
 import ChatListScreen from '../screens/chat/ChatListScreen';
 import ChatScreen from '../screens/chat/ChatScreen';
 import NewChatScreen from '../screens/chat/NewChatScreen';
+import StaffNewChatScreen from '../screens/chat/StaffNewChatScreen';
 import UploadLectureScreen from '../screens/UploadLectureScreen';
 import LectureListScreen from '../screens/LectureListScreen';
 
@@ -67,6 +68,7 @@ export const teacherHomeScreens = [
   { name: 'StaffNotifications', component: StaffNotificationsScreen },
   { name: 'ChatList', component: ChatListScreen },
   { name: 'Chat', component: ChatScreen, options: { headerShown: false } },
+  { name: 'StaffNewChat', component: StaffNewChatScreen, options: { headerShown: false } },
 ];
 
 export const adminHomeScreens = [
@@ -87,6 +89,7 @@ export const adminHomeScreens = [
   { name: 'StudentAttendanceDetail', component: StudentAttendanceDetailScreen },
   { name: 'ChatList', component: ChatListScreen },
   { name: 'Chat', component: ChatScreen, options: { headerShown: false } },
+  { name: 'StaffNewChat', component: StaffNewChatScreen, options: { headerShown: false } },
 ];
 
 export const orgAdminHomeScreens = [

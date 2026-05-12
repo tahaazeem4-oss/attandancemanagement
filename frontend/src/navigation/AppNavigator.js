@@ -31,6 +31,7 @@ import StaffNotificationsScreen    from '../screens/StaffNotificationsScreen';
 import ChatListScreen from '../screens/chat/ChatListScreen';
 import ChatScreen from '../screens/chat/ChatScreen';
 import NewChatScreen from '../screens/chat/NewChatScreen';
+import StaffNewChatScreen from '../screens/chat/StaffNewChatScreen';
 import StudentNotificationsScreen from '../screens/student/StudentNotificationsScreen';
 
 // Parent screens
@@ -78,6 +79,7 @@ function TeacherChatStack() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="ChatList" component={ChatListScreen} />
       <Stack.Screen name="Chat" component={ChatScreen} />
+      <Stack.Screen name="StaffNewChat" component={StaffNewChatScreen} />
     </Stack.Navigator>
   );
 }
@@ -103,6 +105,7 @@ function AdminChatStack() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="ChatList" component={ChatListScreen} />
       <Stack.Screen name="Chat" component={ChatScreen} />
+      <Stack.Screen name="StaffNewChat" component={StaffNewChatScreen} />
     </Stack.Navigator>
   );
 }

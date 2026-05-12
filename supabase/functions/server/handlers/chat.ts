@@ -175,33 +175,57 @@ export async function handleChat(
     }
   }
 
-  // ── POST /chat/conversations — create or get existing (parent only) ──
+  // ── POST /chat/conversations — create or get existing ──────────
   if (path === "/chat/conversations" && method === "POST") {
-    if (role !== "parent") return json({ message: "Only parents can start conversations" }, 403);
     try {
-      const { participant_id, participant_type } = await req.json();
-      if (!participant_id || !["teacher", "admin"].includes(participant_type)) {
-        return json({ message: "participant_id and participant_type (teacher|admin) are required" }, 400);
+      const body = await req.json();
+
+      let parentId: number;
+      let participantId: number;
+      let participantType: string;
+
+      if (role === "parent") {
+        // Parent initiates: provide participant_id + participant_type
+        const { participant_id, participant_type } = body;
+        if (!participant_id || !["teacher", "admin"].includes(participant_type)) {
+          return json({ message: "participant_id and participant_type (teacher|admin) are required" }, 400);
+        }
+        // Verify participant belongs to same school
+        const table = participant_type === "teacher" ? "teachers" : "admins";
+        const { data: participant } = await db
+          .from(table)
+          .select("id")
+          .eq("id", participant_id)
+          .eq("school_id", schoolId)
+          .single();
+        if (!participant) return json({ message: "Participant not found in this school" }, 404);
+        parentId = userId;
+        participantId = participant_id;
+        participantType = participant_type;
+      } else {
+        // Teacher/admin initiates: provide parent_id
+        const { parent_id } = body;
+        if (!parent_id) return json({ message: "parent_id is required" }, 400);
+        // Verify parent belongs to same school
+        const { data: parent } = await db
+          .from("parents")
+          .select("id")
+          .eq("id", parent_id)
+          .eq("school_id", schoolId)
+          .single();
+        if (!parent) return json({ message: "Parent not found in this school" }, 404);
+        parentId = parent_id;
+        participantId = userId;
+        participantType = role;
       }
 
-      // Verify participant belongs to same school
-      const table = participant_type === "teacher" ? "teachers" : "admins";
-      const { data: participant } = await db
-        .from(table)
-        .select("id, first_name, last_name")
-        .eq("id", participant_id)
-        .eq("school_id", schoolId)
-        .single();
-
-      if (!participant) return json({ message: "Participant not found in this school" }, 404);
-
-      // Upsert conversation
+      // Return existing conversation if present
       const { data: existing } = await db
         .from("chat_conversations")
         .select("*")
-        .eq("parent_id", userId)
-        .eq("participant_id", participant_id)
-        .eq("participant_type", participant_type)
+        .eq("parent_id", parentId)
+        .eq("participant_id", participantId)
+        .eq("participant_type", participantType)
         .single();
 
       if (existing) return json(existing);
@@ -210,9 +234,9 @@ export async function handleChat(
         .from("chat_conversations")
         .insert({
           school_id: schoolId,
-          parent_id: userId,
-          participant_id,
-          participant_type,
+          parent_id: parentId,
+          participant_id: participantId,
+          participant_type: participantType,
         })
         .select()
         .single();
@@ -551,6 +575,32 @@ export async function handleChat(
       return json(admins || []);
     } catch (err) {
       console.error("[chat/admins GET]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── GET /chat/parents — teacher/admin lists parents in their school ─
+  if (path === "/chat/parents" && method === "GET") {
+    if (role === "parent") return json({ message: "Forbidden" }, 403);
+    try {
+      const search = url.searchParams.get("q") || "";
+      let query = db
+        .from("parents")
+        .select("id, first_name, last_name, email, phone")
+        .eq("school_id", schoolId)
+        .order("first_name");
+
+      if (search.trim()) {
+        query = query.or(
+          `first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%`
+        );
+      }
+
+      const { data: parents, error } = await query.limit(50);
+      if (error) throw error;
+      return json(parents || []);
+    } catch (err) {
+      console.error("[chat/parents GET]", err);
       return json({ message: "Server error" }, 500);
     }
   }

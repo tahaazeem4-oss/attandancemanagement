@@ -112,14 +112,12 @@ export default function ChatListScreen({ navigation }) {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Messages</Text>
-        {isParent && (
-          <Pressable
-            style={styles.newBtn}
-            onPress={() => navigation.navigate('NewChat')}
-          >
-            <Ionicons name="create-outline" size={24} color="#fff" />
-          </Pressable>
-        )}
+        <Pressable
+          style={styles.newBtn}
+          onPress={() => navigation.navigate(isParent ? 'NewChat' : 'StaffNewChat')}
+        >
+          <Ionicons name="create-outline" size={24} color="#fff" />
+        </Pressable>
       </View>
 
       {loading ? (
@@ -144,11 +142,11 @@ export default function ChatListScreen({ navigation }) {
             <View style={styles.center}>
               <Ionicons name="chatbubbles-outline" size={64} color={C.textLight} />
               <Text style={styles.emptyTitle}>No conversations yet</Text>
-              {isParent && (
-                <Text style={styles.emptySubtitle}>
-                  Tap the compose icon above to message a teacher or admin.
-                </Text>
-              )}
+              <Text style={styles.emptySubtitle}>
+                {isParent
+                  ? 'Tap the compose icon above to message a teacher or admin.'
+                  : 'Tap the compose icon above to message a parent.'}
+              </Text>
             </View>
           }
         />

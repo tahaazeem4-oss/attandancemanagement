@@ -205,6 +205,20 @@ export default function ParentDashboardScreen({ navigation }) {
                 </View>
                 {overviewLoading ? <ActivityIndicator size="small" color={C.primary} /> : null}
               </View>
+              {/* Quick-access shortcut row */}
+              <View style={styles.quickRow}>
+                <Pressable
+                  style={({ pressed }) => [styles.quickCard, pressed && { opacity: 0.82 }]}
+                  onPress={() => navigation.navigate('ChatList')}
+                >
+                  <View style={[styles.quickIcon, { backgroundColor: '#2563EB' }]}>
+                    <Ionicons name="chatbubbles-outline" size={20} color="#fff" />
+                  </View>
+                  <Text style={styles.quickLabel}>Messages</Text>
+                  <Ionicons name="chevron-forward" size={16} color={C.textLight} />
+                </Pressable>
+              </View>
+
               <Text style={styles.childrenHeading}>Children</Text>
             </View>
           }
@@ -212,7 +226,7 @@ export default function ParentDashboardScreen({ navigation }) {
             <View style={styles.empty}>
               <Text style={styles.emptyIcon}>👶</Text>
               <Text style={styles.emptyTitle}>No children linked yet</Text>
-              <Text style={styles.emptyTxt}>Please ask school admin to link a child to your account.</Text>
+              <Text style={styles.emptyTxt}>Please ask your school admin to link your children to this account.</Text>
             </View>
           }
           renderItem={({ item }) => (
@@ -336,6 +350,20 @@ const styles = StyleSheet.create({
   },
   pendingText: { color: '#1E3A8A', fontSize: 13, fontWeight: '700' },
   childrenHeading: { fontSize: 12, color: C.textMed, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 2 },
+  quickRow: { marginBottom: 12 },
+  quickCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.card,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    gap: 12,
+  },
+  quickIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  quickLabel: { flex: 1, fontSize: 15, fontWeight: '600', color: C.textDark },
   empty: { alignItems: 'center', marginTop: 60, paddingHorizontal: 32 },
   emptyIcon: { fontSize: 48, marginBottom: 12 },
   emptyTitle: { fontSize: 18, fontWeight: '700', color: C.textDark, marginBottom: 4 },
