@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, Pressable,
   StyleSheet, Alert, ActivityIndicator,
-  Animated, LayoutAnimation, UIManager, Platform,
+  Animated, LayoutAnimation, UIManager, Platform, RefreshControl,
 } from 'react-native';
 import api from '../services/api';
 import { C } from '../config/theme';
@@ -46,6 +46,7 @@ const FILTER_CATEGORIES = ['all', ...Object.keys(CATEGORY_META)];
 export default function StaffNotificationsScreen({ navigation }) {
   const [notifications, setNotifications] = useState([]);
   const [loading,       setLoading]       = useState(true);
+  const [refreshing,    setRefreshing]    = useState(false);
   const [markingAll,    setMarkingAll]     = useState(false);
   const [filter,        setFilter]        = useState('all');
   const [expanded,      setExpanded]      = useState(null);
@@ -67,6 +68,15 @@ export default function StaffNotificationsScreen({ navigation }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [load]);
 
   const markRead = async (notif) => {
     if (notif.is_read) return;
@@ -211,6 +221,7 @@ export default function StaffNotificationsScreen({ navigation }) {
           data={filtered}
           keyExtractor={item => String(item.id)}
           renderItem={renderItem}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} colors={[C.primary]} />}
           style={{ opacity: fadeAnim }}
           contentContainerStyle={{ padding: 14, paddingBottom: 40 }}
           ListEmptyComponent={

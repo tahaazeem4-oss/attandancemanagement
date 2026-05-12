@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, Pressable, TextInput, Modal, StyleSheet,
-  Alert, ActivityIndicator, ScrollView, TouchableOpacity,
+  Alert, ActivityIndicator, ScrollView, TouchableOpacity, RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
@@ -13,6 +13,7 @@ import ImportExportBar from './ImportExportBar';
 import EntityEmptyState from './EntityEmptyState';
 import ManagerSearchAddRow from './ManagerSearchAddRow';
 import ModalFooterActions from './ModalFooterActions';
+import { showDestructiveConfirm } from '../lib/confirmDialog';
 
 const EMPTY_FORM = { email: '', password: '', first_name: '', last_name: '', phone: '', school_id: '' };
 
@@ -24,6 +25,7 @@ export default function ParentsManagerScreen({ navigation, mode }) {
 
   const [parents, setParents] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   const [campuses, setCampuses] = useState([]);
   const [organizations, setOrganizations] = useState([]);
@@ -112,6 +114,15 @@ export default function ParentsManagerScreen({ navigation, mode }) {
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
   }, [load]);
 
   const F = (k, v) => setForm(p => ({ ...p, [k]: v }));
@@ -225,26 +236,24 @@ export default function ParentsManagerScreen({ navigation, mode }) {
   };
 
   const handleDelete = p => {
-    Alert.alert('Delete Parent', `Delete ${p.email || `${p.first_name} ${p.last_name}`}?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            const path = isSuper
-              ? `/super-admin/schools/${p.school_id || filterCampus}/parents/${p.id}`
-              : isOrg
-                ? `/org-admin/parents/${p.id}`
-                : `/admin/parents/${p.id}`;
-            await api.delete(path);
-            await load();
-          } catch (err) {
-            Alert.alert('Error', err?.response?.data?.message || 'Could not delete');
-          }
-        },
+    const targetLabel = p.email || `${p.first_name} ${p.last_name}`;
+    showDestructiveConfirm({
+      title: 'Delete Parent',
+      message: `Are you sure you want to delete ${targetLabel}? This action cannot be undone.`,
+      onConfirm: async () => {
+        try {
+          const path = isSuper
+            ? `/super-admin/schools/${p.school_id || filterCampus}/parents/${p.id}`
+            : isOrg
+              ? `/org-admin/parents/${p.id}`
+              : `/admin/parents/${p.id}`;
+          await api.delete(path);
+          await load();
+        } catch (err) {
+          Alert.alert('Error', err?.response?.data?.message || 'Could not delete');
+        }
       },
-    ]);
+    });
   };
 
   const handleLinkExisting = async () => {
@@ -469,6 +478,7 @@ export default function ParentsManagerScreen({ navigation, mode }) {
         <FlatList
           data={filteredParents}
           keyExtractor={item => String(item.id)}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={C.primary} colors={[C.primary]} />}
           contentContainerStyle={{ padding: 14, paddingBottom: 100 }}
           ListEmptyComponent={
             <EntityEmptyState
@@ -503,7 +513,7 @@ export default function ParentsManagerScreen({ navigation, mode }) {
                   <TouchableOpacity onPress={() => openChildren(item)} style={styles.actionBtn}><Ionicons name="people-outline" size={17} color={C.primary} /></TouchableOpacity>
                 ) : null}
                 <TouchableOpacity onPress={() => openEdit(item)} style={styles.actionBtn}><Ionicons name="pencil-outline" size={17} color="#2563EB" /></TouchableOpacity>
-                <TouchableOpacity onPress={() => handleDelete(item)} style={styles.actionBtn}><Ionicons name="trash-outline" size={17} color="#EF4444" /></TouchableOpacity>
+                <TouchableOpacity onPress={() => handleDelete(item)} style={[styles.actionBtn, styles.actionBtnDanger]}><Ionicons name="trash-outline" size={17} color="#C2410C" /></TouchableOpacity>
               </View>
             </Pressable>
           )}
@@ -571,8 +581,8 @@ export default function ParentsManagerScreen({ navigation, mode }) {
                 <>
                   <View style={styles.divider} />
                   <Text style={styles.sectionLabel}>Danger Zone</Text>
-                  <Pressable style={[styles.modalBtn, { backgroundColor: '#DC2626', marginTop: 8 }]} onPress={() => { const cur = editing; setModal(false); handleDelete(cur); }}>
-                    <Text style={styles.saveBtnText}>Delete Parent</Text>
+                  <Pressable style={[styles.modalBtn, styles.dangerModalBtn, { marginTop: 8 }]} onPress={() => { const cur = editing; setModal(false); handleDelete(cur); }}>
+                    <Text style={styles.dangerModalBtnText}>Delete Parent</Text>
                   </Pressable>
                 </>
               )}
@@ -630,7 +640,7 @@ export default function ParentsManagerScreen({ navigation, mode }) {
                       </View>
                       {isOwnCampus ? (
                         <Pressable onPress={() => onUnlink(c.student_id, `${c.first_name} ${c.last_name}`)}>
-                          <Ionicons name="close-circle" size={22} color="#DC2626" />
+                          <Ionicons name="close-circle" size={22} color="#C2410C" />
                         </Pressable>
                       ) : (
                         <View style={styles.lockedBadge}>
@@ -729,6 +739,7 @@ const styles = StyleSheet.create({
   badgeTxt: { fontSize: 11, color: '#475569', fontWeight: '600' },
   actionBtns: { flexDirection: 'row', gap: 4 },
   actionBtn: { padding: 6, borderRadius: 8, backgroundColor: '#F8FAFC' },
+  actionBtnDanger: { backgroundColor: '#FFF7ED', borderWidth: 1, borderColor: '#FDBA74' },
   linkExistingBtn: { alignSelf: 'flex-end', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   linkExistingTxt: { color: C.primary, fontSize: 12, fontWeight: '700' },
   empty: { textAlign: 'center', color: C.textLight, marginTop: 40, fontSize: 15 },
@@ -751,10 +762,12 @@ const styles = StyleSheet.create({
   filterLabel: { fontSize: 12, fontWeight: '600', color: C.textMed, marginBottom: 6 },
   modalBtns: { flexDirection: 'row', gap: 12, marginTop: 20 },
   modalBtn: { flex: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  dangerModalBtn: { backgroundColor: '#FFF7ED', borderWidth: 1, borderColor: '#FDBA74' },
   cancelBtn: { backgroundColor: C.border },
   saveBtn: { backgroundColor: C.primary },
   cancelBtnText: { color: C.textMed, fontWeight: '700' },
   saveBtnText: { color: '#fff', fontWeight: '700' },
+  dangerModalBtnText: { color: '#9A3412', fontWeight: '800' },
   childRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },
   stuRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },

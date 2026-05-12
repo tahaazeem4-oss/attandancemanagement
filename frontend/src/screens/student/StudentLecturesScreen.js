@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TextInput, FlatList, Pressable,
-  StyleSheet, Alert, ActivityIndicator,
+  StyleSheet, Alert, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import api from '../../services/api';
 import { C } from '../../config/theme';
@@ -28,6 +28,7 @@ export default function StudentLecturesScreen({ navigation, route }) {
   const screenTitle = route?.params?.title || 'Lectures';
   const [lectures,      setLectures]      = useState([]);
   const [loading,       setLoading]       = useState(true);
+  const [refreshing,    setRefreshing]    = useState(false);
   const [search,        setSearch]        = useState('');
   const [filtersOpen,   setFiltersOpen]   = useState(false);
   const [filterMonth,   setFilterMonth]   = useState('');
@@ -96,6 +97,15 @@ export default function StudentLecturesScreen({ navigation, route }) {
   }, [isParentViewing, childId]);
 
   useEffect(() => { load(); }, [load]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [load]);
 
   const renderItem = ({ item }) => (
     <Pressable
@@ -243,6 +253,7 @@ export default function StudentLecturesScreen({ navigation, route }) {
           <FlatList
             data={filtered}
             keyExtractor={l => String(l.id)}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} colors={[C.primary]} />}
             contentContainerStyle={styles.listContent}
             ListHeaderComponent={ListHeader}
             ListEmptyComponent={

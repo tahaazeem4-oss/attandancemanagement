@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, Pressable, TextInput,
-  Modal, ScrollView, StyleSheet, Alert, ActivityIndicator, TouchableOpacity,
+  Modal, ScrollView, StyleSheet, Alert, ActivityIndicator, TouchableOpacity, RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
@@ -12,6 +12,7 @@ import PickerField from './PickerField';
 import EntityEmptyState from './EntityEmptyState';
 import ManagerSearchAddRow from './ManagerSearchAddRow';
 import ModalFooterActions from './ModalFooterActions';
+import { showDestructiveConfirm } from '../lib/confirmDialog';
 
 const EMPTY_FORM = { first_name: '', last_name: '', email: '', password: '', phone: '', assignments: [], school_id: '' };
 
@@ -104,6 +105,7 @@ export default function TeachersManagerScreen({ navigation, mode }) {
   const [organizations, setOrganizations] = useState([]);
 
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const [search, setSearch] = useState('');
@@ -186,6 +188,15 @@ export default function TeachersManagerScreen({ navigation, mode }) {
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
   }, [load]);
 
   const openAdd = () => {
@@ -280,26 +291,23 @@ export default function TeachersManagerScreen({ navigation, mode }) {
   };
 
   const handleDelete = item => {
-    Alert.alert('Delete Teacher', `Delete ${item.first_name} ${item.last_name}?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            const path = isSuper
-              ? `/super-admin/schools/${item.school_id}/teachers/${item.id}`
-              : isOrg
-                ? `/org-admin/teachers/${item.id}`
-                : `/admin/teachers/${item.id}`;
-            await api.delete(path);
-            await load();
-          } catch (err) {
-            Alert.alert('Error', err?.response?.data?.message || 'Could not delete');
-          }
-        },
+    showDestructiveConfirm({
+      title: 'Delete Teacher',
+      message: `Are you sure you want to delete ${item.first_name} ${item.last_name}? This action cannot be undone.`,
+      onConfirm: async () => {
+        try {
+          const path = isSuper
+            ? `/super-admin/schools/${item.school_id}/teachers/${item.id}`
+            : isOrg
+              ? `/org-admin/teachers/${item.id}`
+              : `/admin/teachers/${item.id}`;
+          await api.delete(path);
+          await load();
+        } catch (err) {
+          Alert.alert('Error', err?.response?.data?.message || 'Could not delete');
+        }
       },
-    ]);
+    });
   };
 
   const handleResetPw = async target => {
@@ -343,6 +351,7 @@ export default function TeachersManagerScreen({ navigation, mode }) {
 
   const orgItems = [{ label: 'All Organizations', value: '' }, ...organizations.map(o => ({ label: o.name, value: String(o.id) }))];
   const campusItems = [{ label: 'All Campuses', value: '' }, ...campuses.map(c => ({ label: c.name, value: String(c.id) }))];
+  const ieBase = isOrg ? '/org-admin/import-export' : '/import-export';
 
   return (
     <View style={styles.container}>
@@ -367,11 +376,11 @@ export default function TeachersManagerScreen({ navigation, mode }) {
       {(isOrg || isSuper) ? (
         filterCampus ? (
           <ImportExportBar
-            templatePath="/import-export/teachers/template"
+            templatePath={`${ieBase}/teachers/template`}
             templateParams={{ campus_id: filterCampus }}
-            importPath="/import-export/teachers/import"
+            importPath={`${ieBase}/teachers/import`}
             importFields={{ campus_id: filterCampus }}
-            exportPath="/import-export/teachers/export"
+            exportPath={`${ieBase}/teachers/export`}
             exportParams={{ campus_id: filterCampus }}
             exportFilename="teachers_export.xlsx"
             templateFilename="teachers_template.xlsx"
@@ -380,10 +389,10 @@ export default function TeachersManagerScreen({ navigation, mode }) {
         ) : null
       ) : (
         <ImportExportBar
-          templatePath="/import-export/teachers/template"
+          templatePath={`${ieBase}/teachers/template`}
           templateFilename="teachers_template.xlsx"
-          importPath="/import-export/teachers/import"
-          exportPath="/import-export/teachers/export"
+          importPath={`${ieBase}/teachers/import`}
+          exportPath={`${ieBase}/teachers/export`}
           exportFilename="teachers_export.xlsx"
           onImportDone={load}
         />
@@ -395,6 +404,7 @@ export default function TeachersManagerScreen({ navigation, mode }) {
         <FlatList
           data={visible}
           keyExtractor={t => String(t.id)}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={C.primary} colors={[C.primary]} />}
           contentContainerStyle={{ padding: 14, paddingBottom: 100 }}
           ListEmptyComponent={<EntityEmptyState icon="people-outline" title="No teachers found" subtitle="Add a teacher to begin assignments" />}
           renderItem={({ item }) => (
@@ -420,8 +430,8 @@ export default function TeachersManagerScreen({ navigation, mode }) {
                 <TouchableOpacity onPress={() => openEdit(item)} style={styles.actionBtn}>
                   <Ionicons name="pencil-outline" size={17} color="#2563EB" />
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => handleDelete(item)} style={styles.actionBtn}>
-                  <Ionicons name="trash-outline" size={17} color="#EF4444" />
+                <TouchableOpacity onPress={() => handleDelete(item)} style={[styles.actionBtn, styles.actionBtnDanger]}>
+                  <Ionicons name="trash-outline" size={17} color="#C2410C" />
                 </TouchableOpacity>
               </View>
             </Pressable>
@@ -488,8 +498,8 @@ export default function TeachersManagerScreen({ navigation, mode }) {
 
                   <View style={styles.divider} />
                   <Text style={styles.sectionLabel}>Danger Zone</Text>
-                  <Pressable style={[styles.modalBtn, { backgroundColor: '#DC2626', marginTop: 8 }]} onPress={() => { const cur = editing; setModal(false); handleDelete(cur); }}>
-                    <Text style={styles.saveBtnText}>Delete Teacher</Text>
+                  <Pressable style={[styles.modalBtn, styles.dangerModalBtn, { marginTop: 8 }]} onPress={() => { const cur = editing; setModal(false); handleDelete(cur); }}>
+                    <Text style={styles.dangerModalBtnText}>Delete Teacher</Text>
                   </Pressable>
                 </>
               )}
@@ -541,6 +551,7 @@ const styles = StyleSheet.create({
   eyeBtn: { width: 34, height: 34, borderRadius: 10, backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' },
   actionBtns: { flexDirection: 'row', gap: 4 },
   actionBtn: { padding: 6, borderRadius: 8, backgroundColor: '#F8FAFC' },
+  actionBtnDanger: { backgroundColor: '#FFF7ED', borderWidth: 1, borderColor: '#FDBA74' },
   badge: { marginTop: 5, alignSelf: 'flex-start', backgroundColor: '#F1F5F9', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   badgeTxt: { fontSize: 11, color: '#475569', fontWeight: '600' },
   empty: { textAlign: 'center', color: C.textLight, marginTop: 40, fontSize: 15 },
@@ -560,10 +571,12 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 10 },
   modalBtns: { flexDirection: 'row', gap: 12, marginTop: 16 },
   modalBtn: { flex: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  dangerModalBtn: { backgroundColor: '#FFF7ED', borderWidth: 1, borderColor: '#FDBA74' },
   cancelBtn: { backgroundColor: C.border },
   saveBtn: { backgroundColor: C.primary },
   cancelBtnText: { color: C.textMed, fontWeight: '700' },
   saveBtnText: { color: '#fff', fontWeight: '700' },
+  dangerModalBtnText: { color: '#9A3412', fontWeight: '800' },
   cancelBtn2: { flex: 1, padding: 14, borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', alignItems: 'center' },
   cancelTxt: { color: '#64748B', fontWeight: '600' },
   saveBtn2: { flex: 1, padding: 14, borderRadius: 10, backgroundColor: C.primary, alignItems: 'center' },

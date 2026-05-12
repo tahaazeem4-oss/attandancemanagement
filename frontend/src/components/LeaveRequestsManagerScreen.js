@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, Pressable, ScrollView,
-  StyleSheet, Alert, ActivityIndicator, TouchableOpacity,
+  StyleSheet, Alert, ActivityIndicator, TouchableOpacity, RefreshControl,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import api from '../services/api';
@@ -27,6 +27,7 @@ export default function LeaveRequestsManagerScreen({ navigation, mode }) {
   const [leaves, setLeaves] = useState([]);
   const [campuses, setCampuses] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState('all');
   const [filterCampus, setFilterCampus] = useState('');
   const [acting, setActing] = useState(null);
@@ -50,6 +51,15 @@ export default function LeaveRequestsManagerScreen({ navigation, mode }) {
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
   }, [load]);
 
   useFocusEffect(useCallback(() => {
@@ -326,6 +336,7 @@ export default function LeaveRequestsManagerScreen({ navigation, mode }) {
           data={filtered}
           renderItem={renderItem}
           keyExtractor={(item, index) => String(item.group_id ?? item.id ?? index)}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={C.primary} colors={[C.primary]} />}
           contentContainerStyle={[styles.list, { paddingTop: 10 }]}
           ListEmptyComponent={<EntityEmptyState icon="calendar-outline" title="No leave requests found" subtitle="Try another filter or check back later" />}
         />

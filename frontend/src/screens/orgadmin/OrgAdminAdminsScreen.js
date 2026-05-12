@@ -9,6 +9,7 @@ import { C } from '../../config/theme';
 import AppHeader from '../../components/AppHeader';
 import ImportExportBar from '../../components/ImportExportBar';
 import PickerField from '../../components/PickerField';
+import { showDestructiveConfirm } from '../../lib/confirmDialog';
 
 const EMPTY_FORM = { first_name: '', last_name: '', email: '', password: '', school_id: '' };
 
@@ -86,13 +87,14 @@ export default function OrgAdminAdminsScreen({ navigation }) {
   };
 
   const handleDelete = (item) => {
-    Alert.alert('Delete Admin', `Delete "${item.first_name} ${item.last_name}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
+    showDestructiveConfirm({
+      title: 'Delete Admin',
+      message: `Are you sure you want to delete ${item.first_name} ${item.last_name}? This action cannot be undone.`,
+      onConfirm: async () => {
         try { await api.delete(`/org-admin/admins/${item.id}`); load(); }
         catch (err) { Alert.alert('Error', err?.response?.data?.message || 'Could not delete.'); }
-      }},
-    ]);
+      },
+    });
   };
 
   const handleResetPassword = async () => {
@@ -127,8 +129,8 @@ export default function OrgAdminAdminsScreen({ navigation }) {
         <TouchableOpacity onPress={() => openEdit(item)} style={styles.actionBtn}>
           <Ionicons name="pencil-outline" size={17} color="#2563EB" />
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => handleDelete(item)} style={styles.actionBtn}>
-          <Ionicons name="trash-outline" size={17} color="#EF4444" />
+        <TouchableOpacity onPress={() => handleDelete(item)} style={[styles.actionBtn, styles.actionBtnDanger]}>
+          <Ionicons name="trash-outline" size={17} color="#C2410C" />
         </TouchableOpacity>
       </View>
     </View>
@@ -241,6 +243,7 @@ const styles = StyleSheet.create({
   badgeTxt: { fontSize: 11, color: '#475569', fontWeight: '600' },
   actionBtns: { flexDirection: 'row', gap: 4 },
   actionBtn: { padding: 6, borderRadius: 8, backgroundColor: '#F8FAFC' },
+  actionBtnDanger: { backgroundColor: '#FFF7ED', borderWidth: 1, borderColor: '#FDBA74' },
   empty: { textAlign: 'center', color: '#94A3B8', marginTop: 40, fontSize: 14 },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   modal: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '85%' },

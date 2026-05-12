@@ -8,6 +8,7 @@ import { C, S } from '../../config/theme';
 import PickerField from '../../components/PickerField';
 import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '../../components/AppHeader';
+import { showDestructiveConfirm } from '../../lib/confirmDialog';
 
 export default function AdminAssignmentsScreen({ navigation }) {
   const [assignments, setAssignments] = useState([]);
@@ -52,13 +53,15 @@ export default function AdminAssignmentsScreen({ navigation }) {
   };
 
   const handleDelete = (item) => {
-    Alert.alert('Remove Assignment', `Remove ${item.teacher_name} from ${item.class_name} — ${item.section_name}?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: async () => {
+    showDestructiveConfirm({
+      title: 'Remove Assignment',
+      message: `Are you sure you want to remove ${item.teacher_name} from ${item.class_name} - ${item.section_name}?`,
+      confirmText: 'Remove',
+      onConfirm: async () => {
         try { await api.delete(`/admin/assignments/${item.id}`); load(); }
         catch (err) { Alert.alert('Error', err?.response?.data?.message || 'Failed'); }
-      }},
-    ]);
+      },
+    });
   };
 
   const F = (k, v) => setForm(p => ({ ...p, [k]: v }));

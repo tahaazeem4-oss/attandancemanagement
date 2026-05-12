@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, FlatList, Pressable,
-  StyleSheet, Alert, ActivityIndicator, Animated
+  StyleSheet, Alert, ActivityIndicator, Animated, RefreshControl
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import api from '../services/api';
@@ -19,6 +19,7 @@ export default function StudentAttendanceScreen({ navigation, route }) {
   const [attendance,     setAttendance]     = useState({});
   const [lockedStudents, setLockedStudents] = useState({});
   const [loading,        setLoading]        = useState(true);
+  const [refreshing,     setRefreshing]     = useState(false);
   const [saving,         setSaving]         = useState(false);
   const [frozen,         setFrozen]         = useState(false);
   const [toast,          setToast]          = useState(false); // success toast
@@ -36,35 +37,47 @@ export default function StudentAttendanceScreen({ navigation, route }) {
     ]).start(() => navigation.navigate('Home'));
   };
 
-  useEffect(() => {
+  const loadAttendance = useCallback(async () => {
     const today = new Date().toISOString().slice(0, 10);
-    let loadedStudents = [];
-    api.get('/students', { params: { class_id, section_id } })
-      .then(({ data }) => {
-        loadedStudents = data;
-        setStudents(data);
-        return api.get('/attendance/report', { params: { class_id, section_id, date: today } });
-      })
-      .then(({ data: report }) => {
-        const locked = {};
-        const existing = {};
-        let anyNonLockedMarked = false;
-        for (const r of report.records) {
-          if (r.leave_locked) {
-            locked[r.id] = true;
-            existing[r.id] = 'leave'; // always leave
-          } else if (r.status !== 'not_marked') {
-            existing[r.id] = r.status;
-            anyNonLockedMarked = true;
-          }
+    setLoading(true);
+    try {
+      const { data } = await api.get('/students', { params: { class_id, section_id } });
+      setStudents(data || []);
+      const { data: report } = await api.get('/attendance/report', { params: { class_id, section_id, date: today } });
+      const locked = {};
+      const existing = {};
+      let anyNonLockedMarked = false;
+      for (const r of (report?.records || [])) {
+        if (r.leave_locked) {
+          locked[r.id] = true;
+          existing[r.id] = 'leave';
+        } else if (r.status !== 'not_marked') {
+          existing[r.id] = r.status;
+          anyNonLockedMarked = true;
         }
-        setLockedStudents(locked);
-        setAttendance(existing);
-        if (anyNonLockedMarked) setFrozen(true);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+      }
+      setLockedStudents(locked);
+      setAttendance(existing);
+      setFrozen(anyNonLockedMarked);
+    } catch {
+      // keep previous UI state on transient network errors
+    } finally {
+      setLoading(false);
+    }
+  }, [class_id, section_id]);
+
+  useEffect(() => {
+    loadAttendance();
+  }, [loadAttendance]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadAttendance();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadAttendance]);
 
   const toggle = (studentId, status) => {
     if (frozen || lockedStudents[studentId]) return;
@@ -133,6 +146,7 @@ export default function StudentAttendanceScreen({ navigation, route }) {
       <FlatList
         data={students}
         keyExtractor={item => String(item.id)}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} colors={[C.primary]} />}
         contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 120, paddingTop: 8 }}
         renderItem={({ item }) => {
           const isLocked = !!lockedStudents[item.id];

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, Pressable,
   StyleSheet, Alert, ActivityIndicator,
-  Animated, LayoutAnimation, UIManager, Platform,
+  Animated, LayoutAnimation, UIManager, Platform, RefreshControl,
 } from 'react-native';
 import api from '../../services/api';
 import { C } from '../../config/theme';
@@ -46,6 +46,7 @@ const FILTER_CATEGORIES = ['all', ...Object.keys(CATEGORY_META)];
 export default function StudentNotificationsScreen({ navigation, route }) {
   const [notifications, setNotifications] = useState([]);
   const [loading,       setLoading]       = useState(true);
+  const [refreshing,    setRefreshing]    = useState(false);
   const [markingAll,    setMarkingAll]     = useState(false);
   const [filter,        setFilter]        = useState('all');
   const [expanded,      setExpanded]      = useState(null); // id of expanded card
@@ -77,6 +78,15 @@ export default function StudentNotificationsScreen({ navigation, route }) {
   }, [childId, isParentViewing, fadeAnim]);
 
   useEffect(() => { load(); }, [load]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [load]);
 
   // ── Mark single as read ────────────────────────────────────
   const markRead = async (notif) => {
@@ -240,6 +250,7 @@ export default function StudentNotificationsScreen({ navigation, route }) {
           <FlatList
             data={visible}
             keyExtractor={n => String(n.id)}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} colors={[C.primary]} />}
             contentContainerStyle={{ padding: 14, paddingBottom: 40 }}
             ListEmptyComponent={
               <View style={styles.emptyWrap}>
@@ -250,8 +261,6 @@ export default function StudentNotificationsScreen({ navigation, route }) {
             }
             renderItem={renderItem}
             showsVerticalScrollIndicator={false}
-            onRefresh={load}
-            refreshing={loading}
           />
         )}
     </View>

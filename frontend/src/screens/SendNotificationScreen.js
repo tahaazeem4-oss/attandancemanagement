@@ -8,6 +8,7 @@ import api from '../services/api';
 import { C } from '../config/theme';
 import PickerField from '../components/PickerField';
 import AppHeader from '../components/AppHeader';
+import { showDestructiveConfirm } from '../lib/confirmDialog';
 
 // ── Constants ─────────────────────────────────────────────────
 const TARGETS = [
@@ -154,10 +155,11 @@ export default function SendNotificationScreen({ navigation, route }) {
 
   // ── Delete sent notification ───────────────────────────────
   const confirmDelete = (id) =>
-    Alert.alert('Delete', 'Remove this notification?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => doDelete(id) },
-    ]);
+    showDestructiveConfirm({
+      title: 'Delete Notification',
+      message: 'Are you sure you want to delete this notification? This action cannot be undone.',
+      onConfirm: () => doDelete(id),
+    });
 
   const doDelete = async (id) => {
     setDeleting(id);

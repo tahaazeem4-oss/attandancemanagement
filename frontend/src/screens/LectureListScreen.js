@@ -15,6 +15,7 @@ import PickerField from '../components/PickerField';
 import { C } from '../config/theme';
 import { useAuth } from '../context/AuthContext';
 import AppHeader from '../components/AppHeader';
+import { showDestructiveConfirm } from '../lib/confirmDialog';
 
 const TYPE_COLOR = { classwork: '#4F46E5', homework: '#D97706' };
 const TYPE_BG    = { classwork: '#EEF2FF', homework: '#FFFBEB' };
@@ -154,14 +155,11 @@ export default function LectureListScreen({ navigation }) {
   };
 
   const confirmDelete = (lecture) => {
-    Alert.alert(
-      'Delete Lecture',
-      `Delete "${lecture.lecture_name}"? This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => doDelete(lecture.id) },
-      ]
-    );
+    showDestructiveConfirm({
+      title: 'Delete Lecture',
+      message: `Are you sure you want to delete "${lecture.lecture_name}"? This action cannot be undone.`,
+      onConfirm: () => doDelete(lecture.id),
+    });
   };
 
   const doDelete = async (id) => {

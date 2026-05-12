@@ -539,22 +539,22 @@ const styles = StyleSheet.create({
   adminActionRow:  { flexDirection: 'row', gap: 8 },
   adminEditBtn:    { flex: 1, paddingVertical: 7, borderRadius: 8, backgroundColor: C.card, alignItems: 'center', borderWidth: 1, borderColor: C.border },
   adminEditBtnText:{ color: C.textMed, fontSize: 11, fontWeight: '600' },
-  adminDelBtn:     { flex: 1, paddingVertical: 7, borderRadius: 8, backgroundColor: '#FEF2F2', alignItems: 'center', borderWidth: 1, borderColor: '#FECACA' },
-  adminDelBtnText: { color: '#DC2626', fontSize: 11, fontWeight: '600' },
+  adminDelBtn:     { flex: 1, paddingVertical: 7, borderRadius: 8, backgroundColor: '#FFF7ED', alignItems: 'center', borderWidth: 1, borderColor: '#FDBA74' },
+  adminDelBtnText: { color: '#9A3412', fontSize: 11, fontWeight: '600' },
 });
 
 const cm = StyleSheet.create({
   overlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 },
   box:        { backgroundColor: C.card, borderRadius: 24, padding: 28, width: '100%', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 20, shadowOffset: { width: 0, height: 8 }, elevation: 10 },
-  iconWrap:   { width: 60, height: 60, borderRadius: 18, backgroundColor: '#FEF2F2', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  iconWrap:   { width: 60, height: 60, borderRadius: 18, backgroundColor: '#FFF7ED', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
   icon:       { fontSize: 26 },
   title:      { fontSize: 18, fontWeight: '800', color: C.textDark, marginBottom: 8, textAlign: 'center' },
   message:    { fontSize: 14, color: C.textMed, textAlign: 'center', lineHeight: 20, marginBottom: 24 },
   btnRow:     { flexDirection: 'row', gap: 12, width: '100%' },
   cancelBtn:  { flex: 1, paddingVertical: 13, borderRadius: 14, borderWidth: 1.5, borderColor: C.border, alignItems: 'center' },
   cancelText: { color: C.textMed, fontWeight: '700', fontSize: 15 },
-  confirmBtn: { flex: 1, paddingVertical: 13, borderRadius: 14, backgroundColor: '#DC2626', alignItems: 'center' },
-  confirmText:{ color: '#fff', fontWeight: '700', fontSize: 15 },
+  confirmBtn: { flex: 1, paddingVertical: 13, borderRadius: 14, backgroundColor: '#FFF7ED', borderWidth: 1, borderColor: '#FDBA74', alignItems: 'center' },
+  confirmText:{ color: '#9A3412', fontWeight: '700', fontSize: 15 },
 });
 
 const em = StyleSheet.create({
@@ -569,8 +569,8 @@ const m = StyleSheet.create({
   sheetScroll:  { flexGrow: 1, justifyContent: 'flex-end' },
   sheet:        { backgroundColor: C.card, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 24, paddingTop: 24, paddingBottom: 40 },
   title:        { fontSize: 20, fontWeight: '800', color: C.textDark, marginBottom: 16 },
-  errorBox:     { backgroundColor: '#FEF2F2', borderRadius: 10, padding: 10, marginBottom: 12, borderWidth: 1, borderColor: '#FECACA' },
-  errorText:    { color: '#DC2626', fontSize: 13 },
+  errorBox:     { backgroundColor: '#FFF7ED', borderRadius: 10, padding: 10, marginBottom: 12, borderWidth: 1, borderColor: '#FDBA74' },
+  errorText:    { color: '#9A3412', fontSize: 13 },
   passwordWrap: { position: 'relative', justifyContent: 'center' },
   passwordInput:{ paddingRight: 44 },
   eyeToggle:    { position: 'absolute', right: 12, height: '100%', justifyContent: 'center' },

@@ -5,13 +5,30 @@ import { Alert }           from 'react-native';
 import api from './api';
 
 // Convert an ArrayBuffer to a base64 string (needed to write binary via FileSystem)
+// Avoids using global btoa because it may be unavailable in some RN runtimes.
 function arrayBufferToBase64(buffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const bytes = new Uint8Array(buffer || new ArrayBuffer(0));
+  let out = '';
+  let i = 0;
+
+  while (i < bytes.length) {
+    const b1 = bytes[i++] || 0;
+    const b2 = i < bytes.length ? bytes[i++] : NaN;
+    const b3 = i < bytes.length ? bytes[i++] : NaN;
+
+    const enc1 = b1 >> 2;
+    const enc2 = ((b1 & 3) << 4) | ((Number.isNaN(b2) ? 0 : b2) >> 4);
+    const enc3 = Number.isNaN(b2) ? 64 : (((b2 & 15) << 2) | ((Number.isNaN(b3) ? 0 : b3) >> 6));
+    const enc4 = Number.isNaN(b3) ? 64 : (b3 & 63);
+
+    out += chars.charAt(enc1);
+    out += chars.charAt(enc2);
+    out += enc3 === 64 ? '=' : chars.charAt(enc3);
+    out += enc4 === 64 ? '=' : chars.charAt(enc4);
   }
-  return btoa(binary);
+
+  return out;
 }
 
 // ── Export ────────────────────────────────────────────────────────────────
@@ -21,6 +38,11 @@ function arrayBufferToBase64(buffer) {
  */
 export async function exportFile(path, filename, params = {}) {
   try {
+    if (!path) {
+      Alert.alert('Export Failed', 'Export path is missing.');
+      return false;
+    }
+
     // Use axios so the Authorization header is sent automatically
     const response = await api.get(path, {
       params,
@@ -71,6 +93,11 @@ export async function downloadTemplate(path, filename, params = {}) {
  */
 export async function importFile(path, extraFields = {}) {
   try {
+    if (!path) {
+      Alert.alert('Import Failed', 'Import path is missing.');
+      return null;
+    }
+
     const result = await DocumentPicker.getDocumentAsync({
       type: [
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -84,9 +111,18 @@ export async function importFile(path, extraFields = {}) {
     if (result.canceled || !result.assets?.length) return null;
 
     const asset = result.assets[0];
-    const uri   = asset.uri;
+    let uri     = asset.uri;
     const name  = asset.name || 'upload.xlsx';
     const type  = asset.mimeType || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+    // Some Android pickers return content:// URIs that fail multipart upload.
+    // Copy once to cache and upload from a stable file:// URI.
+    if (uri && !String(uri).startsWith('file://')) {
+      const safeName = name.replace(/[^a-zA-Z0-9_.-]/g, '_');
+      const cachedUri = `${FileSystem.cacheDirectory}import_${Date.now()}_${safeName}`;
+      await FileSystem.copyAsync({ from: uri, to: cachedUri });
+      uri = cachedUri;
+    }
 
     // Build multipart form
     const formData = new FormData();

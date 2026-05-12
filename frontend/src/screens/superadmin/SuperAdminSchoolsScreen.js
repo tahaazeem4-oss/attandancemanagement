@@ -617,22 +617,22 @@ const styles = StyleSheet.create({
   adminActionRow:    { flexDirection: 'row', gap: 8 },
   adminEditBtnFull:  { flex: 1, paddingVertical: 6, borderRadius: 8, backgroundColor: C.card, alignItems: 'center', borderWidth: 1, borderColor: C.border },
   adminEditBtnFullText: { color: C.textMed, fontSize: 11, fontWeight: '600' },
-  adminDeleteBtn:    { flex: 1, paddingVertical: 6, borderRadius: 8, backgroundColor: '#FEF2F2', alignItems: 'center', borderWidth: 1, borderColor: '#FECACA' },
-  adminDeleteBtnText:{ color: '#DC2626', fontSize: 11, fontWeight: '600' },
+  adminDeleteBtn:    { flex: 1, paddingVertical: 6, borderRadius: 8, backgroundColor: '#FFF7ED', alignItems: 'center', borderWidth: 1, borderColor: '#FDBA74' },
+  adminDeleteBtnText:{ color: '#9A3412', fontSize: 11, fontWeight: '600' },
 });
 
 const confirm = StyleSheet.create({
   overlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 },
   box:        { backgroundColor: C.card, borderRadius: 24, padding: 28, width: '100%', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 20, shadowOffset: { width: 0, height: 8 }, elevation: 10 },
-  iconWrap:   { width: 60, height: 60, borderRadius: 18, backgroundColor: '#FEF2F2', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  iconWrap:   { width: 60, height: 60, borderRadius: 18, backgroundColor: '#FFF7ED', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
   icon:       { fontSize: 26 },
   title:      { fontSize: 18, fontWeight: '800', color: C.textDark, marginBottom: 8, textAlign: 'center' },
   message:    { fontSize: 14, color: C.textMed, textAlign: 'center', lineHeight: 20, marginBottom: 24 },
   btnRow:     { flexDirection: 'row', gap: 12, width: '100%' },
   cancelBtn:  { flex: 1, paddingVertical: 13, borderRadius: 14, borderWidth: 1.5, borderColor: C.border, alignItems: 'center' },
   cancelText: { color: C.textMed, fontWeight: '700', fontSize: 15 },
-  confirmBtn: { flex: 1, paddingVertical: 13, borderRadius: 14, backgroundColor: '#DC2626', alignItems: 'center' },
-  confirmText:{ color: '#fff', fontWeight: '700', fontSize: 15 },
+  confirmBtn: { flex: 1, paddingVertical: 13, borderRadius: 14, backgroundColor: '#FFF7ED', borderWidth: 1, borderColor: '#FDBA74', alignItems: 'center' },
+  confirmText:{ color: '#9A3412', fontWeight: '700', fontSize: 15 },
 });
 
 const editModal = StyleSheet.create({
@@ -646,8 +646,8 @@ const modal = StyleSheet.create({
   overlay:         { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   sheet:           { backgroundColor: C.card, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 24, paddingTop: 24, paddingBottom: 40 },
   title:           { fontSize: 20, fontWeight: '800', color: C.textDark, marginBottom: 16 },
-  errorBox:        { backgroundColor: '#FEF2F2', borderRadius: 10, padding: 10, marginBottom: 12, borderWidth: 1, borderColor: '#FECACA' },
-  errorText:       { color: '#DC2626', fontSize: 13 },
+  errorBox:        { backgroundColor: '#FFF7ED', borderRadius: 10, padding: 10, marginBottom: 12, borderWidth: 1, borderColor: '#FDBA74' },
+  errorText:       { color: '#9A3412', fontSize: 13 },
   passwordWrap:    { position: 'relative', justifyContent: 'center' },
   passwordInput:   { paddingRight: 44 },
   eyeToggle:       { position: 'absolute', right: 12, height: '100%', justifyContent: 'center' },
@@ -657,7 +657,7 @@ const modal = StyleSheet.create({
   logoPlaceholderText: { color: C.textLight, fontSize: 11 },
   uploadBtn:       { borderWidth: 1.5, borderColor: C.primary, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 14, alignItems: 'center' },
   uploadBtnText:   { color: C.primary, fontWeight: '700', fontSize: 13 },
-  removeLogoText:  { color: '#DC2626', fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  removeLogoText:  { color: '#9A3412', fontSize: 12, fontWeight: '600', textAlign: 'center' },
   btnRow:          { flexDirection: 'row', gap: 12, marginTop: 20 },
   cancelBtn:       { flex: 1, paddingVertical: 14, borderRadius: 14, borderWidth: 1.5, borderColor: C.border, alignItems: 'center' },
   cancelText:      { color: C.textMed, fontWeight: '600', fontSize: 15 },

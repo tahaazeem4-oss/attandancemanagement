@@ -239,7 +239,6 @@ const ROLE_ROOT_SCREENS = {
   super_admin: { name: 'SuperAdminTabs', component: SuperAdminTabs },
   org_admin: { name: 'OrgAdminTabs', component: OrgAdminTabs },
   admin: { name: 'AdminTabs', component: AdminTabs },
-  student: { name: 'StudentTabs', component: StudentTabs },
   parent: { name: 'ParentStack', component: ParentStack },
   teacher: { name: 'TeacherTabs', component: TeacherTabs },
 };

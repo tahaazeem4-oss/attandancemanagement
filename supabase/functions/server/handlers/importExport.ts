@@ -47,8 +47,9 @@ export async function handleImportExport(
   if (user.role !== "admin" && user.role !== "super_admin" && user.role !== "teacher")
     return json({ message: "Forbidden" }, 403);
 
-  // Attendance export is open to teachers; all other import/export routes require admin+
-  const isAdminOnly = !path.startsWith("/import-export/attendance");
+  // Attendance and leave report exports are open to teachers; all other import/export routes require admin+
+  const isTeacherAllowed = path.startsWith("/import-export/attendance") || path === "/import-export/leaves/export";
+  const isAdminOnly = !isTeacherAllowed;
   if (isAdminOnly && user.role === "teacher")
     return json({ message: "Forbidden" }, 403);
 

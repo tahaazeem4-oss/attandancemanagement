@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   StatusBar,
   Animated,
+  RefreshControl,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,6 +29,8 @@ export default function RoleDashboardScreen({
   superBadgeText,
   badgeByKey,
   navigation,
+  refreshing = false,
+  onRefresh,
 }) {
   const insets = useSafeAreaInsets();
   const statusInset = StatusBar.currentHeight ?? 0;
@@ -49,7 +52,12 @@ export default function RoleDashboardScreen({
   }, [cards, fadeAnims, slideAnims]);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 48 }} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={{ paddingBottom: 48 }}
+      showsVerticalScrollIndicator={false}
+      refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} colors={[C.primary]} /> : undefined}
+    >
       <StatusBar barStyle="light-content" backgroundColor="#1E40AF" translucent={false} />
 
       <LinearGradient

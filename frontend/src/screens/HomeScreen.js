@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, Pressable, Animated, StyleSheet,
-  Alert, ActivityIndicator, ScrollView, Image, StatusBar
+  Alert, ActivityIndicator, ScrollView, Image, StatusBar, RefreshControl
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -30,6 +30,7 @@ export default function HomeScreen({ navigation }) {
   const [todayStatus,      setTodayStatus]      = useState(null);
   const [loadingStatus,    setLoadingStatus]    = useState(true);
   const [marking,          setMarking]          = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [assignments,      setAssignments]      = useState(null);
   const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
 
@@ -77,6 +78,27 @@ export default function HomeScreen({ navigation }) {
     }, [])
   );
 
+  const refreshDashboard = useCallback(async () => {
+    await Promise.all([
+      fetchTodayStatus(),
+      api.get('/teachers/classes').then(({ data }) => setAssignments(data)).catch(() => setAssignments([])),
+      api.get('/teachers/leaves').then(({ data }) => {
+        const pendingLeaves = data.filter(l => l.status === 'pending' && !l.withdrawal_status).length;
+        const pendingWithdrawals = data.filter(l => l.withdrawal_status === 'pending').length;
+        setPendingLeaveCount(pendingLeaves + pendingWithdrawals);
+      }).catch(() => setPendingLeaveCount(0)),
+    ]);
+  }, []);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refreshDashboard();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshDashboard]);
+
   const fetchTodayStatus = async () => {
     try {
       const { data } = await api.get('/teachers/attendance/today');
@@ -117,7 +139,12 @@ export default function HomeScreen({ navigation }) {
   const headerTopPad = Math.max(insets.top, statusInset) + 18;
 
   return (
-    <ScrollView style={styles.root} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }}>
+    <ScrollView
+      style={styles.root}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={{ paddingBottom: 60 }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} colors={[C.primary]} />}
+    >
       <StatusBar barStyle="light-content" backgroundColor="#1E40AF" translucent={false} />
 
       {/* ══ HEADER ══════════════════════════════════════════════ */}

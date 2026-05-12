@@ -112,43 +112,7 @@ export async function handleAuth(
         return json({ token, role: "teacher", user, school, teacher: user });
       }
 
-      // 4. Student account
-      const { data: accs } = await db
-        .from("student_accounts")
-        .select(
-          `id, student_id, email, password, phone,
-           students!inner(first_name, last_name, class_id, section_id, roll_no, school_id,
-             classes!inner(class_name),
-             sections!inner(section_name)
-           )`,
-        )
-        .eq("email", e);
-      if (accs?.length) {
-        const a = accs[0];
-        const s = a.students;
-        if (!(await comparePassword(password, a.password)))
-          return json({ message: "Invalid credentials" }, 401);
-        const school = await getSchool(db, s.school_id);
-        const user = {
-          id: a.id,
-          student_id: a.student_id,
-          first_name: s.first_name,
-          last_name: s.last_name,
-          email: a.email,
-          phone: a.phone,
-          role: "student",
-          school_id: s.school_id,
-          class_id: s.class_id,
-          section_id: s.section_id,
-          roll_no: s.roll_no,
-          class_name: s.classes.class_name,
-          section_name: s.sections.section_name,
-        };
-        const token = await signJwt(user);
-        return json({ token, role: "student", user, school });
-      }
-
-      // 5. Org Admin
+      // 4. Org Admin
       try {
         const { data: orgAdmins } = await db
           .from("org_admins")
@@ -173,7 +137,7 @@ export async function handleAuth(
         // org_admins table may not exist yet — skip silently
       }
 
-      // 6. Parent
+      // 5. Parent
       const { data: parents } = await db
         .from("parents")
         .select("*")
@@ -247,73 +211,6 @@ export async function handleAuth(
         return json({ token, role: "teacher", user, school });
       }
 
-      if (role === "student") {
-        const { roll_no, email, password, phone } = payload;
-        if (!roll_no || !email || !password)
-          return json({ message: "roll_no, email and password are required" }, 400);
-
-        const { data: students } = await db
-          .from("students")
-          .select("id, school_id, class_id, section_id")
-          .eq("roll_no", roll_no);
-        if (!students?.length)
-          return json({ message: "No student found with that roll number" }, 404);
-        const student = students[0];
-
-        const { data: existing } = await db
-          .from("student_accounts")
-          .select("id")
-          .eq("student_id", student.id);
-        if (existing?.length)
-          return json({ message: "Account already exists for this student" }, 409);
-
-        const hashed = await hashPassword(password);
-        const { data: acc, error } = await db
-          .from("student_accounts")
-          .insert({
-            student_id: student.id,
-            email: email.trim().toLowerCase(),
-            password: hashed,
-            phone: phone || null,
-          })
-          .select()
-          .single();
-
-        if (error) {
-          if (error.code === "23505")
-            return json({ message: "Email already registered" }, 409);
-          throw error;
-        }
-
-        const { data: fullStudent } = await db
-          .from("students")
-          .select(
-            `first_name, last_name, class_id, section_id, roll_no, school_id,
-             classes!inner(class_name), sections!inner(section_name)`,
-          )
-          .eq("id", student.id)
-          .single();
-
-        const school = await getSchool(db, student.school_id);
-        const user = {
-          id: acc.id,
-          student_id: student.id,
-          first_name: fullStudent.first_name,
-          last_name: fullStudent.last_name,
-          email: acc.email,
-          phone: acc.phone,
-          role: "student",
-          school_id: student.school_id,
-          class_id: student.class_id,
-          section_id: student.section_id,
-          roll_no: fullStudent.roll_no,
-          class_name: fullStudent.classes.class_name,
-          section_name: fullStudent.sections.section_name,
-        };
-        const token = await signJwt(user);
-        return json({ token, role: "student", user, school });
-      }
-
       return json({ message: "Invalid role" }, 400);
     } catch (err) {
       console.error("[auth/signup]", err);
@@ -344,7 +241,6 @@ export async function handleAuth(
         "super_admins",
         "admins",
         "teachers",
-        "student_accounts",
       ]) {
         const { data } = await db.from(table).select("id").eq("email", e);
         if (data?.length) { found = true; break; }
@@ -438,7 +334,6 @@ export async function handleAuth(
         "super_admins",
         "admins",
         "teachers",
-        "student_accounts",
       ]) {
         const { data } = await db.from(table).select("id").eq("email", email);
         if (data?.length) {
@@ -479,7 +374,6 @@ export async function handleAuth(
         super_admin: "super_admins",
         admin: "admins",
         teacher: "teachers",
-        student: "student_accounts",
       };
       const table = tableMap[role];
       if (!table) return json({ message: "Invalid role" }, 400);

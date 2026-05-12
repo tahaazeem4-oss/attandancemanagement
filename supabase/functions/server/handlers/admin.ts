@@ -224,21 +224,38 @@ export async function handleAdmin(
 
       const { data: students } = await q;
 
-      const studentIds = (students || []).map((s: Record<string, unknown>) => s.id);
-      const { data: accounts } = studentIds.length
-        ? await db.from("student_accounts").select("student_id, email").in("student_id", studentIds)
+      const studentIds = (students || []).map((s: Record<string, unknown>) => s.id as number);
+      const { data: links } = studentIds.length
+        ? await db.from("parent_student").select("student_id, parent_id").in("student_id", studentIds)
         : { data: [] };
 
-      const accMap = new Map(
-        (accounts || []).map((a: Record<string, unknown>) => [a.student_id as number, a.email as string]),
+      const parentIds = [...new Set((links || []).map((l: Record<string, unknown>) => l.parent_id as number))];
+      const { data: parents } = parentIds.length
+        ? await db.from("parents").select("id, email").in("id", parentIds)
+        : { data: [] };
+
+      const parentEmailById = new Map(
+        (parents || []).map((p: Record<string, unknown>) => [p.id as number, p.email as string]),
       );
+
+      const parentEmailsByStudent = new Map<number, string[]>();
+      for (const link of links || []) {
+        const sid = (link as Record<string, unknown>).student_id as number;
+        const pid = (link as Record<string, unknown>).parent_id as number;
+        const email = parentEmailById.get(pid);
+        if (!email) continue;
+        if (!parentEmailsByStudent.has(sid)) parentEmailsByStudent.set(sid, []);
+        const list = parentEmailsByStudent.get(sid)!;
+        if (!list.includes(email)) list.push(email);
+      }
 
       const result = (students || []).map((s: Record<string, unknown>) => ({
         ...s,
         class_name: (s.classes as Record<string, unknown>).class_name,
         section_name: (s.sections as Record<string, unknown>).section_name,
-        has_account: accMap.has(s.id as number),
-        account_email: accMap.get(s.id as number) || null,
+        has_parent: (parentEmailsByStudent.get(s.id as number) || []).length > 0,
+        parent_email: (parentEmailsByStudent.get(s.id as number) || [])[0] || null,
+        parent_emails: parentEmailsByStudent.get(s.id as number) || [],
       }));
 
       return json(result);

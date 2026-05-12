@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, Pressable, TextInput,
-  Modal, StyleSheet, Alert, ActivityIndicator, ScrollView, TouchableOpacity,
+  Modal, StyleSheet, Alert, ActivityIndicator, ScrollView, TouchableOpacity, RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
@@ -12,6 +12,7 @@ import AppHeader from './AppHeader';
 import EntityEmptyState from './EntityEmptyState';
 import ManagerSearchAddRow from './ManagerSearchAddRow';
 import ModalFooterActions from './ModalFooterActions';
+import { showDestructiveConfirm } from '../lib/confirmDialog';
 
 const EMPTY_FORM = { first_name: '', last_name: '', age: '', class_id: '', section_id: '', roll_no: '', school_id: '' };
 
@@ -35,11 +36,10 @@ export default function StudentsManagerScreen({ navigation, mode }) {
   const [filterSection, setFilterSection] = useState('');
 
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
-  const [newPw, setNewPw] = useState('');
-  const [showResetPw, setShowResetPw] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const [modalSections, setModalSections] = useState([]);
@@ -163,6 +163,15 @@ export default function StudentsManagerScreen({ navigation, mode }) {
     load();
   }, [load]);
 
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [load]);
+
   useEffect(() => {
     if (isSuper) {
       if (form.school_id) {
@@ -209,8 +218,6 @@ export default function StudentsManagerScreen({ navigation, mode }) {
   const openAdd = () => {
     setEditing(null);
     setForm(EMPTY_FORM);
-    setNewPw('');
-    setShowResetPw(false);
     setModal(true);
   };
 
@@ -225,30 +232,19 @@ export default function StudentsManagerScreen({ navigation, mode }) {
       roll_no: item.roll_no || '',
       school_id: String(item.school_id || ''),
     });
-    setNewPw('');
-    setShowResetPw(false);
     setModal(true);
   };
 
   const handleSave = async () => {
-    if (!form.first_name || !form.last_name) return Alert.alert('Validation', 'Name is required.');
-    if (isSuper || isOrg) {
-      if (!editing && !form.school_id) return Alert.alert('Validation', 'Please select a campus.');
-      if (!form.class_id) return Alert.alert('Validation', 'Please select a class.');
-      if (!form.section_id) return Alert.alert('Validation', 'Please select a section.');
-    } else if (!form.age || !form.class_id || !form.section_id) {
-      return Alert.alert('Validation', 'All fields except roll number are required.');
+    if (!form.first_name || !form.last_name || !form.class_id || !form.section_id || (!isOrg && !form.age) || ((isOrg || isSuper) && !form.school_id)) {
+      Alert.alert('Validation', 'Please fill all required fields.');
+      return;
     }
 
     setSaving(true);
     try {
       if (isSuper) {
-        const schoolId = editing ? (editing.school_id || form.school_id) : form.school_id;
-        if (!schoolId) {
-          setSaving(false);
-          return Alert.alert('Validation', 'Please select a campus.');
-        }
-
+        const schoolId = parseInt(form.school_id, 10);
         const payload = {
           first_name: form.first_name,
           last_name: form.last_name,
@@ -273,10 +269,17 @@ export default function StudentsManagerScreen({ navigation, mode }) {
         if (editing) await api.put(`/org-admin/students/${editing.id}`, payload);
         else await api.post('/org-admin/students', payload);
       } else {
-        const payload = { ...form, age: parseInt(form.age, 10) };
+        const payload = {
+          ...form,
+          age: form.age ? parseInt(form.age, 10) : null,
+          class_id: parseInt(form.class_id, 10),
+          section_id: parseInt(form.section_id, 10),
+          roll_no: form.roll_no || null,
+        };
         if (editing) await api.put(`/admin/students/${editing.id}`, payload);
         else await api.post('/admin/students', payload);
       }
+
       setModal(false);
       await load();
     } catch (err) {
@@ -287,45 +290,23 @@ export default function StudentsManagerScreen({ navigation, mode }) {
   };
 
   const handleDelete = item => {
-    Alert.alert('Delete Student', `Delete ${item.first_name} ${item.last_name}?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            const path = isSuper
-              ? `/super-admin/schools/${item.school_id}/students/${item.id}`
-              : isOrg
-                ? `/org-admin/students/${item.id}`
-                : `/admin/students/${item.id}`;
-            await api.delete(path);
-            await load();
-          } catch (err) {
-            Alert.alert('Error', err?.response?.data?.message || 'Could not delete');
-          }
-        },
+    showDestructiveConfirm({
+      title: 'Delete Student',
+      message: `Are you sure you want to delete ${item.first_name} ${item.last_name}? This action cannot be undone.`,
+      onConfirm: async () => {
+        try {
+          const path = isSuper
+            ? `/super-admin/schools/${item.school_id}/students/${item.id}`
+            : isOrg
+              ? `/org-admin/students/${item.id}`
+              : `/admin/students/${item.id}`;
+          await api.delete(path);
+          await load();
+        } catch (err) {
+          Alert.alert('Error', err?.response?.data?.message || 'Could not delete');
+        }
       },
-    ]);
-  };
-
-  const handleResetPw = async () => {
-    if (!newPw || newPw.length < 6) return Alert.alert('Validation', 'Password must be at least 6 characters.');
-    setSaving(true);
-    try {
-      if (isSuper) {
-        const schoolId = editing?.school_id || form.school_id;
-        await api.post(`/super-admin/schools/${schoolId}/students/${editing.id}/reset-password`, { new_password: newPw });
-      } else {
-        await api.post(`/admin/students/${editing.id}/reset-password`, { new_password: newPw });
-      }
-      Alert.alert('Done', 'Password reset successfully');
-      setNewPw('');
-    } catch (err) {
-      Alert.alert('Error', err?.response?.data?.message || 'Failed');
-    } finally {
-      setSaving(false);
-    }
+    });
   };
 
   const F = (k, v) => setForm(p => ({ ...p, [k]: v }));
@@ -350,6 +331,7 @@ export default function StudentsManagerScreen({ navigation, mode }) {
   const campusItems = [{ label: 'All Campuses', value: '' }, ...campuses.map(c => ({ label: c.name, value: String(c.id) }))];
   const classFilterItems = [{ label: 'All Classes', value: '' }, ...classes.map(c => ({ label: c.class_name, value: String(c.id) }))];
   const sectionFilterItems = [{ label: 'All Sections', value: '' }, ...sections.map(s => ({ label: s.section_name, value: String(s.id) }))];
+  const ieBase = isOrg ? '/org-admin/import-export' : '/import-export';
 
   return (
     <View style={styles.container}>
@@ -385,11 +367,11 @@ export default function StudentsManagerScreen({ navigation, mode }) {
           {(isOrg || isSuper) ? (
             filterCampus ? (
               <ImportExportBar
-                templatePath="/import-export/students/template"
+                templatePath={`${ieBase}/students/template`}
                 templateParams={{ campus_id: filterCampus }}
-                importPath="/import-export/students/import"
+                importPath={`${ieBase}/students/import`}
                 importFields={{ campus_id: filterCampus }}
-                exportPath="/import-export/students/export"
+                exportPath={`${ieBase}/students/export`}
                 exportParams={{ campus_id: filterCampus }}
                 exportFilename="students_export.xlsx"
                 templateFilename="students_template.xlsx"
@@ -401,10 +383,10 @@ export default function StudentsManagerScreen({ navigation, mode }) {
       ) : (
         <>
           <ImportExportBar
-            templatePath="/import-export/students/template"
+            templatePath={`${ieBase}/students/template`}
             templateFilename="students_template.xlsx"
-            importPath="/import-export/students/import"
-            exportPath="/import-export/students/export"
+            importPath={`${ieBase}/students/import`}
+            exportPath={`${ieBase}/students/export`}
             exportFilename="students_export.xlsx"
             onImportDone={load}
           />
@@ -458,6 +440,7 @@ export default function StudentsManagerScreen({ navigation, mode }) {
         <FlatList
           data={filtered}
           keyExtractor={s => String(s.id)}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={C.primary} colors={[C.primary]} />}
           contentContainerStyle={{ padding: 14, paddingBottom: 100 }}
           ListEmptyComponent={<EntityEmptyState icon="school-outline" title="No students found" subtitle="Add students or adjust filters" />}
           renderItem={({ item }) => (
@@ -469,15 +452,12 @@ export default function StudentsManagerScreen({ navigation, mode }) {
                   {item.class_name}{item.section_name ? ` - Sec ${item.section_name}` : ''}
                   {item.roll_no ? `  -  #${item.roll_no}` : ''}
                 </Text>
-                {!isOrg && !isSuper && item.has_account > 0 && <Text style={styles.accountBadge}>Portal account</Text>}
+                {!isOrg && !isSuper && item.has_parent && <Text style={styles.accountBadge}>Parent linked</Text>}
                 {(item.campus_name || item.school_name) ? <View style={styles.badge}><Text style={styles.badgeTxt}>{item.campus_name || item.school_name}</Text></View> : null}
               </View>
               <View style={styles.actionBtns}>
-                {!isOrg ? (
-                  <TouchableOpacity onPress={() => { openEdit(item); setShowResetPw(false); setNewPw(''); }} style={styles.actionBtn}><Ionicons name="key-outline" size={17} color="#F59E0B" /></TouchableOpacity>
-                ) : null}
                 <TouchableOpacity onPress={() => openEdit(item)} style={styles.actionBtn}><Ionicons name="pencil-outline" size={17} color="#2563EB" /></TouchableOpacity>
-                <TouchableOpacity onPress={() => handleDelete(item)} style={styles.actionBtn}><Ionicons name="trash-outline" size={17} color="#EF4444" /></TouchableOpacity>
+                <TouchableOpacity onPress={() => handleDelete(item)} style={[styles.actionBtn, styles.actionBtnDanger]}><Ionicons name="trash-outline" size={17} color="#C2410C" /></TouchableOpacity>
               </View>
             </Pressable>
           )}
@@ -540,35 +520,19 @@ export default function StudentsManagerScreen({ navigation, mode }) {
 
               {!isOrg && !isSuper && editing && (
                 <View style={styles.idMapBox}>
-                  <Text style={styles.idMapTitle}>Mapped Account</Text>
+                  <Text style={styles.idMapTitle}>Linked Parent</Text>
                   <View style={styles.idMapRow}>
-                    <Text style={styles.idMapText}>Email: {editing.account_email || 'No portal account mapped'}</Text>
+                    <Text style={styles.idMapText}>Email: {editing.parent_email || 'No parent linked yet'}</Text>
                   </View>
                 </View>
-              )}
-
-              {editing && (isSuper || (!isOrg && editing.has_account > 0)) && (
-                <>
-                  <View style={styles.divider} />
-                  <Text style={styles.sectionLabel}>Reset Password</Text>
-                  <View style={styles.passwordWrap}>
-                    <TextInput style={[styles.input, styles.passwordInput]} placeholder="New password (min 6)" secureTextEntry={!showResetPw} value={newPw} onChangeText={setNewPw} />
-                    <Pressable onPress={() => setShowResetPw(p => !p)} style={styles.eyeToggle} hitSlop={8}>
-                      <Ionicons name={showResetPw ? 'eye-off-outline' : 'eye-outline'} size={20} color="#94A3B8" />
-                    </Pressable>
-                  </View>
-                  <Pressable style={[styles.modalBtn, { backgroundColor: '#D97706', marginTop: 8 }]} onPress={handleResetPw} disabled={saving}>
-                    {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveBtnText}>Reset Password</Text>}
-                  </Pressable>
-                </>
               )}
 
               {editing && (
                 <>
                   <View style={styles.divider} />
                   <Text style={styles.sectionLabel}>Danger Zone</Text>
-                  <Pressable style={[styles.modalBtn, { backgroundColor: '#DC2626', marginTop: 8 }]} onPress={() => { const cur = editing; setModal(false); handleDelete(cur); }}>
-                    <Text style={styles.saveBtnText}>Delete Student</Text>
+                  <Pressable style={[styles.modalBtn, styles.dangerModalBtn, { marginTop: 8 }]} onPress={() => { const cur = editing; setModal(false); handleDelete(cur); }}>
+                    <Text style={styles.dangerModalBtnText}>Delete Student</Text>
                   </Pressable>
                 </>
               )}
@@ -607,6 +571,7 @@ const styles = StyleSheet.create({
   eyeBtn: { width: 34, height: 34, borderRadius: 10, backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center' },
   actionBtns: { flexDirection: 'row', gap: 4 },
   actionBtn: { padding: 6, borderRadius: 8, backgroundColor: '#F8FAFC' },
+  actionBtnDanger: { backgroundColor: '#FFF7ED', borderWidth: 1, borderColor: '#FDBA74' },
   badge: { marginTop: 5, alignSelf: 'flex-start', backgroundColor: '#F1F5F9', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   badgeTxt: { fontSize: 11, color: '#475569', fontWeight: '600' },
   empty: { textAlign: 'center', color: C.textLight, marginTop: 40, fontSize: 15 },
@@ -630,8 +595,10 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 10 },
   modalBtns: { flexDirection: 'row', gap: 12, marginTop: 16 },
   modalBtn: { flex: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  dangerModalBtn: { backgroundColor: '#FFF7ED', borderWidth: 1, borderColor: '#FDBA74' },
   cancelBtn: { backgroundColor: C.border },
   saveBtn: { backgroundColor: C.primary },
   cancelBtnText: { color: C.textMed, fontWeight: '700' },
   saveBtnText: { color: '#fff', fontWeight: '700' },
+  dangerModalBtnText: { color: '#9A3412', fontWeight: '800' },
 });

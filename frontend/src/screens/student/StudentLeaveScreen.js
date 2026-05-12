@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, Pressable, TextInput, Modal,
-  StyleSheet, Alert, ActivityIndicator, ScrollView
+  StyleSheet, Alert, ActivityIndicator, ScrollView, RefreshControl
 } from 'react-native';
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
@@ -80,6 +80,7 @@ function CalendarPicker({ selectedDates, onChange }) {
 export default function StudentLeaveScreen({ navigation, route }) {
   const [groups,    setGroups]    = useState([]);
   const [loading,   setLoading]   = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [modal,     setModal]     = useState(false);
   const [selDates,  setSelDates]  = useState([]);
   const [reason,    setReason]    = useState('');
@@ -120,6 +121,15 @@ export default function StudentLeaveScreen({ navigation, route }) {
   }, [childId, isParentViewing]);
 
   useEffect(() => { load(); }, [load]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [load]);
 
   const openModal = () => { setSelDates([]); setReason(''); setModal(true); };
 
@@ -183,6 +193,7 @@ export default function StudentLeaveScreen({ navigation, route }) {
           <FlatList
             data={groups}
             keyExtractor={g => String(g.group_id)}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} colors={[C.primary]} />}
             contentContainerStyle={{ padding: 14, paddingBottom: 100 }}
             ListEmptyComponent={<Text style={styles.empty}>No leave applications yet.</Text>}
             renderItem={({ item }) => (

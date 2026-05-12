@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, ScrollView, Pressable, Image,
-  StyleSheet, ActivityIndicator, Animated
+  StyleSheet, ActivityIndicator, Animated, RefreshControl
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,6 +23,7 @@ export default function StudentHomeScreen({ navigation, route }) {
   const { user, school, logout } = useAuth();
   const [stats,   setStats]   = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [resolvedCampus, setResolvedCampus] = useState(null);
 
   // Support parent viewing child's portal
@@ -87,6 +88,29 @@ export default function StudentHomeScreen({ navigation, route }) {
     return () => { mounted = false; };
   }, [childData?.school_id, displayUser?.school_id, user?.school_id]);
 
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const now = new Date();
+      const endpoint = isParentViewing
+        ? `/parent/children/${childData.student_id}/attendance`
+        : '/student-portal/attendance';
+
+      const { data } = await api.get(endpoint, { params: { month: now.getMonth() + 1, year: now.getFullYear() } });
+      if (data?.stats) {
+        setStats(data.stats);
+      } else {
+        const records = data?.records || data?.attendance || [];
+        const present = records.filter(r => r.status === 'present').length;
+        const absent = records.filter(r => r.status === 'absent').length;
+        const leave = records.filter(r => r.status === 'leave').length;
+        setStats({ present, absent, leave, total: records.length });
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }, [isParentViewing, childData?.student_id]);
+
   const attendancePct = stats && stats.total > 0
     ? Math.round((stats.present / stats.total) * 100)
     : null;
@@ -98,7 +122,12 @@ export default function StudentHomeScreen({ navigation, route }) {
 
   return (
     <View style={styles.wrapper}>
-      <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 48 }} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={{ paddingBottom: 48 }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} colors={[C.primary]} />}
+      >
 
       {/* ── Hero Card ──────────────────────────────────────────────── */}
       <LinearGradient

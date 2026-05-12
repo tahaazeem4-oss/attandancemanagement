@@ -20,6 +20,7 @@ export default function OrgAdminHomeScreen({ navigation }) {
   const { user, logout } = useAuth();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   const fetchStats = useCallback(() => {
     api.get('/org-admin/stats')
@@ -35,6 +36,15 @@ export default function OrgAdminHomeScreen({ navigation }) {
   useFocusEffect(
     useCallback(() => { fetchStats(); }, [fetchStats])
   );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await fetchStats();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [fetchStats]);
 
   return (
     <RoleDashboardScreen
@@ -52,6 +62,8 @@ export default function OrgAdminHomeScreen({ navigation }) {
       headerLabel="Organization Admin Panel"
       badgeByKey={{ OrgAdminLeaves: stats?.pending_leaves ?? 0 }}
       navigation={navigation}
+      refreshing={refreshing}
+      onRefresh={onRefresh}
     />
   );
 }

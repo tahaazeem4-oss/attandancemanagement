@@ -10,6 +10,7 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
@@ -20,6 +21,7 @@ import PickerField from './PickerField';
 import EntityEmptyState from './EntityEmptyState';
 import ManagerSearchAddRow from './ManagerSearchAddRow';
 import ModalFooterActions from './ModalFooterActions';
+import { showDestructiveConfirm } from '../lib/confirmDialog';
 
 const EMPTY_CLASS = { class_name: '', school_id: '' };
 
@@ -31,6 +33,7 @@ export default function ClassesManagerScreen({ navigation, mode }) {
   const [campuses, setCampuses] = useState([]);
   const [organizations, setOrganizations] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const [search, setSearch] = useState('');
@@ -113,6 +116,15 @@ export default function ClassesManagerScreen({ navigation, mode }) {
     loadClasses();
   }, [loadClasses]);
 
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([loadCampuses(), loadClasses()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadCampuses, loadClasses]);
+
   // Add/Edit class
   const openAddClass = () => {
     setEditingClass(null);
@@ -183,28 +195,25 @@ export default function ClassesManagerScreen({ navigation, mode }) {
 
   const handleDeleteClass = (item) => {
     if (!item?.id) return;
-    Alert.alert('Delete Class', `Delete "${item.class_name}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            const endpoint = isSuper
-              ? `/super-admin/schools/${item.school_id || filterCampus}/classes/${item.id}`
-              : isOrg
-                ? `/org-admin/classes/${item.id}`
-                : `/admin/classes/${item.id}`;
-            await api.delete(endpoint);
-            setDetailModal(false);
-            setTarget(null);
-            await loadClasses();
-          } catch (err) {
-            Alert.alert('Error', err?.response?.data?.message || 'Could not delete class.');
-          }
-        },
+    showDestructiveConfirm({
+      title: 'Delete Class',
+      message: `Are you sure you want to delete "${item.class_name}"? This action cannot be undone.`,
+      onConfirm: async () => {
+        try {
+          const endpoint = isSuper
+            ? `/super-admin/schools/${item.school_id || filterCampus}/classes/${item.id}`
+            : isOrg
+              ? `/org-admin/classes/${item.id}`
+              : `/admin/classes/${item.id}`;
+          await api.delete(endpoint);
+          setDetailModal(false);
+          setTarget(null);
+          await loadClasses();
+        } catch (err) {
+          Alert.alert('Error', err?.response?.data?.message || 'Could not delete class.');
+        }
       },
-    ]);
+    });
   };
 
   // Section management
@@ -280,35 +289,32 @@ export default function ClassesManagerScreen({ navigation, mode }) {
 
   const handleDeleteSection = (sec) => {
     if (!sec?.id) return;
-    Alert.alert('Delete Section', `Delete section "${sec.section_name}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            const endpoint = isSuper
-              ? `/super-admin/schools/${target.school_id || filterCampus}/sections/${sec.id}`
+    showDestructiveConfirm({
+      title: 'Delete Section',
+      message: `Are you sure you want to delete section "${sec.section_name}"? This action cannot be undone.`,
+      onConfirm: async () => {
+        try {
+          const endpoint = isSuper
+            ? `/super-admin/schools/${target.school_id || filterCampus}/sections/${sec.id}`
+            : isOrg
+              ? `/org-admin/sections/${sec.id}`
+              : `/admin/sections/${sec.id}`;
+          await api.delete(endpoint);
+          if (target?.id) {
+            const reloadEndpoint = isSuper
+              ? `/super-admin/schools/${target.school_id || filterCampus}/classes/${target.id}`
               : isOrg
-                ? `/org-admin/sections/${sec.id}`
-                : `/admin/sections/${sec.id}`;
-            await api.delete(endpoint);
-            if (target?.id) {
-              const reloadEndpoint = isSuper
-                ? `/super-admin/schools/${target.school_id || filterCampus}/classes/${target.id}`
-                : isOrg
-                  ? `/org-admin/classes/${target.id}`
-                  : `/admin/classes/${target.id}`;
-              const { data } = await api.get(reloadEndpoint);
-              setTarget(data);
-              setSections(data.sections || []);
-            }
-          } catch (err) {
-            Alert.alert('Error', err?.response?.data?.message || 'Could not delete section.');
+                ? `/org-admin/classes/${target.id}`
+                : `/admin/classes/${target.id}`;
+            const { data } = await api.get(reloadEndpoint);
+            setTarget(data);
+            setSections(data.sections || []);
           }
-        },
+        } catch (err) {
+          Alert.alert('Error', err?.response?.data?.message || 'Could not delete section.');
+        }
       },
-    ]);
+    });
   };
 
   const orgItems = [
@@ -319,6 +325,7 @@ export default function ClassesManagerScreen({ navigation, mode }) {
     { label: 'All Campuses', value: '' },
     ...campuses.map(c => ({ label: c.name, value: String(c.id) })),
   ];
+  const ieBase = isOrg ? '/org-admin/import-export' : '/import-export';
 
   const visibleClasses = (isOrg || isSuper)
     ? classes.filter(c => {
@@ -368,11 +375,11 @@ export default function ClassesManagerScreen({ navigation, mode }) {
       {(isOrg || isSuper) ? (
         filterCampus && (
           <ImportExportBar
-            templatePath="/import-export/classes/template"
+            templatePath={`${ieBase}/classes/template`}
             templateParams={{ campus_id: filterCampus }}
-            importPath="/import-export/classes/import"
+            importPath={`${ieBase}/classes/import`}
             importFields={{ campus_id: filterCampus }}
-            exportPath="/import-export/classes/export"
+            exportPath={`${ieBase}/classes/export`}
             exportParams={{ campus_id: filterCampus }}
             exportFilename="classes_export.xlsx"
             templateFilename="classes_template.xlsx"
@@ -381,10 +388,10 @@ export default function ClassesManagerScreen({ navigation, mode }) {
         )
       ) : (
         <ImportExportBar
-          templatePath="/import-export/classes/template"
+          templatePath={`${ieBase}/classes/template`}
           templateFilename="classes_template.xlsx"
-          importPath="/import-export/classes/import"
-          exportPath="/import-export/classes/export"
+          importPath={`${ieBase}/classes/import`}
+          exportPath={`${ieBase}/classes/export`}
           exportFilename="classes_export.xlsx"
           onImportDone={loadClasses}
         />
@@ -396,6 +403,7 @@ export default function ClassesManagerScreen({ navigation, mode }) {
         <FlatList
           data={visibleClasses}
           keyExtractor={i => String(i.id)}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={C.primary} colors={[C.primary]} />}
           contentContainerStyle={{ padding: 14, paddingBottom: 100 }}
           ListEmptyComponent={
             <EntityEmptyState
@@ -529,10 +537,10 @@ export default function ClassesManagerScreen({ navigation, mode }) {
                         </Pressable>
                       )}
                       <Pressable
-                        style={styles.iconBtn}
+                        style={[styles.iconBtn, styles.iconBtnDanger]}
                         onPress={() => handleDeleteSection(sec)}
                       >
-                        <Ionicons name="trash" size={16} color="#EF4444" />
+                        <Ionicons name="trash" size={16} color="#C2410C" />
                       </Pressable>
                     </View>
                   </View>
@@ -569,10 +577,10 @@ export default function ClassesManagerScreen({ navigation, mode }) {
                 <Text style={styles.cancelBtnText}>Close</Text>
               </Pressable>
               <Pressable
-                style={[styles.btn, { backgroundColor: '#DC2626' }]}
+                style={[styles.btn, styles.dangerModalBtn]}
                 onPress={() => handleDeleteClass(target)}
               >
-                <Text style={styles.confirmBtnText}>Delete Class</Text>
+                <Text style={styles.dangerModalBtnText}>Delete Class</Text>
               </Pressable>
             </View>
           </View>
@@ -663,10 +671,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  iconBtnDanger: { backgroundColor: '#FFF7ED', borderWidth: 1, borderColor: '#FDBA74' },
   addSectionRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   modalActions: { flexDirection: 'row', gap: 10, marginTop: 16 },
   btn: { flex: 1, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
   cancelBtn: { borderWidth: 1, borderColor: '#E2E8F0', backgroundColor: '#fff' },
+  dangerModalBtn: { backgroundColor: '#FFF7ED', borderWidth: 1, borderColor: '#FDBA74' },
   cancelBtnText: { color: '#64748B', fontWeight: '600' },
   confirmBtnText: { color: '#fff', fontWeight: '700' },
+  dangerModalBtnText: { color: '#9A3412', fontWeight: '800' },
 });

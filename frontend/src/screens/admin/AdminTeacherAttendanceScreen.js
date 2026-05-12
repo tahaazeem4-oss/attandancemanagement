@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, Pressable, Modal, FlatList,
-  StyleSheet, ActivityIndicator, Alert, Platform,
+  StyleSheet, ActivityIndicator, Alert, Platform, RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -265,6 +265,7 @@ export default function AdminTeacherAttendanceScreen() {
   const [selectedTeacher, setSelectedTeacher] = useState(null);
   const [data,            setData]            = useState([]);
   const [loading,         setLoading]         = useState(false);
+  const [refreshing,      setRefreshing]      = useState(false);
   const [exporting,       setExporting]       = useState(false);
 
   // Load teacher list once
@@ -286,6 +287,15 @@ export default function AdminTeacherAttendanceScreen() {
 
   // Auto-load when filters change
   useEffect(() => { load(); }, [load]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [load]);
 
   const handleExport = async () => {
     setExporting(true);
@@ -346,6 +356,7 @@ export default function AdminTeacherAttendanceScreen() {
             <FlatList
               data={data}
               keyExtractor={item => String(item.id)}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} colors={[C.primary]} />}
               renderItem={({ item }) => (
                 <TeacherAttendanceCard teacher={item} year={year} month={month} />
               )}

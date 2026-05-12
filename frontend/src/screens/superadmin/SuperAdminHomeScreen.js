@@ -18,6 +18,7 @@ export default function SuperAdminHomeScreen({ navigation }) {
   const { user, logout } = useAuth();
   const [stats,   setStats]   = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   const fetchStats = useCallback(() => {
     api.get('/super-admin/stats')
@@ -36,6 +37,15 @@ export default function SuperAdminHomeScreen({ navigation }) {
     }, [fetchStats])
   );
 
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await fetchStats();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [fetchStats]);
+
   return (
     <RoleDashboardScreen
       user={user}
@@ -52,6 +62,8 @@ export default function SuperAdminHomeScreen({ navigation }) {
       superBadgeText="SUPER ADMIN"
       subtitle={user?.email}
       navigation={navigation}
+      refreshing={refreshing}
+      onRefresh={onRefresh}
     />
   );
 }

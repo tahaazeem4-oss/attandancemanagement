@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, Pressable,
-  StyleSheet, ActivityIndicator
+  StyleSheet, ActivityIndicator, RefreshControl
 } from 'react-native';
 import api from '../../services/api';
 import { C } from '../../config/theme';
@@ -19,6 +19,7 @@ export default function StudentHistoryScreen({ navigation, route }) {
   const [records, setRecords] = useState([]);
   const [stats,   setStats]   = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Support parent viewing child's portal
   const childData = route?.params?.child;
@@ -38,6 +39,15 @@ export default function StudentHistoryScreen({ navigation, route }) {
   }, [month, year, endpoint]);
 
   useEffect(() => { load(); }, [load]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [load]);
 
   const changeMonth = (delta) => {
     let m = month + delta, y = year;
@@ -81,6 +91,7 @@ export default function StudentHistoryScreen({ navigation, route }) {
           <FlatList
             data={records}
             keyExtractor={r => r.date}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} colors={[C.primary]} />}
             contentContainerStyle={{ padding: 14 }}
             ListEmptyComponent={<Text style={styles.empty}>No records for {MONTHS[month - 1]} {year}.</Text>}
             renderItem={({ item }) => {

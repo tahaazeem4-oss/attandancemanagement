@@ -9,6 +9,7 @@ import api from '../../services/api';
 import { C } from '../../config/theme';
 import AppHeader from '../../components/AppHeader';
 import ImportExportBar from '../../components/ImportExportBar';
+import { showDestructiveConfirm } from '../../lib/confirmDialog';
 
 const EMPTY_FORM = { name: '', tagline: '', initials: '' };
 
@@ -88,20 +89,18 @@ export default function OrgAdminCampusesScreen({ navigation }) {
   };
 
   const handleDelete = (item) => {
-    Alert.alert('Delete Campus', `Delete "${item.name}"? This cannot be undone.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: async () => {
-          try {
-            await api.delete(`/org-admin/campuses/${item.id}`);
-            load();
-          } catch (err) {
-            Alert.alert('Error', err?.response?.data?.message || 'Could not delete.');
-          }
-        },
+    showDestructiveConfirm({
+      title: 'Delete Campus',
+      message: `Are you sure you want to delete "${item.name}"? This action cannot be undone.`,
+      onConfirm: async () => {
+        try {
+          await api.delete(`/org-admin/campuses/${item.id}`);
+          load();
+        } catch (err) {
+          Alert.alert('Error', err?.response?.data?.message || 'Could not delete.');
+        }
       },
-    ]);
+    });
   };
 
   const renderItem = ({ item }) => (
@@ -127,8 +126,8 @@ export default function OrgAdminCampusesScreen({ navigation }) {
         <TouchableOpacity onPress={() => openEdit(item)} style={styles.actionBtn}>
           <Ionicons name="pencil-outline" size={18} color="#2563EB" />
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => handleDelete(item)} style={styles.actionBtn}>
-          <Ionicons name="trash-outline" size={18} color="#EF4444" />
+        <TouchableOpacity onPress={() => handleDelete(item)} style={[styles.actionBtn, styles.actionBtnDanger]}>
+          <Ionicons name="trash-outline" size={18} color="#C2410C" />
         </TouchableOpacity>
       </View>
     </View>
@@ -242,6 +241,7 @@ const styles = StyleSheet.create({
   statSep: { fontSize: 11, color: '#CBD5E1' },
   actionBtns: { flexDirection: 'row', gap: 4 },
   actionBtn: { padding: 6, borderRadius: 8, backgroundColor: '#F8FAFC' },
+  actionBtnDanger: { backgroundColor: '#FFF7ED', borderWidth: 1, borderColor: '#FDBA74' },
   logoImg: { width: 44, height: 44, borderRadius: 12 },
   logoPicker: { alignSelf: 'center', marginVertical: 8 },
   logoPreview: { width: 90, height: 90, borderRadius: 16, borderWidth: 2, borderColor: C.primary },

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, Pressable, Modal, ScrollView,
-  StyleSheet, Alert, ActivityIndicator, Platform,
+  StyleSheet, Alert, ActivityIndicator, Platform, RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -286,6 +286,7 @@ export default function ReportScreen({ route, navigation }) {
   const [allStudents,     setAllStudents]     = useState([]); // full list for picker
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [loading,         setLoading]         = useState(false);
+  const [refreshing,      setRefreshing]      = useState(false);
   const [exporting,       setExporting]       = useState(false);
   const [exportOptions,   setExportOptions]   = useState(false);
   const [xlsxModal,       setXlsxModal]       = useState(false);
@@ -308,6 +309,15 @@ export default function ReportScreen({ route, navigation }) {
   }, [year, month, selectedStudent]);
 
   useEffect(() => { load(); }, [load]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [load]);
 
   const handleCsvExport = async () => {
     setExportOptions(false);
@@ -386,6 +396,7 @@ export default function ReportScreen({ route, navigation }) {
             <FlatList
               data={data}
               keyExtractor={item => String(item.id)}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} colors={[C.primary]} />}
               renderItem={({ item }) => (
                 <StudentCard
                   student={item}

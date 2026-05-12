@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
@@ -21,6 +22,7 @@ import PickerField from './PickerField';
 import EntityEmptyState from './EntityEmptyState';
 import ManagerSearchAddRow from './ManagerSearchAddRow';
 import ModalFooterActions from './ModalFooterActions';
+import { showDestructiveConfirm } from '../lib/confirmDialog';
 
 export default function SubjectsManagerScreen({ navigation, mode }) {
   const isOrg = mode === 'orgadmin';
@@ -33,6 +35,7 @@ export default function SubjectsManagerScreen({ navigation, mode }) {
   const [subjects, setSubjects] = useState([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [formName, setFormName] = useState('');
@@ -115,6 +118,15 @@ export default function SubjectsManagerScreen({ navigation, mode }) {
     load();
   }, [load]);
 
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [load]);
+
   const openAdd = () => {
     setEditing(null);
     setFormName('');
@@ -183,27 +195,24 @@ export default function SubjectsManagerScreen({ navigation, mode }) {
       return;
     }
 
-    Alert.alert('Delete Subject', `Remove "${item.name}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            if (isSuper) {
-              await api.delete(`/super-admin/schools/${campusId}/subjects/${item.id}`);
-            } else if (isOrg) {
-              await api.delete(`/org-admin/subjects/${item.id}`);
-            } else {
-              await api.delete(`/subjects/${item.id}`);
-            }
-            setSubjects(prev => prev.filter(s => s.id !== item.id));
-          } catch (err) {
-            Alert.alert('Error', err?.response?.data?.message || 'Could not delete subject.');
+    showDestructiveConfirm({
+      title: 'Delete Subject',
+      message: `Are you sure you want to delete "${item.name}"? This action cannot be undone.`,
+      onConfirm: async () => {
+        try {
+          if (isSuper) {
+            await api.delete(`/super-admin/schools/${campusId}/subjects/${item.id}`);
+          } else if (isOrg) {
+            await api.delete(`/org-admin/subjects/${item.id}`);
+          } else {
+            await api.delete(`/subjects/${item.id}`);
           }
-        },
+          setSubjects(prev => prev.filter(s => s.id !== item.id));
+        } catch (err) {
+          Alert.alert('Error', err?.response?.data?.message || 'Could not delete subject.');
+        }
       },
-    ]);
+    });
   };
 
   const orgItems = [{ label: 'All Organizations', value: '' }, ...organizations.map(o => ({ label: o.name, value: String(o.id) }))];
@@ -267,6 +276,7 @@ export default function SubjectsManagerScreen({ navigation, mode }) {
             <FlatList
               data={filteredSubjects}
               keyExtractor={i => String(i.id)}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={C.primary} colors={[C.primary]} />}
               contentContainerStyle={styles.list}
               ListEmptyComponent={
                 <EntityEmptyState icon="book-outline" title="No subjects yet" subtitle="Add your first subject to get started" />
@@ -281,9 +291,9 @@ export default function SubjectsManagerScreen({ navigation, mode }) {
                     </Pressable>
                     <Pressable
                       onPress={() => handleDelete(item)}
-                      style={[styles.actionBtn, !isOrg && !isSuper && !item?.id && { opacity: 0.35 }]}
+                      style={[styles.actionBtn, styles.actionBtnDanger, !isOrg && !isSuper && !item?.id && { opacity: 0.35 }]}
                     >
-                      <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                      <Ionicons name="trash-outline" size={18} color="#C2410C" />
                     </Pressable>
                   </View>
                 </View>
@@ -365,6 +375,7 @@ const styles = StyleSheet.create({
   subjectName: { flex: 1, fontSize: 14, fontWeight: '600', color: C.textDark },
   actionBtns: { flexDirection: 'row', gap: 6 },
   actionBtn: { padding: 6, borderRadius: 8, backgroundColor: '#F8FAFC' },
+  actionBtnDanger: { backgroundColor: '#FFF7ED', borderWidth: 1, borderColor: '#FDBA74' },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 60, gap: 8 },
   emptyList: { alignItems: 'center', marginTop: 60, gap: 8 },
   emptyTxt: { fontSize: 16, fontWeight: '600', color: '#94A3B8', marginTop: 8 },
