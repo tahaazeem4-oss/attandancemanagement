@@ -193,7 +193,7 @@ export async function handleParent(
 
       const { data: lectures } = await db
         .from("lectures")
-        .select(`id, teacher_id, subject_name, lecture_name, type, date, file_path, uploaded_by, created_at, class_id, section_id,
+        .select(`id, teacher_id, subject_name, lecture_name, type, date, file_path, message, uploaded_by, created_at, class_id, section_id,
                  classes!inner(class_name), sections(section_name)`)
         .eq("school_id", (student as any).school_id)
         .eq("class_id", (student as any).class_id)

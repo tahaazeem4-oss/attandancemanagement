@@ -353,10 +353,11 @@ const styles = StyleSheet.create({
   cardTop:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   typePill:    { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
   typePillTxt: { fontSize: 12, fontWeight: '800' },
-  downloadBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' },
-  downloadIcon:{ fontSize: 18 },
+  attachBadge: { backgroundColor: '#FEF3C7', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: '#FDE68A' },
+  attachBadgeTxt: { fontSize: 11, color: '#B45309', fontWeight: '700' },
 
   lectureName: { fontSize: 16, fontWeight: '800', color: '#1E293B', marginBottom: 8 },
+  messagePreview: { fontSize: 13, color: '#64748B', lineHeight: 18, marginBottom: 6, fontStyle: 'italic' },
   metaRow:     { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 4 },
   metaChip:    { fontSize: 12, color: '#475569', backgroundColor: '#F0F4FF', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   metaClass:   { fontSize: 12, color: '#475569', marginTop: 2 },
