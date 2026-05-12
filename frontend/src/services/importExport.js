@@ -59,8 +59,8 @@ export async function exportFile(path, filename, params = {}) {
 }
 
 // ── Download Template ─────────────────────────────────────────────────────
-export async function downloadTemplate(path, filename) {
-  return exportFile(path, filename);
+export async function downloadTemplate(path, filename, params = {}) {
+  return exportFile(path, filename, params);
 }
 
 // ── Import ────────────────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ export async function downloadTemplate(path, filename) {
  * @param {string} path   - API path, e.g. '/import-export/teachers/import'
  * @returns {{ created, errors, message } | null}
  */
-export async function importFile(path) {
+export async function importFile(path, extraFields = {}) {
   try {
     const result = await DocumentPicker.getDocumentAsync({
       type: [
@@ -91,6 +91,10 @@ export async function importFile(path) {
     // Build multipart form
     const formData = new FormData();
     formData.append('file', { uri, name, type });
+    Object.entries(extraFields || {}).forEach(([k, v]) => {
+      if (v === undefined || v === null || v === '') return;
+      formData.append(k, String(v));
+    });
 
     const { data } = await api.post(path, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },

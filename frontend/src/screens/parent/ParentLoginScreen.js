@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, Alert, ActivityIndicator, ScrollView } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { C, S } from '../../config/theme';
 
@@ -7,6 +8,7 @@ export default function ParentLoginScreen({ navigation }) {
   const { parentLogin } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -54,14 +56,19 @@ export default function ParentLoginScreen({ navigation }) {
         />
 
         <Text style={S.label}>Password</Text>
-        <TextInput
-          style={S.input}
-          placeholder="Enter password"
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-          editable={!loading}
-        />
+        <View style={styles.passwordWrap}>
+          <TextInput
+            style={[S.input, styles.passwordInput]}
+            placeholder="Enter password"
+            secureTextEntry={!showPw}
+            value={password}
+            onChangeText={setPassword}
+            editable={!loading}
+          />
+          <Pressable onPress={() => setShowPw(p => !p)} style={styles.eyeBtn} hitSlop={8}>
+            <Ionicons name={showPw ? 'eye-off-outline' : 'eye-outline'} size={20} color="#94A3B8" />
+          </Pressable>
+        </View>
 
         <Pressable
           style={[styles.loginBtn, loading && { opacity: 0.6 }]}
@@ -87,6 +94,9 @@ const styles = StyleSheet.create({
   title: { fontSize: 28, fontWeight: '800', color: C.textDark, marginBottom: 4 },
   subtitle: { fontSize: 14, color: C.textMed, textAlign: 'center' },
   error: { backgroundColor: '#FEE2E2', color: '#DC2626', padding: 12, borderRadius: 10, marginBottom: 20, fontSize: 13, fontWeight: '600' },
+  passwordWrap: { position: 'relative', justifyContent: 'center' },
+  passwordInput: { paddingRight: 44 },
+  eyeBtn: { position: 'absolute', right: 12, height: '100%', justifyContent: 'center' },
   loginBtn: { backgroundColor: C.primary, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 24 },
   loginBtnTxt: { color: '#fff', fontWeight: '800', fontSize: 16 },
 });

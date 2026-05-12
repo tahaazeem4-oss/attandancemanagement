@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, Pressable, TextInput, Modal,
-  StyleSheet, ActivityIndicator, StatusBar, Alert,
+  StyleSheet, ActivityIndicator, StatusBar, Alert, KeyboardAvoidingView, Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
 import AppHeader from '../../components/AppHeader';
@@ -58,28 +59,32 @@ function OrgFormModal({ visible, org, onClose, onSaved }) {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={m.overlay}>
-        <View style={m.sheet}>
-          <Text style={m.title}>{org ? 'Edit Organization' : 'Add Organization'}</Text>
-          {!!error && <View style={m.errorBox}><Text style={m.errorText}>{error}</Text></View>}
-          <Text style={S.label}>Organization Name *</Text>
-          <TextInput
-            style={S.input}
-            placeholder="e.g. Sunrise Education Group"
-            placeholderTextColor={C.textLight}
-            value={name}
-            onChangeText={setName}
-          />
-          <View style={m.btnRow}>
-            <Pressable style={m.cancelBtn} onPress={onClose}>
-              <Text style={m.cancelText}>Cancel</Text>
-            </Pressable>
-            <Pressable style={m.saveBtn} onPress={handleSave} disabled={loading}>
-              {loading
-                ? <ActivityIndicator color="#fff" />
-                : <Text style={m.saveText}>{org ? 'Update' : 'Add'}</Text>}
-            </Pressable>
-          </View>
-        </View>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ width: '100%' }}>
+          <ScrollView contentContainerStyle={m.sheetScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            <View style={m.sheet}>
+              <Text style={m.title}>{org ? 'Edit Organization' : 'Add Organization'}</Text>
+              {!!error && <View style={m.errorBox}><Text style={m.errorText}>{error}</Text></View>}
+              <Text style={S.label}>Organization Name *</Text>
+              <TextInput
+                style={S.input}
+                placeholder="e.g. Sunrise Education Group"
+                placeholderTextColor={C.textLight}
+                value={name}
+                onChangeText={setName}
+              />
+              <View style={m.btnRow}>
+                <Pressable style={m.cancelBtn} onPress={onClose}>
+                  <Text style={m.cancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={m.saveBtn} onPress={handleSave} disabled={loading}>
+                  {loading
+                    ? <ActivityIndicator color="#fff" />
+                    : <Text style={m.saveText}>{org ? 'Update' : 'Add'}</Text>}
+                </Pressable>
+              </View>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </View>
     </Modal>
   );
@@ -88,11 +93,13 @@ function OrgFormModal({ visible, org, onClose, onSaved }) {
 // ── AddOrgAdminModal ──────────────────────────────────────────
 function AddOrgAdminModal({ visible, orgId, onClose, onSaved }) {
   const [form, setForm] = useState({ first_name: '', last_name: '', email: '', password: '' });
+  const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     setForm({ first_name: '', last_name: '', email: '', password: '' });
+    setShowPw(false);
     setError('');
   }, [visible]);
 
@@ -134,8 +141,13 @@ function AddOrgAdminModal({ visible, orgId, onClose, onSaved }) {
             keyboardType="email-address" autoCapitalize="none"
             value={form.email} onChangeText={v => setF('email', v)} />
           <Text style={S.label}>Password *</Text>
-          <TextInput style={S.input} placeholder="Min 6 characters" placeholderTextColor={C.textLight}
-            secureTextEntry value={form.password} onChangeText={v => setF('password', v)} />
+          <View style={m.passwordWrap}>
+            <TextInput style={[S.input, m.passwordInput]} placeholder="Min 6 characters" placeholderTextColor={C.textLight}
+              secureTextEntry={!showPw} value={form.password} onChangeText={v => setF('password', v)} />
+            <Pressable onPress={() => setShowPw(p => !p)} style={m.eyeToggle} hitSlop={8}>
+              <Ionicons name={showPw ? 'eye-off-outline' : 'eye-outline'} size={20} color="#94A3B8" />
+            </Pressable>
+          </View>
           <View style={m.btnRow}>
             <Pressable style={m.cancelBtn} onPress={onClose}><Text style={m.cancelText}>Cancel</Text></Pressable>
             <Pressable style={m.saveBtn} onPress={handleSave} disabled={loading}>
@@ -152,13 +164,14 @@ function AddOrgAdminModal({ visible, orgId, onClose, onSaved }) {
 function EditOrgAdminModal({ visible, admin, orgId, onClose, onSaved }) {
   const [form, setForm] = useState({ first_name: '', last_name: '', email: '' });
   const [newPassword, setNewPassword] = useState('');
+  const [showResetPw, setShowResetPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (admin) setForm({ first_name: admin.first_name, last_name: admin.last_name, email: admin.email });
-    setNewPassword(''); setError('');
+    setNewPassword(''); setShowResetPw(false); setError('');
   }, [admin, visible]);
 
   const setF = (k, v) => setForm(p => ({ ...p, [k]: v }));
@@ -217,8 +230,13 @@ function EditOrgAdminModal({ visible, admin, orgId, onClose, onSaved }) {
           </Pressable>
           <View style={m.divider} />
           <Text style={m.sectionLabel}>Reset Password</Text>
-          <TextInput style={S.input} placeholder="New password (min 6 chars)" placeholderTextColor={C.textLight}
-            secureTextEntry value={newPassword} onChangeText={setNewPassword} />
+          <View style={m.passwordWrap}>
+            <TextInput style={[S.input, m.passwordInput]} placeholder="New password (min 6 chars)" placeholderTextColor={C.textLight}
+              secureTextEntry={!showResetPw} value={newPassword} onChangeText={setNewPassword} />
+            <Pressable onPress={() => setShowResetPw(p => !p)} style={m.eyeToggle} hitSlop={8}>
+              <Ionicons name={showResetPw ? 'eye-off-outline' : 'eye-outline'} size={20} color="#94A3B8" />
+            </Pressable>
+          </View>
           <Pressable style={em.resetBtn} onPress={handleResetPassword} disabled={resetting}>
             {resetting ? <ActivityIndicator color={C.primary} /> : <Text style={em.resetBtnText}>🔑  Reset Password</Text>}
           </Pressable>
@@ -548,10 +566,14 @@ const em = StyleSheet.create({
 
 const m = StyleSheet.create({
   overlay:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  sheetScroll:  { flexGrow: 1, justifyContent: 'flex-end' },
   sheet:        { backgroundColor: C.card, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 24, paddingTop: 24, paddingBottom: 40 },
   title:        { fontSize: 20, fontWeight: '800', color: C.textDark, marginBottom: 16 },
   errorBox:     { backgroundColor: '#FEF2F2', borderRadius: 10, padding: 10, marginBottom: 12, borderWidth: 1, borderColor: '#FECACA' },
   errorText:    { color: '#DC2626', fontSize: 13 },
+  passwordWrap: { position: 'relative', justifyContent: 'center' },
+  passwordInput:{ paddingRight: 44 },
+  eyeToggle:    { position: 'absolute', right: 12, height: '100%', justifyContent: 'center' },
   btnRow:       { flexDirection: 'row', gap: 12, marginTop: 20 },
   cancelBtn:    { flex: 1, paddingVertical: 14, borderRadius: 14, borderWidth: 1.5, borderColor: C.border, alignItems: 'center' },
   cancelText:   { color: C.textMed, fontWeight: '600', fontSize: 15 },

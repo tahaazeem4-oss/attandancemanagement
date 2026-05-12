@@ -39,6 +39,18 @@ function parseUpload(buffer) {
   return XLSX.utils.sheet_to_json(ws, { defval: '' });
 }
 
+function resolveSchoolId(req) {
+  const role = req?.user?.role;
+  const tokenSchool = req?.user?.school_id;
+  const requestedCampus = req?.query?.campus_id || req?.body?.campus_id || req?.query?.school_id || req?.body?.school_id;
+
+  if (role === 'super_admin' || role === 'org_admin' || role === 'orgadmin') {
+    return requestedCampus ? Number(requestedCampus) : null;
+  }
+
+  return tokenSchool ? Number(tokenSchool) : null;
+}
+
 // ─── TEACHERS ──────────────────────────────────────────────────────────────
 
 /**
@@ -57,7 +69,8 @@ exports.teacherTemplate = (req, res) => {
  * Exports all teachers for the admin's school.
  */
 exports.exportTeachers = async (req, res) => {
-  const sid = req.user.school_id;
+  const sid = resolveSchoolId(req);
+  if (!sid) return res.status(400).json({ message: 'campus_id is required' });
   try {
     const [rows] = await db.query(
       'SELECT first_name, last_name, email, phone, created_at FROM teachers WHERE school_id=? ORDER BY last_name, first_name',
@@ -74,7 +87,8 @@ exports.exportTeachers = async (req, res) => {
  * Optional: phone
  */
 exports.importTeachers = async (req, res) => {
-  const sid = req.user.school_id;
+  const sid = resolveSchoolId(req);
+  if (!sid) return res.status(400).json({ message: 'campus_id is required' });
   if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
   const rows   = parseUpload(req.file.buffer);
@@ -112,7 +126,8 @@ exports.importTeachers = async (req, res) => {
  * GET /api/import-export/students/template
  */
 exports.studentTemplate = async (req, res) => {
-  const sid = req.user.school_id;
+  const sid = resolveSchoolId(req);
+  if (!sid) return res.status(400).json({ message: 'campus_id is required' });
   const [classes] = await db.query(
     `SELECT c.id AS class_id, c.class_name, s.id AS section_id, s.section_name
      FROM classes c JOIN sections s ON s.class_id = c.id WHERE c.school_id=? ORDER BY c.class_name, s.section_name`,
@@ -135,7 +150,8 @@ exports.studentTemplate = async (req, res) => {
  * GET /api/import-export/students/export
  */
 exports.exportStudents = async (req, res) => {
-  const sid = req.user.school_id;
+  const sid = resolveSchoolId(req);
+  if (!sid) return res.status(400).json({ message: 'campus_id is required' });
   try {
     const [rows] = await db.query(
       `SELECT s.first_name, s.last_name, s.age, s.roll_no,
@@ -156,7 +172,8 @@ exports.exportStudents = async (req, res) => {
  * Optional: age, roll_no
  */
 exports.importStudents = async (req, res) => {
-  const sid = req.user.school_id;
+  const sid = resolveSchoolId(req);
+  if (!sid) return res.status(400).json({ message: 'campus_id is required' });
   if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
   const rows   = parseUpload(req.file.buffer);
@@ -191,7 +208,8 @@ exports.importStudents = async (req, res) => {
  * GET /api/import-export/classes/export
  */
 exports.exportClasses = async (req, res) => {
-  const sid = req.user.school_id;
+  const sid = resolveSchoolId(req);
+  if (!sid) return res.status(400).json({ message: 'campus_id is required' });
   try {
     const [rows] = await db.query(
       `SELECT c.id AS class_id, c.class_name, s.id AS section_id, s.section_name
@@ -220,7 +238,8 @@ exports.classTemplate = (req, res) => {
  * Creates class if not exists, then adds section if not exists.
  */
 exports.importClasses = async (req, res) => {
-  const sid = req.user.school_id;
+  const sid = resolveSchoolId(req);
+  if (!sid) return res.status(400).json({ message: 'campus_id is required' });
   if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
   const rows   = parseUpload(req.file.buffer);
@@ -269,7 +288,8 @@ exports.importClasses = async (req, res) => {
  */
 exports.exportAttendance = async (req, res) => {
   const { class_id, section_id, date, from, to } = req.query;
-  const sid = req.user.school_id;
+  const sid = resolveSchoolId(req);
+  if (!sid) return res.status(400).json({ message: 'campus_id is required' });
 
   console.log('[exportAttendance] user:', req.user?.role, 'school:', sid, 'class:', class_id, 'section:', section_id);
 
@@ -388,7 +408,8 @@ exports.exportAttendance = async (req, res) => {
  * Exports leave applications as Excel.
  */
 exports.exportLeaves = async (req, res) => {
-  const sid = req.user.school_id;
+  const sid = resolveSchoolId(req);
+  if (!sid) return res.status(400).json({ message: 'campus_id is required' });
   const { status, from, to } = req.query;
 
   try {

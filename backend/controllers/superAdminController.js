@@ -32,13 +32,38 @@ exports.listSchools = async (req, res) => {
 
 // ── POST /api/super-admin/schools ────────────────────────────
 exports.addSchool = async (req, res) => {
-  const { name, tagline, initials, logo_url, primary_color, accent_color } = req.body;
+  const { name, tagline, initials, logo_url, primary_color, accent_color, org_id } = req.body;
   if (!name || !name.trim())
     return res.status(400).json({ message: 'School name is required' });
   try {
+    let resolvedOrgId = org_id || null;
+
+    // Keep backward compatibility for old clients that don't send org_id.
+    // Pick an existing org, or create a default one if none exists yet.
+    if (!resolvedOrgId) {
+      const [orgRows] = await db.query('SELECT id FROM organizations ORDER BY id LIMIT 1');
+      if (orgRows.length > 0) {
+        resolvedOrgId = orgRows[0].id;
+      } else {
+        const [createdOrg] = await db.query(
+          'INSERT INTO organizations (name) VALUES (?) RETURNING id',
+          ['Default Organization']
+        );
+        resolvedOrgId = createdOrg[0].id;
+      }
+    }
+
     const [r] = await db.query(
-      'INSERT INTO schools (name, tagline, initials, logo_url, primary_color, accent_color) VALUES (?,?,?,?,?,?) RETURNING id',
-      [name.trim(), tagline || 'Attendance Management System', initials || name.trim().slice(0,2).toUpperCase(), normalizeLogo(logo_url), primary_color || '#2563EB', accent_color || '#1D4ED8']
+      'INSERT INTO schools (name, tagline, initials, logo_url, primary_color, accent_color, org_id) VALUES (?,?,?,?,?,?,?) RETURNING id',
+      [
+        name.trim(),
+        tagline || 'Attendance Management System',
+        initials || name.trim().slice(0,2).toUpperCase(),
+        normalizeLogo(logo_url),
+        primary_color || '#2563EB',
+        accent_color || '#1D4ED8',
+        resolvedOrgId,
+      ]
     );
     res.status(201).json({ message: 'School added', id: r[0].id });
   } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
@@ -333,7 +358,7 @@ exports.addSchoolStudent = async (req, res) => {
       'INSERT INTO students (school_id, first_name, last_name, age, class_id, section_id, roll_no) VALUES (?,?,?,?,?,?,?) RETURNING id',
       [req.params.schoolId, first_name, last_name, parseInt(age), class_id, section_id, roll_no || null]
     );
-    res.status(201).json({ message: 'Student added', id: r.insertId });
+    res.status(201).json({ message: 'Student added', id: r[0].id });
   } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
 };
 

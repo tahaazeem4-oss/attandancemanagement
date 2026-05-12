@@ -23,6 +23,8 @@ export default function OrgAdminAdminsScreen({ navigation }) {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [newPassword, setNewPassword] = useState('');
+  const [showCreatePw, setShowCreatePw] = useState(false);
+  const [showResetPw, setShowResetPw] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(() => {
@@ -51,10 +53,12 @@ export default function OrgAdminAdminsScreen({ navigation }) {
 
   const campusItems = [{ label: 'All Campuses', value: '' }, ...campuses.map(c => ({ label: c.name, value: String(c.id) }))];
 
-  const openAdd = () => { setEditing(null); setForm(EMPTY_FORM); setModalVisible(true); };
+  const openAdd = () => { setEditing(null); setForm(EMPTY_FORM); setShowCreatePw(false); setShowResetPw(false); setModalVisible(true); };
   const openEdit = (item) => {
     setEditing(item);
     setForm({ first_name: item.first_name || '', last_name: item.last_name || '', email: item.email || '', password: '', school_id: String(item.school_id) || '' });
+    setShowCreatePw(false);
+    setShowResetPw(false);
     setModalVisible(true);
   };
 
@@ -117,7 +121,7 @@ export default function OrgAdminAdminsScreen({ navigation }) {
         {item.campus_name ? <View style={styles.badge}><Text style={styles.badgeTxt}>{item.campus_name}</Text></View> : null}
       </View>
       <View style={styles.actionBtns}>
-        <TouchableOpacity onPress={() => { setResetModal(item); setNewPassword(''); }} style={styles.actionBtn}>
+        <TouchableOpacity onPress={() => { setResetModal(item); setNewPassword(''); setShowResetPw(false); }} style={styles.actionBtn}>
           <Ionicons name="key-outline" size={17} color="#F59E0B" />
         </TouchableOpacity>
         <TouchableOpacity onPress={() => openEdit(item)} style={styles.actionBtn}>
@@ -174,7 +178,12 @@ export default function OrgAdminAdminsScreen({ navigation }) {
               <TextInput style={styles.input} value={form.email} onChangeText={v => setForm(f => ({ ...f, email: v }))} autoCapitalize="none" keyboardType="email-address" />
               {!editing && <>
                 <Text style={styles.label}>Password *</Text>
-                <TextInput style={styles.input} value={form.password} onChangeText={v => setForm(f => ({ ...f, password: v }))} secureTextEntry />
+                <View style={styles.passwordWrap}>
+                  <TextInput style={[styles.input, styles.passwordInput]} value={form.password} onChangeText={v => setForm(f => ({ ...f, password: v }))} secureTextEntry={!showCreatePw} />
+                  <Pressable onPress={() => setShowCreatePw(p => !p)} style={styles.eyeToggle} hitSlop={8}>
+                    <Ionicons name={showCreatePw ? 'eye-off-outline' : 'eye-outline'} size={20} color="#94A3B8" />
+                  </Pressable>
+                </View>
                 <Text style={styles.label}>Campus *</Text>
                 <PickerField label="" value={form.school_id} onChange={v => setForm(f => ({ ...f, school_id: v }))}
                   items={campuses.map(c => ({ label: c.name, value: String(c.id) }))} placeholder="Select campus" />
@@ -197,7 +206,12 @@ export default function OrgAdminAdminsScreen({ navigation }) {
             <Text style={styles.modalTitle}>Reset Password</Text>
             <Text style={styles.sub}>{resetModal?.first_name} {resetModal?.last_name}</Text>
             <Text style={styles.label}>New Password</Text>
-            <TextInput style={styles.input} value={newPassword} onChangeText={setNewPassword} secureTextEntry placeholder="Enter new password" />
+            <View style={styles.passwordWrap}>
+              <TextInput style={[styles.input, styles.passwordInput]} value={newPassword} onChangeText={setNewPassword} secureTextEntry={!showResetPw} placeholder="Enter new password" />
+              <Pressable onPress={() => setShowResetPw(p => !p)} style={styles.eyeToggle} hitSlop={8}>
+                <Ionicons name={showResetPw ? 'eye-off-outline' : 'eye-outline'} size={20} color="#94A3B8" />
+              </Pressable>
+            </View>
             <View style={styles.modalBtns}>
               <TouchableOpacity onPress={() => setResetModal(null)} style={styles.cancelBtn}><Text style={styles.cancelTxt}>Cancel</Text></TouchableOpacity>
               <TouchableOpacity onPress={handleResetPassword} style={styles.saveBtn} disabled={saving}>
@@ -233,6 +247,9 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 18, fontWeight: '700', color: C.textDark, marginBottom: 8 },
   label: { fontSize: 13, fontWeight: '600', color: '#475569', marginBottom: 4, marginTop: 10 },
   input: { backgroundColor: '#F8FAFC', borderRadius: 10, padding: 12, fontSize: 14, color: C.textDark, borderWidth: 1, borderColor: '#E2E8F0' },
+  passwordWrap: { position: 'relative', justifyContent: 'center' },
+  passwordInput: { paddingRight: 44 },
+  eyeToggle: { position: 'absolute', right: 12, height: '100%', justifyContent: 'center' },
   modalBtns: { flexDirection: 'row', gap: 10, marginTop: 20 },
   cancelBtn: { flex: 1, padding: 14, borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', alignItems: 'center' },
   cancelTxt: { color: '#64748B', fontWeight: '600' },

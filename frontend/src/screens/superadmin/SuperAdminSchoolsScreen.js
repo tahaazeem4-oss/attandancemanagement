@@ -3,6 +3,7 @@ import {
   View, Text, ScrollView, Pressable, TextInput, Modal, Image,
   StyleSheet, ActivityIndicator, StatusBar, Alert, Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import api from '../../services/api';
@@ -190,10 +191,11 @@ function ConfirmModal({ visible, title, message, confirmLabel = 'Delete', onConf
 // ── AddAdminModal ─────────────────────────────────────────────
 function AddAdminModal({ visible, campusId, onClose, onSaved }) {
   const [form, setForm] = useState({ first_name: '', last_name: '', email: '', password: '' });
+  const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState('');
 
-  useEffect(() => { setForm({ first_name: '', last_name: '', email: '', password: '' }); setError(''); }, [visible]);
+  useEffect(() => { setForm({ first_name: '', last_name: '', email: '', password: '' }); setShowPw(false); setError(''); }, [visible]);
   const setF = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   const handleSave = async () => {
@@ -232,8 +234,13 @@ function AddAdminModal({ visible, campusId, onClose, onSaved }) {
             keyboardType="email-address" autoCapitalize="none"
             value={form.email} onChangeText={v => setF('email', v)} />
           <Text style={S.label}>Password *</Text>
-          <TextInput style={S.input} placeholder="Min 6 characters" placeholderTextColor={C.textLight}
-            secureTextEntry value={form.password} onChangeText={v => setF('password', v)} />
+          <View style={modal.passwordWrap}>
+            <TextInput style={[S.input, modal.passwordInput]} placeholder="Min 6 characters" placeholderTextColor={C.textLight}
+              secureTextEntry={!showPw} value={form.password} onChangeText={v => setF('password', v)} />
+            <Pressable onPress={() => setShowPw(p => !p)} style={modal.eyeToggle} hitSlop={8}>
+              <Ionicons name={showPw ? 'eye-off-outline' : 'eye-outline'} size={20} color="#94A3B8" />
+            </Pressable>
+          </View>
           <View style={modal.btnRow}>
             <Pressable style={modal.cancelBtn} onPress={onClose}><Text style={modal.cancelText}>Cancel</Text></Pressable>
             <Pressable style={modal.saveBtn} onPress={handleSave} disabled={loading}>
@@ -250,13 +257,14 @@ function AddAdminModal({ visible, campusId, onClose, onSaved }) {
 function EditAdminModal({ visible, admin, campusId, onClose, onSaved }) {
   const [form,        setForm]        = useState({ first_name: '', last_name: '', email: '' });
   const [newPassword, setNewPassword] = useState('');
+  const [showResetPw, setShowResetPw] = useState(false);
   const [loading,     setLoading]     = useState(false);
   const [resetting,   setResetting]   = useState(false);
   const [error,       setError]       = useState('');
 
   useEffect(() => {
     if (admin) setForm({ first_name: admin.first_name, last_name: admin.last_name, email: admin.email });
-    setNewPassword(''); setError('');
+    setNewPassword(''); setShowResetPw(false); setError('');
   }, [admin, visible]);
 
   const setF = (k, v) => setForm(p => ({ ...p, [k]: v }));
@@ -315,8 +323,13 @@ function EditAdminModal({ visible, admin, campusId, onClose, onSaved }) {
           </Pressable>
           <View style={modal.divider} />
           <Text style={modal.sectionLabel}>Reset Password</Text>
-          <TextInput style={S.input} placeholder="New password (min 6 chars)" placeholderTextColor={C.textLight}
-            secureTextEntry value={newPassword} onChangeText={setNewPassword} />
+          <View style={modal.passwordWrap}>
+            <TextInput style={[S.input, modal.passwordInput]} placeholder="New password (min 6 chars)" placeholderTextColor={C.textLight}
+              secureTextEntry={!showResetPw} value={newPassword} onChangeText={setNewPassword} />
+            <Pressable onPress={() => setShowResetPw(p => !p)} style={modal.eyeToggle} hitSlop={8}>
+              <Ionicons name={showResetPw ? 'eye-off-outline' : 'eye-outline'} size={20} color="#94A3B8" />
+            </Pressable>
+          </View>
           <Pressable style={editModal.resetBtn} onPress={handleResetPassword} disabled={resetting}>
             {resetting ? <ActivityIndicator color={C.primary} /> : <Text style={editModal.resetBtnText}>🔑  Reset Password</Text>}
           </Pressable>
@@ -635,6 +648,9 @@ const modal = StyleSheet.create({
   title:           { fontSize: 20, fontWeight: '800', color: C.textDark, marginBottom: 16 },
   errorBox:        { backgroundColor: '#FEF2F2', borderRadius: 10, padding: 10, marginBottom: 12, borderWidth: 1, borderColor: '#FECACA' },
   errorText:       { color: '#DC2626', fontSize: 13 },
+  passwordWrap:    { position: 'relative', justifyContent: 'center' },
+  passwordInput:   { paddingRight: 44 },
+  eyeToggle:       { position: 'absolute', right: 12, height: '100%', justifyContent: 'center' },
   logoRow:         { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 12 },
   logoThumb:       { width: 72, height: 72, borderRadius: 14, resizeMode: 'cover', borderWidth: 1, borderColor: C.border },
   logoPlaceholder: { width: 72, height: 72, borderRadius: 14, backgroundColor: C.cardAlt, borderWidth: 1.5, borderColor: C.border, borderStyle: 'dashed', justifyContent: 'center', alignItems: 'center' },

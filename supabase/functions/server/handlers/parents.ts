@@ -2,6 +2,7 @@
 import {
   json,
   getDb,
+  SUPABASE_URL,
   verifyToken,
   verifyTokenString,
   hashPassword,
@@ -204,7 +205,7 @@ export async function handleParent(
         class_name: l.classes?.class_name,
         section_name: l.section_id ? l.sections?.section_name : "All Sections",
         file_url: l.file_path
-          ? `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/public/lecture-files/${l.file_path}`
+          ? `${SUPABASE_URL()}/storage/v1/object/public/lectures/${l.file_path}`
           : null,
       }));
       return json({ lectures: result }, 200);

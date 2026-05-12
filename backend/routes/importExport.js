@@ -24,22 +24,22 @@ const upload = multer({
   },
 });
 
-const adminOnly = [protect, requireRole('admin')];
+const staffAccess = [protect, requireRole('admin', 'teacher', 'super_admin', 'org_admin', 'orgadmin')];
 
 // ── Teachers ──────────────────────────────────────────────────
-router.get('/teachers/template', ...adminOnly, ctrl.teacherTemplate);
-router.get('/teachers/export',   ...adminOnly, ctrl.exportTeachers);
-router.post('/teachers/import',  ...adminOnly, upload.single('file'), ctrl.importTeachers);
+router.get('/teachers/template', ...staffAccess, ctrl.teacherTemplate);
+router.get('/teachers/export',   ...staffAccess, ctrl.exportTeachers);
+router.post('/teachers/import',  ...staffAccess, upload.single('file'), ctrl.importTeachers);
 
 // ── Students ──────────────────────────────────────────────────
-router.get('/students/template', ...adminOnly, ctrl.studentTemplate);
-router.get('/students/export',   ...adminOnly, ctrl.exportStudents);
-router.post('/students/import',  ...adminOnly, upload.single('file'), ctrl.importStudents);
+router.get('/students/template', ...staffAccess, ctrl.studentTemplate);
+router.get('/students/export',   ...staffAccess, ctrl.exportStudents);
+router.post('/students/import',  ...staffAccess, upload.single('file'), ctrl.importStudents);
 
 // ── Classes ───────────────────────────────────────────────────
-router.get('/classes/template',  ...adminOnly, ctrl.classTemplate);
-router.get('/classes/export',    ...adminOnly, ctrl.exportClasses);
-router.post('/classes/import',   ...adminOnly, upload.single('file'), ctrl.importClasses);
+router.get('/classes/template',  ...staffAccess, ctrl.classTemplate);
+router.get('/classes/export',    ...staffAccess, ctrl.exportClasses);
+router.post('/classes/import',   ...staffAccess, upload.single('file'), ctrl.importClasses);
 
 // ── Attendance report export ─────────────────────────────────
 // Any authenticated user (admin / teacher / student-portal admin) may export.
@@ -47,6 +47,6 @@ router.post('/classes/import',   ...adminOnly, upload.single('file'), ctrl.impor
 router.get('/attendance/export', protect, ctrl.exportAttendance);
 
 // ── Leave report export ────────────────────────────────────────
-router.get('/leaves/export',     ...adminOnly, ctrl.exportLeaves);
+router.get('/leaves/export',     ...staffAccess, ctrl.exportLeaves);
 
 module.exports = router;
