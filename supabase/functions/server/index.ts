@@ -19,6 +19,7 @@ import { handleSchools } from "./handlers/schools.ts";
 import { handleParent, handleAdminParents } from "./handlers/parents.ts";
 import { handleOrgAdmin } from "./handlers/orgAdmin.ts";
 import { handleOrgAdminImportExport } from "./handlers/orgAdmin.ts";
+import { handleChat } from "./handlers/chat.ts";
 
 Deno.serve(async (req: Request) => {
   // CORS preflight
@@ -56,6 +57,7 @@ Deno.serve(async (req: Request) => {
     if (path.startsWith("/import-export"))   return await handleImportExport(req, path, url);
     if (path.startsWith("/schools"))         return await handleSchools(req, path, url);
     if (path.startsWith("/parent"))          return await handleParent(req, path, url);
+    if (path.startsWith("/chat"))             return await handleChat(req, path, url);
 
     // Health check
     if (path === "/" || path === "/health") {

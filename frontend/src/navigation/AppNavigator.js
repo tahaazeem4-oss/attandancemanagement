@@ -28,6 +28,9 @@ import ForgotPasswordScreen  from '../screens/ForgotPasswordScreen';
 
 // Shared screens
 import StaffNotificationsScreen    from '../screens/StaffNotificationsScreen';
+import ChatListScreen from '../screens/chat/ChatListScreen';
+import ChatScreen from '../screens/chat/ChatScreen';
+import NewChatScreen from '../screens/chat/NewChatScreen';
 import StudentNotificationsScreen from '../screens/student/StudentNotificationsScreen';
 
 // Parent screens
@@ -69,12 +72,23 @@ function createConfiguredStack(screens) {
 
 const TeacherHomeStack = createConfiguredStack(teacherHomeScreens);
 
+// Chat stack is the same screens — ChatList is the root, Chat is pushed on nav
+function TeacherChatStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="ChatList" component={ChatListScreen} />
+      <Stack.Screen name="Chat" component={ChatScreen} />
+    </Stack.Navigator>
+  );
+}
+
 function TeacherTabs() {
   return (
     <RoleTabs
       homeComponent={TeacherHomeStack}
       notificationComponent={StaffNotificationsScreen}
       unreadCountPath="/notifications/inbox/unread-count"
+      chatComponent={TeacherChatStack}
     />
   );
 }
@@ -84,12 +98,22 @@ function TeacherTabs() {
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const AdminHomeStack = createConfiguredStack(adminHomeScreens);
 
+function AdminChatStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="ChatList" component={ChatListScreen} />
+      <Stack.Screen name="Chat" component={ChatScreen} />
+    </Stack.Navigator>
+  );
+}
+
 function AdminTabs() {
   return (
     <RoleTabs
       homeComponent={AdminHomeStack}
       notificationComponent={StaffNotificationsScreen}
       unreadCountPath="/notifications/inbox/unread-count"
+      chatComponent={AdminChatStack}
     />
   );
 }
@@ -140,6 +164,16 @@ function StudentTabs() {
 // ────────────────────────────────────────────────────────────────────────────────────────────────────────
 // PARENT STACKS
 // ────────────────────────────────────────────────────────────────────────────────────────────────────────
+function ParentChatStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="ChatList" component={ChatListScreen} />
+      <Stack.Screen name="Chat" component={ChatScreen} />
+      <Stack.Screen name="NewChat" component={NewChatScreen} />
+    </Stack.Navigator>
+  );
+}
+
 function ParentChildHomeStack({ route, child }) {
   const activeChild = child || route?.params?.child || null;
   return (
@@ -221,6 +255,11 @@ function ParentStudentPortalTabs({ route, navigation }) {
         tabBarBadgeStyle: { backgroundColor: '#EF4444', color: '#fff', fontSize: 10, minWidth: 18, height: 18, lineHeight: 18 },
         tabBarIcon: ({ focused }) => notificationTabIcon({ focused, unread: notifUnread }),
       },
+    },
+    {
+      name: 'ChatTab',
+      component: ParentChatStack,
+      options: { title: 'Messages', tabBarIcon: ({ focused }) => tabIcon(focused, 'chatbubbles', 'chatbubbles-outline') },
     },
   ];
 

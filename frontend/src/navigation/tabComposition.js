@@ -73,7 +73,7 @@ export function renderTabScreens(screens) {
   ));
 }
 
-export function RoleTabs({ homeComponent, notificationComponent, unreadCountPath }) {
+export function RoleTabs({ homeComponent, notificationComponent, unreadCountPath, chatComponent }) {
   const tabBarOptions = useTabBarOptions();
   const { count: notifUnread, fetchUnread } = useUnreadNotifications(unreadCountPath);
 
@@ -101,6 +101,13 @@ export function RoleTabs({ homeComponent, notificationComponent, unreadCountPath
         component={homeComponent}
         options={{ title: 'Home', tabBarIcon: ({ focused }) => tabIcon(focused, 'home', 'home-outline', 26) }}
       />
+      {chatComponent && (
+        <Tab.Screen
+          name="ChatTab"
+          component={chatComponent}
+          options={{ title: 'Messages', tabBarIcon: ({ focused }) => tabIcon(focused, 'chatbubbles', 'chatbubbles-outline') }}
+        />
+      )}
       <Tab.Screen
         name="NotifTab"
         component={notificationComponent}

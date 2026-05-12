@@ -1,5 +1,8 @@
 import StaffNotificationsScreen from '../screens/StaffNotificationsScreen';
 import SendNotificationScreen from '../screens/SendNotificationScreen';
+import ChatListScreen from '../screens/chat/ChatListScreen';
+import ChatScreen from '../screens/chat/ChatScreen';
+import NewChatScreen from '../screens/chat/NewChatScreen';
 import UploadLectureScreen from '../screens/UploadLectureScreen';
 import LectureListScreen from '../screens/LectureListScreen';
 
@@ -62,6 +65,8 @@ export const teacherHomeScreens = [
   { name: 'LectureList', component: LectureListScreen },
   { name: 'SendNotification', component: SendNotificationScreen },
   { name: 'StaffNotifications', component: StaffNotificationsScreen },
+  { name: 'ChatList', component: ChatListScreen },
+  { name: 'Chat', component: ChatScreen, options: { headerShown: false } },
 ];
 
 export const adminHomeScreens = [
@@ -80,6 +85,8 @@ export const adminHomeScreens = [
   { name: 'AdminTeacherAttendance', component: AdminTeacherAttendanceScreen },
   { name: 'Report', component: ReportScreen },
   { name: 'StudentAttendanceDetail', component: StudentAttendanceDetailScreen },
+  { name: 'ChatList', component: ChatListScreen },
+  { name: 'Chat', component: ChatScreen, options: { headerShown: false } },
 ];
 
 export const orgAdminHomeScreens = [
@@ -142,5 +149,8 @@ export function getParentStackScreens(parentStudentPortalTabsComponent, parentDa
   return [
     { name: 'ParentDashboard', component: parentDashboardScreenComponent },
     { name: 'ChildStudentPortal', component: parentStudentPortalTabsComponent },
+    { name: 'ChatList', component: ChatListScreen },
+    { name: 'Chat', component: ChatScreen, options: { headerShown: false } },
+    { name: 'NewChat', component: NewChatScreen, options: { headerShown: false } },
   ];
 }
