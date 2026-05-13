@@ -85,8 +85,14 @@ export default function ParentsManagerScreen({ navigation, mode }) {
           const { data } = await api.get(`/super-admin/organizations/${filterOrg}/parents`);
           setParents(Array.isArray(data) ? data : []);
         } else {
-          // Nothing selected
-          setParents([]);
+          // All orgs + all campuses — aggregate parents across all campuses.
+          const responses = await Promise.all(
+            allCampuses.map(campus =>
+              api.get(`/super-admin/schools/${campus.id}/parents`).catch(() => ({ data: [] })),
+            ),
+          );
+          const merged = responses.flatMap(r => (r.data?.parents || r.data || []));
+          setParents(merged);
         }
       } else if (isOrg) {
         const params = filterCampus ? { campus_id: filterCampus } : {};

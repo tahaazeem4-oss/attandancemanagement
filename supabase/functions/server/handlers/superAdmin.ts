@@ -19,6 +19,18 @@ export async function handleSuperAdmin(
 
   const db = getDb();
 
+  const deriveRoleFromAssignments = (assignments: unknown[]): string => {
+    const n = Array.isArray(assignments) ? assignments.length : 0;
+    if (n === 0) return "subject_teacher";
+    if (n === 1) return "class_teacher";
+    return "floor_incharge";
+  };
+
+  const validateTeacherRoleAssignments = (
+    _teacherRole: string,
+    _assignments: unknown[],
+  ): string | null => null;
+
   // ── GET /super-admin/stats ───────────────────────────────────
   if (path === "/super-admin/stats" && method === "GET") {
     try {
@@ -266,7 +278,7 @@ export async function handleSuperAdmin(
 
       const { data: teachers } = await db
         .from("teachers")
-        .select("id, first_name, last_name, email, phone")
+        .select("id, first_name, last_name, email, phone, teacher_role")
         .eq("school_id", schoolId);
 
       const { data: assignments } = await db
@@ -290,7 +302,7 @@ export async function handleSuperAdmin(
       let result = (teachers || []).map((t: Record<string, unknown>) => ({
         ...t,
         assignments: assignMap[t.id as number] || [],
-        teacher_role: (assignMap[t.id as number]?.length || 0) > 0 ? "class_teacher" : "subject_teacher",
+        teacher_role: (t.teacher_role as string) || deriveRoleFromAssignments(assignMap[t.id as number] || []),
       }));
 
       if (classId) {
@@ -312,20 +324,36 @@ export async function handleSuperAdmin(
   if (schoolTeachersMatch && method === "POST") {
     const schoolId = parseInt(schoolTeachersMatch[1]);
     try {
-      const { first_name, last_name, email, password, phone, assignments } = await req.json();
+      const body = await req.json();
+      const { first_name, last_name, email, password, phone, assignments } = body;
+      const normalizedAssignments = Array.isArray(assignments) ? assignments : [];
+      const teacherRole = ["class_teacher", "floor_incharge", "subject_teacher"].includes(body.teacher_role)
+        ? body.teacher_role
+        : deriveRoleFromAssignments(normalizedAssignments);
+      const roleValidationError = validateTeacherRoleAssignments(teacherRole, normalizedAssignments);
+      if (roleValidationError) return json({ message: roleValidationError }, 400);
+
       const hashed = await hashPassword(password);
       const { data: t, error } = await db
         .from("teachers")
-        .insert({ school_id: schoolId, first_name, last_name, email: email.trim().toLowerCase(), password: hashed, phone: phone || null })
+        .insert({
+          school_id: schoolId,
+          first_name,
+          last_name,
+          email: email.trim().toLowerCase(),
+          password: hashed,
+          phone: phone || null,
+          teacher_role: teacherRole,
+        })
         .select()
         .single();
       if (error) {
         if (error.code === "23505") return json({ message: "Email already exists" }, 409);
         throw error;
       }
-      if (Array.isArray(assignments) && assignments.length) {
+      if (normalizedAssignments.length) {
         await db.from("teacher_classes").insert(
-          assignments.map((a: Record<string, unknown>) => ({ teacher_id: t.id, class_id: a.class_id, section_id: a.section_id })),
+          normalizedAssignments.map((a: Record<string, unknown>) => ({ teacher_id: t.id, class_id: a.class_id, section_id: a.section_id })),
         );
       }
       return json({ message: "Teacher created", id: t.id }, 201);
@@ -340,12 +368,26 @@ export async function handleSuperAdmin(
   if (schoolTeacherIdMatch && method === "PUT") {
     const id = parseInt(schoolTeacherIdMatch[1]);
     try {
-      const { first_name, last_name, email, phone, assignments } = await req.json();
-      await db.from("teachers").update({ first_name, last_name, email: email?.trim().toLowerCase(), phone: phone || null }).eq("id", id);
+      const body = await req.json();
+      const { first_name, last_name, email, phone, assignments } = body;
+      const normalizedAssignments = Array.isArray(assignments) ? assignments : [];
+      const teacherRole = ["class_teacher", "floor_incharge", "subject_teacher"].includes(body.teacher_role)
+        ? body.teacher_role
+        : deriveRoleFromAssignments(normalizedAssignments);
+      const roleValidationError = validateTeacherRoleAssignments(teacherRole, normalizedAssignments);
+      if (roleValidationError) return json({ message: roleValidationError }, 400);
+
+      await db.from("teachers").update({
+        first_name,
+        last_name,
+        email: email?.trim().toLowerCase(),
+        phone: phone || null,
+        teacher_role: teacherRole,
+      }).eq("id", id);
       await db.from("teacher_classes").delete().eq("teacher_id", id);
-      if (Array.isArray(assignments) && assignments.length) {
+      if (normalizedAssignments.length) {
         await db.from("teacher_classes").insert(
-          assignments.map((a: Record<string, unknown>) => ({ teacher_id: id, class_id: a.class_id, section_id: a.section_id })),
+          normalizedAssignments.map((a: Record<string, unknown>) => ({ teacher_id: id, class_id: a.class_id, section_id: a.section_id })),
         );
       }
       return json({ message: "Teacher updated" });

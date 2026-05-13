@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import useUnreadNotifications from '../hooks/useUnreadNotifications';
 import ProfileScreen from '../screens/ProfileScreen';
+import api from '../services/api';
+import { subscribeChatUnreadRefresh } from '../lib/chatEvents';
 
 const Tab = createBottomTabNavigator();
 
@@ -76,6 +78,31 @@ export function renderTabScreens(screens) {
 export function RoleTabs({ homeComponent, notificationComponent, unreadCountPath, chatComponent }) {
   const tabBarOptions = useTabBarOptions();
   const { count: notifUnread, fetchUnread } = useUnreadNotifications(unreadCountPath);
+  const [chatUnread, setChatUnread] = useState(0);
+
+  const fetchChatUnread = useCallback(() => {
+    if (!chatComponent) {
+      setChatUnread(0);
+      return;
+    }
+    api.get('/chat/conversations')
+      .then(({ data }) => {
+        const total = (data || []).reduce((sum, conv) => sum + (Number(conv?.unread_count) || 0), 0);
+        setChatUnread(total);
+      })
+      .catch(() => setChatUnread(0));
+  }, [chatComponent]);
+
+  useEffect(() => {
+    if (!chatComponent) return;
+    fetchChatUnread();
+    const timer = setInterval(fetchChatUnread, 7000);
+    const unsubscribe = subscribeChatUnreadRefresh(fetchChatUnread);
+    return () => {
+      clearInterval(timer);
+      unsubscribe();
+    };
+  }, [chatComponent, fetchChatUnread]);
 
   const notificationOptions = unreadCountPath
     ? {
@@ -105,7 +132,14 @@ export function RoleTabs({ homeComponent, notificationComponent, unreadCountPath
         <Tab.Screen
           name="ChatTab"
           component={chatComponent}
-          options={{ title: 'Messages', tabBarIcon: ({ focused }) => tabIcon(focused, 'chatbubbles', 'chatbubbles-outline') }}
+          listeners={{ tabPress: fetchChatUnread }}
+          options={{
+            title: 'Messages',
+            popToTopOnBlur: true,
+            tabBarBadge: notificationBadgeValue(chatUnread),
+            tabBarBadgeStyle: { backgroundColor: '#EF4444', color: '#fff', fontSize: 10, minWidth: 18, height: 18, lineHeight: 18 },
+            tabBarIcon: ({ focused }) => tabIcon(focused, 'chatbubbles', 'chatbubbles-outline'),
+          }}
         />
       )}
       <Tab.Screen

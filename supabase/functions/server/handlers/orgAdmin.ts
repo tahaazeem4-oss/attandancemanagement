@@ -48,6 +48,18 @@ export async function handleOrgAdmin(
     return map;
   }
 
+  const deriveRoleFromAssignments = (assignments: unknown[]): string => {
+    const n = Array.isArray(assignments) ? assignments.length : 0;
+    if (n === 0) return "subject_teacher";
+    if (n === 1) return "class_teacher";
+    return "floor_incharge";
+  };
+
+  const validateTeacherRoleAssignments = (
+    _teacherRole: string,
+    _assignments: unknown[],
+  ): string | null => null;
+
   // ── GET /org-admin/stats ─────────────────────────────────────
   if (path === "/org-admin/stats" && method === "GET") {
     try {
@@ -230,13 +242,52 @@ export async function handleOrgAdmin(
   if (path === "/org-admin/teachers" && method === "GET") {
     try {
       const campusId = url.searchParams.get("campus_id");
+      const classId = url.searchParams.get("class_id");
+      const sectionId = url.searchParams.get("section_id");
       const campusIds = campusId ? [parseInt(campusId)] : await getCampusIds();
       if (!campusIds.length) return json([]);
       const { data: teachers } = await db.from("teachers")
-        .select("id, first_name, last_name, email, phone, school_id, created_at")
+        .select("id, first_name, last_name, email, phone, school_id, created_at, teacher_role")
         .in("school_id", campusIds).order("last_name");
+
+      const teacherIds = (teachers || []).map((t: Record<string, unknown>) => t.id as number);
+      const { data: assignments } = teacherIds.length
+        ? await db
+          .from("teacher_classes")
+          .select("teacher_id, class_id, section_id, classes!inner(class_name), sections!inner(section_name)")
+          .in("teacher_id", teacherIds)
+        : { data: [] };
+
+      const assignMap: Record<number, unknown[]> = {};
+      for (const a of assignments || []) {
+        const r = a as Record<string, unknown>;
+        const tid = r.teacher_id as number;
+        if (!assignMap[tid]) assignMap[tid] = [];
+        assignMap[tid].push({
+          class_id: r.class_id,
+          section_id: r.section_id,
+          class_name: (r.classes as Record<string, unknown>).class_name,
+          section_name: (r.sections as Record<string, unknown>).section_name,
+        });
+      }
+
       const sMap = await buildSchoolMap(campusIds);
-      return json((teachers || []).map((t: Record<string, unknown>) => ({ ...t, campus_name: sMap[t.school_id as number] || null })));
+      let result = (teachers || []).map((t: Record<string, unknown>) => ({
+        ...t,
+        assignments: assignMap[t.id as number] || [],
+        teacher_role: (t.teacher_role as string) || deriveRoleFromAssignments(assignMap[t.id as number] || []),
+        campus_name: sMap[t.school_id as number] || null,
+      }));
+
+      if (classId) {
+        result = result.filter((t: Record<string, unknown>) =>
+          (t.assignments as Record<string, unknown>[]).some(
+            (a) => String(a.class_id) === classId && (!sectionId || String(a.section_id) === sectionId),
+          )
+        );
+      }
+
+      return json(result);
     } catch (err) {
       console.error("[org-admin/teachers GET]", err);
       return json({ message: "Server error" }, 500);
@@ -245,18 +296,46 @@ export async function handleOrgAdmin(
 
   if (path === "/org-admin/teachers" && method === "POST") {
     try {
-      const { first_name, last_name, email, password, phone, school_id } = await req.json();
+      const body = await req.json();
+      const { first_name, last_name, email, password, phone, school_id, assignments } = body;
       if (!first_name || !last_name || !email || !password || !school_id)
         return json({ message: "Missing required fields" }, 400);
       if (!(await verifyCampus(school_id))) return json({ message: "Campus not in your org" }, 403);
+
+      const normalizedAssignments = Array.isArray(assignments) ? assignments : [];
+      const teacherRole = ["class_teacher", "floor_incharge", "subject_teacher"].includes(body.teacher_role)
+        ? body.teacher_role
+        : deriveRoleFromAssignments(normalizedAssignments);
+      const roleValidationError = validateTeacherRoleAssignments(teacherRole, normalizedAssignments);
+      if (roleValidationError) return json({ message: roleValidationError }, 400);
+
       const hashed = await hashPassword(password);
       const { data, error } = await db.from("teachers")
-        .insert({ school_id, first_name: first_name.trim(), last_name: last_name.trim(), email: email.trim().toLowerCase(), password: hashed, phone: phone || null })
+        .insert({
+          school_id,
+          first_name: first_name.trim(),
+          last_name: last_name.trim(),
+          email: email.trim().toLowerCase(),
+          password: hashed,
+          phone: phone || null,
+          teacher_role: teacherRole,
+        })
         .select().single();
       if (error) {
         if (error.code === "23505") return json({ message: "Email already exists" }, 409);
         throw error;
       }
+
+      if (normalizedAssignments.length) {
+        await db.from("teacher_classes").insert(
+          normalizedAssignments.map((a: Record<string, unknown>) => ({
+            teacher_id: data.id,
+            class_id: a.class_id,
+            section_id: a.section_id,
+          })),
+        );
+      }
+
       return json({ message: "Teacher created", id: data.id }, 201);
     } catch (err) {
       console.error("[org-admin/teachers POST]", err);
@@ -268,9 +347,35 @@ export async function handleOrgAdmin(
   if (teacherMatch && method === "PUT") {
     const id = parseInt(teacherMatch[1]);
     try {
-      const { first_name, last_name, email, phone } = await req.json();
+      const body = await req.json();
+      const { first_name, last_name, email, phone, assignments } = body;
+      const normalizedAssignments = Array.isArray(assignments) ? assignments : [];
+      const teacherRole = ["class_teacher", "floor_incharge", "subject_teacher"].includes(body.teacher_role)
+        ? body.teacher_role
+        : deriveRoleFromAssignments(normalizedAssignments);
+      const roleValidationError = validateTeacherRoleAssignments(teacherRole, normalizedAssignments);
+      if (roleValidationError) return json({ message: roleValidationError }, 400);
+
       const campusIds = await getCampusIds();
-      await db.from("teachers").update({ first_name, last_name, email: email?.trim().toLowerCase(), phone: phone || null }).eq("id", id).in("school_id", campusIds);
+      await db.from("teachers").update({
+        first_name,
+        last_name,
+        email: email?.trim().toLowerCase(),
+        phone: phone || null,
+        teacher_role: teacherRole,
+      }).eq("id", id).in("school_id", campusIds);
+
+      await db.from("teacher_classes").delete().eq("teacher_id", id);
+      if (normalizedAssignments.length) {
+        await db.from("teacher_classes").insert(
+          normalizedAssignments.map((a: Record<string, unknown>) => ({
+            teacher_id: id,
+            class_id: a.class_id,
+            section_id: a.section_id,
+          })),
+        );
+      }
+
       return json({ message: "Teacher updated" });
     } catch (err) {
       console.error("[org-admin/teachers PUT]", err);

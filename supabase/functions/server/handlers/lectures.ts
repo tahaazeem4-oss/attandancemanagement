@@ -6,6 +6,7 @@ import {
   sendPush,
   tokensForClassStudents,
   SUPABASE_URL,
+  resolveTeacherRole,
 } from "../_shared.ts";
 
 const BUCKET = "lectures";
@@ -222,6 +223,13 @@ export async function handleLectures(
   if (deleteMatch && method === "DELETE") {
     const id = parseInt(deleteMatch[1]);
     try {
+      if (user.role === "teacher") {
+        const teacherRole = await resolveTeacherRole(db, user.id as number);
+        if (teacherRole === "subject_teacher") {
+          return json({ message: "Subject teachers cannot delete classwork/homework" }, 403);
+        }
+      }
+
       const { data } = await db
         .from("lectures")
         .select("file_path, school_id")

@@ -14,6 +14,7 @@ import AddStudentScreen from '../screens/AddStudentScreen';
 import ReportScreen from '../screens/ReportScreen';
 import TeacherLeavesScreen from '../screens/TeacherLeavesScreen';
 import StudentAttendanceDetailScreen from '../screens/StudentAttendanceDetailScreen';
+import TeacherStudentsScreen from '../screens/TeacherStudentsScreen';
 
 import AdminHomeScreen from '../screens/admin/AdminHomeScreen';
 import AdminTeachersScreen from '../screens/admin/AdminTeachersScreen';
@@ -59,6 +60,7 @@ export const teacherHomeScreens = [
   { name: 'ClassSelection', component: ClassSelectionScreen },
   { name: 'StudentAttendance', component: StudentAttendanceScreen },
   { name: 'AddStudent', component: AddStudentScreen, options: { title: 'Add Student' } },
+  { name: 'TeacherStudents', component: TeacherStudentsScreen },
   { name: 'TeacherLeaves', component: TeacherLeavesScreen, options: { ...HIDDEN_HEADER, title: 'Leave Requests' } },
   { name: 'Report', component: ReportScreen },
   { name: 'StudentAttendanceDetail', component: StudentAttendanceDetailScreen },

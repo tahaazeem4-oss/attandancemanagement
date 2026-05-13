@@ -5,6 +5,7 @@ import {
   verifyToken,
   sendPush,
   tokensForStudents,
+  resolveTeacherRole,
 } from "../_shared.ts";
 
 export async function handleTeachers(
@@ -95,6 +96,11 @@ export async function handleTeachers(
   // ── GET /teachers/leaves ─────────────────────────────────────
   if (path === "/teachers/leaves" && method === "GET") {
     try {
+      const teacherRole = await resolveTeacherRole(db, teacherId);
+      if (teacherRole === "subject_teacher") {
+        return json({ message: "Subject teachers cannot manage student leaves" }, 403);
+      }
+
       // Get all class/section combos for this teacher
       const { data: assignments } = await db
         .from("teacher_classes")
@@ -176,6 +182,11 @@ export async function handleTeachers(
   if (leaveGroupStatusMatch && method === "PUT") {
     const groupId = leaveGroupStatusMatch[1];
     try {
+      const teacherRole = await resolveTeacherRole(db, teacherId);
+      if (teacherRole === "subject_teacher") {
+        return json({ message: "Subject teachers cannot manage student leaves" }, 403);
+      }
+
       const { status } = await req.json();
       if (!["approved", "rejected"].includes(status))
         return json({ message: "Invalid status" }, 400);
@@ -233,6 +244,11 @@ export async function handleTeachers(
   if (leaveGroupWithdrawalMatch && method === "PUT") {
     const groupId = leaveGroupWithdrawalMatch[1];
     try {
+      const teacherRole = await resolveTeacherRole(db, teacherId);
+      if (teacherRole === "subject_teacher") {
+        return json({ message: "Subject teachers cannot manage student leaves" }, 403);
+      }
+
       const { action } = await req.json();
       if (!["approve", "reject"].includes(action))
         return json({ message: "Invalid action" }, 400);

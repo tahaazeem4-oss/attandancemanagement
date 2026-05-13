@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, Pressable, StyleSheet,
-  ActivityIndicator, SectionList,
+  ActivityIndicator, SectionList, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import api from '../../services/api';
 import { C } from '../../config/theme';
 
@@ -14,22 +15,38 @@ export default function NewChatScreen({ navigation }) {
   const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(null); // id of person being connected to
+  const mountedRef = useRef(true);
 
   const load = useCallback(async () => {
     try {
-      setLoading(true);
+      if (mountedRef.current) setLoading(true);
       const [tRes, aRes] = await Promise.allSettled([
         api.get('/chat/teachers'),
         api.get('/chat/admins'),
       ]);
-      setTeachers(tRes.status === 'fulfilled' ? (tRes.value?.data || []) : []);
-      setAdmins(aRes.status === 'fulfilled' ? (aRes.value?.data || []) : []);
+      if (mountedRef.current) {
+        setTeachers(tRes.status === 'fulfilled' ? (tRes.value?.data || []) : []);
+        setAdmins(aRes.status === 'fulfilled' ? (aRes.value?.data || []) : []);
+      }
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load]),
+  );
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const startChat = async (person, participantType) => {
     const key = `${participantType}-${person.id}`;
@@ -47,8 +64,9 @@ export default function NewChatScreen({ navigation }) {
       };
       // Replace NewChat screen with Chat screen
       navigation.replace('Chat', { conversation: enriched });
-    } catch {
-      // silently ignore — they can try again
+    } catch (err) {
+      const msg = err?.response?.data?.message || 'Unable to start chat right now. Please try again.';
+      Alert.alert('Could not open chat', msg);
     } finally {
       setStarting(null);
     }

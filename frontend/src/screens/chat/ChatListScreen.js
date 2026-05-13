@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, Pressable, StyleSheet,
   ActivityIndicator, RefreshControl,
@@ -40,29 +40,67 @@ export default function ChatListScreen({ navigation }) {
   const [conversations, setConversations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const mountedRef = useRef(true);
 
   const isParent = user?.role === 'parent';
 
+  const goHome = useCallback(() => {
+    const parentNav = navigation.getParent?.();
+
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+
+    // When ChatList is the root of a tab stack, route directly to home tabs.
+    if (parentNav?.navigate) {
+      parentNav.navigate('HomeTab');
+      return;
+    }
+
+    // Fallback for parent portal where a dedicated parent-home tab exists.
+    navigation.navigate('ParentHomeTab');
+  }, [navigation]);
+
   const loadConversations = useCallback(async (isRefresh = false) => {
     try {
-      if (!isRefresh) setLoading(true);
+      if (!isRefresh && mountedRef.current) setLoading(true);
       const { data } = await api.get('/chat/conversations');
-      setConversations(Array.isArray(data) ? data : []);
+      if (mountedRef.current) setConversations(Array.isArray(data) ? data : []);
     } catch {
-      setConversations([]);
+      if (mountedRef.current) setConversations([]);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (mountedRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   useFocusEffect(
     useCallback(() => {
       loadConversations();
+
+      const timer = setInterval(() => {
+        loadConversations(true);
+      }, 7000);
+
+      return () => clearInterval(timer);
     }, [loadConversations]),
   );
 
   const openChat = (conv) => {
+    // Optimistically clear unread for the opened conversation so UI updates immediately.
+    setConversations((prev) =>
+      prev.map((c) => (c.id === conv.id ? { ...c, unread_count: 0 } : c)),
+    );
     navigation.navigate('Chat', { conversation: conv });
   };
 
@@ -111,6 +149,9 @@ export default function ChatListScreen({ navigation }) {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Header */}
       <View style={styles.header}>
+        <Pressable style={styles.backBtn} onPress={goHome}>
+          <Ionicons name="arrow-back" size={22} color="#fff" />
+        </Pressable>
         <Text style={styles.headerTitle}>Messages</Text>
         <Pressable
           style={styles.newBtn}
@@ -161,12 +202,12 @@ const styles = StyleSheet.create({
     backgroundColor: C.primary,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
+  backBtn: { marginRight: 10, padding: 4 },
   headerTitle: { color: '#fff', fontSize: 20, fontWeight: '700' },
-  newBtn: { padding: 4 },
+  newBtn: { padding: 4, marginLeft: 'auto' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   empty: { flexGrow: 1 },
   emptyTitle: { fontSize: 18, fontWeight: '600', color: C.textMed, marginTop: 16, textAlign: 'center' },

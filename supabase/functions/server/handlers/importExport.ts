@@ -1,5 +1,5 @@
 // handlers/importExport.ts — Excel import/export using npm:xlsx
-import { json, getDb, verifyToken, hashPassword } from "../_shared.ts";
+import { json, getDb, verifyToken, hashPassword, resolveTeacherRole } from "../_shared.ts";
 // deno-lint-ignore-file no-explicit-any
 import * as XLSX from "npm:xlsx";
 
@@ -55,6 +55,13 @@ export async function handleImportExport(
 
   const db = getDb();
   const schoolId = user.school_id as number;
+
+  if (user.role === "teacher" && isTeacherAllowed) {
+    const teacherRole = await resolveTeacherRole(db, user.id as number);
+    if (teacherRole === "subject_teacher") {
+      return json({ message: "Subject teachers cannot export attendance or leave reports" }, 403);
+    }
+  }
 
   // ── TEACHERS ──────────────────────────────────────────────────
 

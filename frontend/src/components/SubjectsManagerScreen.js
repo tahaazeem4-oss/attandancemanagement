@@ -80,17 +80,32 @@ export default function SubjectsManagerScreen({ navigation, mode }) {
   }, [isSuper, orgId]);
 
   const load = useCallback(async () => {
-    if ((isOrg || isSuper) && !campusId) {
-      setSubjects([]);
-      return;
-    }
-
     setLoading(true);
     try {
       if (isSuper) {
-        const { data } = await api.get(`/super-admin/schools/${campusId}/subjects`);
-        setSubjects(data || []);
+        if (campusId) {
+          const { data } = await api.get(`/super-admin/schools/${campusId}/subjects`);
+          setSubjects(data || []);
+        } else {
+          // "All campuses" for super admin: aggregate subjects across scoped campuses.
+          const { data: allCampuses } = await api.get('/super-admin/schools');
+          const scopedCampuses = (allCampuses || []).filter(c => !orgId || String(c.org_id) === String(orgId));
+          if (!scopedCampuses.length) {
+            setSubjects([]);
+          } else {
+            const responses = await Promise.all(
+              scopedCampuses.map(campus =>
+                api.get(`/super-admin/schools/${campus.id}/subjects`).catch(() => ({ data: [] })),
+              ),
+            );
+            setSubjects(responses.flatMap(r => r.data || []));
+          }
+        }
       } else if (isOrg) {
+        if (!campusId) {
+          setSubjects([]);
+          return;
+        }
         const { data } = await api.get('/org-admin/subjects', { params: { campus_id: campusId } });
         setSubjects(data || []);
       } else {
@@ -112,7 +127,7 @@ export default function SubjectsManagerScreen({ navigation, mode }) {
     } finally {
       setLoading(false);
     }
-  }, [isOrg, isSuper, campusId]);
+  }, [isOrg, isSuper, campusId, orgId]);
 
   useEffect(() => {
     load();

@@ -106,6 +106,7 @@ export async function handleAuth(
           email: t.email,
           phone: t.phone,
           role: "teacher",
+          teacher_role: t.teacher_role || "subject_teacher",
           school_id: t.school_id,
         };
         const token = await signJwt(user);
@@ -173,10 +174,14 @@ export async function handleAuth(
       const { role } = payload;
 
       if (role === "teacher") {
-        const { first_name, last_name, email, password, phone, school_id } =
+        const { first_name, last_name, email, password, phone, school_id, teacher_role } =
           payload;
         if (!first_name || !last_name || !email || !password || !school_id)
           return json({ message: "Missing required fields" }, 400);
+
+        const normalizedRole = ["class_teacher", "floor_incharge", "subject_teacher"].includes(teacher_role)
+          ? teacher_role
+          : "subject_teacher";
 
         const hashed = await hashPassword(password);
         const { data: inserted, error } = await db
@@ -188,6 +193,7 @@ export async function handleAuth(
             email: email.trim().toLowerCase(),
             password: hashed,
             phone: phone || null,
+            teacher_role: normalizedRole,
           })
           .select()
           .single();
@@ -205,6 +211,7 @@ export async function handleAuth(
           email: inserted.email,
           phone: inserted.phone,
           role: "teacher",
+          teacher_role: inserted.teacher_role || normalizedRole,
           school_id,
         };
         const token = await signJwt(user);

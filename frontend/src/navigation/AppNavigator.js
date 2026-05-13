@@ -21,6 +21,7 @@ import {
   notificationTabIcon,
   renderTabScreens,
 } from './tabComposition';
+import { subscribeChatUnreadRefresh } from '../lib/chatEvents';
 
 // Auth screens
 import LoginScreen           from '../screens/LoginScreen';
@@ -191,6 +192,7 @@ function ParentStudentPortalTabs({ route, navigation }) {
   const [currentChild, setCurrentChild] = useState(initialChild);
   const tabBarOptions = useTabBarOptions();
   const [notifUnread, setNotifUnread] = useState(0);
+  const [chatUnread, setChatUnread] = useState(0);
 
   useEffect(() => {
     const incomingChild = route?.params?.child || null;
@@ -231,6 +233,25 @@ function ParentStudentPortalTabs({ route, navigation }) {
   }, [currentChild?.student_id]);
   useEffect(() => { fetchUnread(); }, [fetchUnread]);
 
+  const fetchChatUnread = useCallback(() => {
+    api.get('/chat/conversations')
+      .then(({ data }) => {
+        const total = (data || []).reduce((sum, conv) => sum + (Number(conv?.unread_count) || 0), 0);
+        setChatUnread(total);
+      })
+      .catch(() => setChatUnread(0));
+  }, []);
+
+  useEffect(() => {
+    fetchChatUnread();
+    const timer = setInterval(fetchChatUnread, 7000);
+    const unsubscribe = subscribeChatUnreadRefresh(fetchChatUnread);
+    return () => {
+      clearInterval(timer);
+      unsubscribe();
+    };
+  }, [fetchChatUnread]);
+
   const parentPortalTabScreens = [
     {
       name: 'ParentHomeTab',
@@ -262,7 +283,14 @@ function ParentStudentPortalTabs({ route, navigation }) {
     {
       name: 'ChatTab',
       component: ParentChatStack,
-      options: { title: 'Messages', tabBarIcon: ({ focused }) => tabIcon(focused, 'chatbubbles', 'chatbubbles-outline') },
+      listeners: { tabPress: fetchChatUnread },
+      options: {
+        title: 'Messages',
+        popToTopOnBlur: true,
+        tabBarBadge: notificationBadgeValue(chatUnread),
+        tabBarBadgeStyle: { backgroundColor: '#EF4444', color: '#fff', fontSize: 10, minWidth: 18, height: 18, lineHeight: 18 },
+        tabBarIcon: ({ focused }) => tabIcon(focused, 'chatbubbles', 'chatbubbles-outline'),
+      },
     },
   ];
 

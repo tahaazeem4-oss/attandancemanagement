@@ -83,9 +83,23 @@ export default function ClassesManagerScreen({ navigation, mode }) {
     setLoading(true);
     try {
       let result = [];
-      if (isSuper && filterCampus) {
-        const { data } = await api.get(`/super-admin/schools/${filterCampus}/classes`);
-        result = Array.isArray(data) ? data : [];
+      if (isSuper) {
+        if (filterCampus) {
+          const { data } = await api.get(`/super-admin/schools/${filterCampus}/classes`);
+          result = Array.isArray(data) ? data : [];
+        } else {
+          // "All campuses" for super admin: aggregate classes across scoped campuses.
+          const { data: allCampuses } = await api.get('/super-admin/schools');
+          const scopedCampuses = (allCampuses || []).filter(c => !filterOrg || String(c.org_id) === String(filterOrg));
+          if (scopedCampuses.length) {
+            const responses = await Promise.all(
+              scopedCampuses.map(campus =>
+                api.get(`/super-admin/schools/${campus.id}/classes`).catch(() => ({ data: [] })),
+              ),
+            );
+            result = responses.flatMap(r => (Array.isArray(r.data) ? r.data : []));
+          }
+        }
       } else if (isOrg) {
         const params = filterCampus ? { campus_id: filterCampus } : {};
         const { data } = await api.get('/org-admin/classes', { params });
@@ -101,7 +115,7 @@ export default function ClassesManagerScreen({ navigation, mode }) {
     } finally {
       setLoading(false);
     }
-  }, [isOrg, isSuper, filterCampus]);
+  }, [isOrg, isSuper, filterCampus, filterOrg]);
 
   useEffect(() => {
     if (!isSuper) return;

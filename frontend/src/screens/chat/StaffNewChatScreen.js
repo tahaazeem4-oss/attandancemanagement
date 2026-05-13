@@ -1,135 +1,311 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, FlatList, Pressable, StyleSheet,
-  ActivityIndicator, TextInput,
+  ActivityIndicator, TextInput, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../../services/api';
 import { C } from '../../config/theme';
+import PickerField from '../../components/PickerField';
 
 export default function StaffNewChatScreen({ navigation }) {
   const insets = useSafeAreaInsets();
-  const [parents, setParents] = useState([]);
+  const [classes, setClasses] = useState([]);
+  const [sections, setSections] = useState([]);
+  const [students, setStudents] = useState([]);
+  const [filter, setFilter] = useState({ class_id: '', section_id: '' });
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [starting, setStarting] = useState(null);
+  const mountedRef = useRef(true);
 
-  const load = useCallback(async (q = '') => {
-    try {
-      setLoading(true);
-      const { data } = await api.get(`/chat/parents${q ? `?q=${encodeURIComponent(q)}` : ''}`);
-      setParents(Array.isArray(data) ? data : []);
-    } catch {
-      setParents([]);
-    } finally {
-      setLoading(false);
-    }
+  // Load classes on mount
+  useEffect(() => {
+    const loadClasses = async () => {
+      try {
+        const response = await api.get('/classes');
+        if (mountedRef.current) {
+          const classesData = response.data || [];
+          setClasses(classesData);
+          if (classesData.length > 0) {
+            setFilter({ class_id: String(classesData[0].id), section_id: '' });
+            loadSections(classesData[0].id);
+          } else {
+            setLoading(false);
+          }
+        }
+      } catch (err) {
+        console.error('[StaffNewChatScreen] Load classes error:', err);
+        if (mountedRef.current) {
+          Alert.alert('Error', 'Failed to load classes');
+          setLoading(false);
+        }
+      }
+    };
+    loadClasses();
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
-  useEffect(() => { load(); }, [load]);
-
-  // Debounced search
-  useEffect(() => {
-    const t = setTimeout(() => load(search), 300);
-    return () => clearTimeout(t);
-  }, [search, load]);
-
-  const startChat = async (parent) => {
+  // Load sections when class changes
+  const loadSections = async (classId) => {
     try {
-      setStarting(parent.id);
-      const { data: conv } = await api.post('/chat/conversations', {
-        parent_id: parent.id,
-      });
+      const response = await api.get(`/classes/${classId}/sections`);
+      if (mountedRef.current) {
+        const sectionsData = response.data || [];
+        setSections(sectionsData);
+        if (sectionsData.length > 0) {
+          const newFilter = { class_id: String(classId), section_id: String(sectionsData[0].id) };
+          setFilter(newFilter);
+          loadStudents(String(classId), String(sectionsData[0].id));
+        } else {
+          loadStudents(String(classId), '');
+        }
+      }
+    } catch (err) {
+      console.error('[StaffNewChatScreen] Load sections error:', err);
+      if (mountedRef.current) {
+        setSections([]);
+        loadStudents(String(classId), '');
+      }
+    }
+  };
+
+  // Load students when class/section changes
+  const loadStudents = async (classId, sectionId, q = '') => {
+    setLoading(true);
+    try {
+      const params = {};
+      if (q && String(q).trim()) params.q = q;
+      if (classId) params.class_id = classId;
+      if (sectionId) params.section_id = sectionId;
+      
+      const response = await api.get('/students', { params });
+      if (mountedRef.current) {
+        setStudents(response.data || []);
+        setLoading(false);
+      }
+    } catch (err) {
+      console.error('[StaffNewChatScreen] Load students error:', err);
+      if (mountedRef.current) {
+        setStudents([]);
+        setLoading(false);
+      }
+    }
+  };
+
+  // Handle class change
+  const handleClassChange = (classId) => {
+    setFilter({ class_id: classId, section_id: '' });
+    setSections([]);
+    setStudents([]);
+    if (classId) {
+      loadSections(classId);
+    } else {
+      // "All Classes" should fetch students across all classes.
+      loadStudents('', '', search);
+    }
+  };
+
+  // Handle section change
+  const handleSectionChange = (sectionId) => {
+    setFilter(p => ({ ...p, section_id: sectionId }));
+    loadStudents(filter.class_id, sectionId, search);
+  };
+
+  // Handle search with debounce
+  const searchTimeoutRef = useRef(null);
+  const handleSearch = (q) => {
+    setSearch(q);
+    clearTimeout(searchTimeoutRef.current);
+    searchTimeoutRef.current = setTimeout(() => {
+      loadStudents(filter.class_id, filter.section_id, q);
+    }, 300);
+  };
+
+  // Select student and open chat
+  const selectStudent = async (student) => {
+    try {
+      setStarting(student.id);
+
+      // Fetch parents for this student
+      let parents;
+      try {
+        console.log(`[StaffNewChatScreen] Fetching parents for student ${student.id} (${student.first_name})`);
+        const response = await api.get(`/chat/student/${student.id}/parents`);
+        parents = response.data;
+        console.log(`[StaffNewChatScreen] Parents response for ${student.first_name}:`, parents);
+      } catch (err) {
+        const errMsg = err.response?.data?.message 
+          || err.response?.data?.error 
+          || err.message 
+          || 'Failed to fetch parent accounts';
+        console.error(`[StaffNewChatScreen] Parent fetch error for ${student.first_name}:`, err.response?.data || err.message);
+        throw new Error(`Parents fetch failed: ${errMsg}`);
+      }
+
+      if (!parents || parents.length === 0) {
+        Alert.alert(
+          'No Parent Account',
+          `${student.first_name} does not have a parent account registered in the system.`,
+        );
+        setStarting(null);
+        return;
+      }
+
+      const parent = parents[0];
+      console.log(`[StaffNewChatScreen] Using parent:`, parent);
+
+      // Create conversation
+      let conv;
+      try {
+        console.log(`[StaffNewChatScreen] Creating conversation with parent ${parent.id}`);
+        const response = await api.post('/chat/conversations', {
+          parent_id: parent.id,
+          student_id: student.id,
+        });
+        conv = response.data;
+        console.log(`[StaffNewChatScreen] Conversation created:`, conv);
+      } catch (err) {
+        const errMsg = err.response?.data?.message || err.message || 'Failed to create conversation';
+        console.error(`[StaffNewChatScreen] Conversation error:`, err.response?.data || err.message);
+        throw new Error(`Chat creation failed: ${errMsg}`);
+      }
+
+      // Open chat
       const enriched = {
         ...conv,
         participant_name: `${parent.first_name} ${parent.last_name}`,
         participant_role: 'parent',
       };
       navigation.replace('Chat', { conversation: enriched });
-    } catch {
-      // silent — user can retry
+    } catch (err) {
+      Alert.alert('Error Starting Chat', err.message);
     } finally {
       setStarting(null);
     }
   };
 
-  const renderItem = ({ item }) => {
-    const isStarting = starting === item.id;
-    const fullName = `${item.first_name || ''} ${item.last_name || ''}`.trim() || 'Parent';
-    return (
-      <Pressable
-        style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
-        onPress={() => startChat(item)}
-        disabled={!!starting}
-      >
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{fullName.charAt(0).toUpperCase()}</Text>
-        </View>
-        <View style={styles.info}>
-          <Text style={styles.name}>{fullName}</Text>
-          <Text style={styles.sub}>{item.email || (item.phone || '')}</Text>
-        </View>
-        {isStarting ? (
-          <ActivityIndicator size="small" color={C.primary} />
-        ) : (
-          <Ionicons name="chevron-forward" size={20} color={C.textLight} />
-        )}
-      </Pressable>
-    );
-  };
+  const selectedClassObj = classes.find(c => String(c.id) === String(filter.class_id));
+  const selectedSectionObj = sections.find(s => String(s.id) === String(filter.section_id));
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Header */}
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+        <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [styles.backBtn, pressed && { opacity: 0.7 }]}>
+          <Ionicons name="chevron-back" size={28} color={C.primary} />
         </Pressable>
-        <Text style={styles.headerTitle}>Message a Parent</Text>
+        <Text style={styles.headerTitle}>Message Parent</Text>
+        <View style={{ width: 28 }} />
       </View>
 
-      {/* Search */}
-      <View style={styles.searchRow}>
-        <Ionicons name="search-outline" size={18} color={C.textLight} style={styles.searchIcon} />
+      {/* Filter Summary */}
+      <View style={styles.filterSummary}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.filterTitle}>Student Selection</Text>
+          <Text style={styles.filterSubTitle}>
+            {selectedClassObj?.class_name || 'All Classes'}
+            {selectedSectionObj ? ` - Section ${selectedSectionObj.section_name}` : ' - All Sections'}
+          </Text>
+        </View>
+        <Pressable style={({ pressed }) => [styles.filterToggleBtn, pressed && { opacity: 0.8 }]} onPress={() => setFiltersOpen(v => !v)}>
+          <Text style={styles.filterToggleTxt}>{filtersOpen ? 'Hide' : 'Filters'}</Text>
+        </Pressable>
+      </View>
+
+      {/* Filter Panel */}
+      {filtersOpen && (
+        <View style={styles.filterPanel}>
+          <Text style={styles.fieldLabel}>Class</Text>
+          <PickerField
+            label="Class"
+            value={filter.class_id}
+            onChange={handleClassChange}
+            placeholder="Select class"
+            items={[{ label: 'All Classes', value: '' }, ...classes.map(c => ({ label: c.class_name, value: String(c.id) }))]}
+          />
+
+          <Text style={styles.fieldLabel}>Section</Text>
+          <PickerField
+            label="Section"
+            value={filter.section_id}
+            onChange={handleSectionChange}
+            placeholder="All Sections"
+            disabled={!filter.class_id}
+            items={[{ label: 'All Sections', value: '' }, ...sections.map(s => ({ label: `Section ${s.section_name}`, value: String(s.id) }))]}
+          />
+
+          <Pressable
+            style={({ pressed }) => [styles.clearFilterBtn, pressed && { opacity: 0.8 }]}
+            onPress={() => {
+              setFilter({ class_id: '', section_id: '' });
+              setSections([]);
+              loadStudents('', '', search);
+            }}
+          >
+            <Text style={styles.clearFilterTxt}>Clear Filters</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {/* Search Bar */}
+      <View style={styles.searchBox}>
+        <Ionicons name="search" size={18} color={C.border} style={{ marginRight: 8 }} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search by name or email…"
-          placeholderTextColor={C.textLight}
+          placeholder="Search students..."
+          placeholderTextColor={C.border}
           value={search}
-          onChangeText={setSearch}
-          autoCapitalize="none"
-          autoCorrect={false}
+          onChangeText={handleSearch}
         />
-        {search.length > 0 && (
-          <Pressable onPress={() => setSearch('')} hitSlop={8}>
-            <Ionicons name="close-circle" size={18} color={C.textLight} />
+        {search ? (
+          <Pressable onPress={() => handleSearch('')} hitSlop={8}>
+            <Ionicons name="close-circle" size={18} color={C.border} />
           </Pressable>
-        )}
+        ) : null}
       </View>
 
+      {/* Students List */}
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={C.primary} />
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator color={C.primary} size="large" />
         </View>
-      ) : parents.length === 0 ? (
-        <View style={styles.center}>
-          <Ionicons name="people-outline" size={64} color={C.textLight} />
-          <Text style={styles.emptyTitle}>
-            {search ? 'No parents found' : 'No parents in this school'}
-          </Text>
-          {!search && (
-            <Text style={styles.emptySubtitle}>
-              Parents will appear here once they are registered in the system.
-            </Text>
-          )}
+      ) : students.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Ionicons name="people-outline" size={48} color={C.border} />
+          <Text style={styles.emptyText}>No students found</Text>
         </View>
       ) : (
         <FlatList
-          data={parents}
-          keyExtractor={(item) => String(item.id)}
-          renderItem={renderItem}
-          contentContainerStyle={styles.list}
+          data={students}
+          keyExtractor={s => String(s.id)}
+          contentContainerStyle={{ padding: 12, paddingBottom: 40 }}
+          renderItem={({ item }) => (
+            <Pressable
+              style={({ pressed }) => [styles.studentCard, pressed && { opacity: 0.85 }]}
+              onPress={() => selectStudent(item)}
+              disabled={starting === item.id}
+            >
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>
+                  {(item.first_name?.[0] || '') + (item.last_name?.[0] || '')}
+                </Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.studentName}>{item.first_name} {item.last_name}</Text>
+                {item.roll_no && <Text style={styles.rollNo}>Roll #: {item.roll_no}</Text>}
+              </View>
+              {starting === item.id ? (
+                <ActivityIndicator color={C.primary} />
+              ) : (
+                <Ionicons name="chevron-forward" size={20} color={C.border} />
+              )}
+            </Pressable>
+          )}
         />
       )}
     </View>
@@ -137,54 +313,144 @@ export default function StaffNewChatScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
   header: {
-    backgroundColor: C.primary,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  backBtn: { marginRight: 12, padding: 2 },
-  headerTitle: { color: '#fff', fontSize: 20, fontWeight: '700' },
-
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: C.card,
-    marginHorizontal: 16,
-    marginVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: C.border,
+    justifyContent: 'space-between',
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
   },
-  searchIcon: { marginRight: 8 },
-  searchInput: { flex: 1, fontSize: 15, color: C.textDark },
-
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  emptyTitle: { fontSize: 18, fontWeight: '600', color: C.textMed, marginTop: 16, textAlign: 'center' },
-  emptySubtitle: { fontSize: 14, color: C.textLight, marginTop: 8, textAlign: 'center', lineHeight: 20 },
-
-  list: { paddingBottom: 20 },
-  item: {
+  backBtn: {
+    padding: 8,
+    marginLeft: -8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+  },
+  filterSummary: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: C.card,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: C.border,
+    borderBottomColor: '#e0e0e0',
   },
-  itemPressed: { backgroundColor: C.cardAlt },
+  filterTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  filterSubTitle: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 2,
+  },
+  filterToggleBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 6,
+  },
+  filterToggleTxt: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#333',
+  },
+  filterPanel: {
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    padding: 12,
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 6,
+    marginTop: 8,
+  },
+  clearFilterBtn: {
+    marginTop: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 6,
+  },
+  clearFilterTxt: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
+  },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 12,
+    marginVertical: 10,
+    paddingHorizontal: 12,
+    height: 40,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#333',
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 8,
+  },
+  studentCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
   avatar: {
-    width: 46, height: 46, borderRadius: 23,
-    backgroundColor: '#059669',
-    alignItems: 'center', justifyContent: 'center', marginRight: 14,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#2563EB',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
-  avatarText: { color: '#fff', fontSize: 20, fontWeight: '700' },
-  info: { flex: 1 },
-  name: { fontSize: 16, fontWeight: '600', color: C.textDark },
-  sub: { fontSize: 13, color: C.textMed, marginTop: 2 },
+  avatarText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  studentName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  rollNo: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 2,
+  },
 });

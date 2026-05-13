@@ -34,10 +34,15 @@ export default function HomeScreen({ navigation }) {
   const [assignments,      setAssignments]      = useState(null);
   const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
 
-  const teacherRole = assignments === null ? null
-    : assignments.length === 0 ? 'subject_teacher'
-    : assignments.length === 1 ? 'class_teacher'
-    : 'floor_incharge';
+  const teacherRole = teacher?.teacher_role || (
+    assignments === null
+      ? null
+      : assignments.length === 0
+        ? 'subject_teacher'
+        : assignments.length === 1
+          ? 'class_teacher'
+          : 'floor_incharge'
+  );
 
   // Card entrance animations
   const aY = [useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current];
@@ -58,7 +63,7 @@ export default function HomeScreen({ navigation }) {
       const pendingLeaves     = data.filter(l => l.status === 'pending' && !l.withdrawal_status).length;
       const pendingWithdrawals = data.filter(l => l.withdrawal_status === 'pending').length;
       setPendingLeaveCount(pendingLeaves + pendingWithdrawals);
-    }).catch(() => {});
+    }).catch(() => setPendingLeaveCount(0));
     Animated.stagger(100, aO.map((o, i) =>
       Animated.parallel([
         Animated.timing(o, { toValue: 1, duration: 380, useNativeDriver: true }),
@@ -74,7 +79,7 @@ export default function HomeScreen({ navigation }) {
         const pendingLeaves      = data.filter(l => l.status === 'pending' && !l.withdrawal_status).length;
         const pendingWithdrawals = data.filter(l => l.withdrawal_status === 'pending').length;
         setPendingLeaveCount(pendingLeaves + pendingWithdrawals);
-      }).catch(() => {});
+      }).catch(() => setPendingLeaveCount(0));
     }, [])
   );
 
@@ -254,8 +259,8 @@ export default function HomeScreen({ navigation }) {
           },
           {
             i: 2, icon: 'bar-chart-outline', label: 'Attendance Report',
-            tint: '#F59E0B', bg: '#FFFBEB',
-            locked: false, badge: 0, onPress: () => navigation.navigate('ClassSelection', { mode: 'report' }),
+            tint: isLocked ? '#94A3B8' : '#F59E0B', bg: isLocked ? '#F1F5F9' : '#FFFBEB',
+            locked: isLocked, badge: 0, onPress: () => navigation.navigate('ClassSelection', { mode: 'report' }),
           },
           {
             i: 3, icon: 'cloud-upload-outline', label: 'Upload Lecture',
@@ -268,11 +273,18 @@ export default function HomeScreen({ navigation }) {
             locked: false, badge: 0, onPress: () => navigation.navigate('LectureList'),
           },
           {
-            i: 5, icon: 'notifications-outline', label: 'Send Notification',
+            i: 5, icon: 'school-outline', label: 'Manage Students',
+            tint: isLocked ? '#94A3B8' : '#14B8A6', bg: isLocked ? '#F1F5F9' : '#ECFEFF',
+            locked: isLocked, badge: 0, onPress: () => navigation.navigate('TeacherStudents'),
+          },
+          {
+            i: 6, icon: 'notifications-outline', label: 'Send Notification',
             tint: '#0EA5E9', bg: '#F0F9FF',
             locked: false, badge: 0, onPress: () => navigation.navigate('SendNotification'),
           },
-        ].map(({ i, icon, label, tint, bg, locked, badge, onPress }) => (
+        ]
+          .filter(({ locked }) => !locked)
+          .map(({ i, icon, label, tint, bg, locked, badge, onPress }) => (
           <Animated.View key={i} style={[styles.cardWrap, { opacity: aO[i], transform: [{ translateY: aY[i] }, { scale: sc[i] }] }]}>
             <Pressable
               style={({ pressed }) => [styles.navCard, locked && styles.navCardLocked, pressed && !locked && styles.navCardPressed]}

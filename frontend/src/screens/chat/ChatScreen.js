@@ -6,9 +6,11 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import api from '../../services/api';
 import { C } from '../../config/theme';
 import { useAuth } from '../../context/AuthContext';
+import { emitChatUnreadRefresh } from '../../lib/chatEvents';
 
 const POLL_INTERVAL = 6000; // 6 seconds
 
@@ -45,14 +47,15 @@ function TickIcon({ msg, myRole, myId }) {
   );
 }
 
-function MessageBubble({ msg, myRole, myId, onLongPress }) {
+function MessageBubble({ msg, myRole, myId, onOpenActions }) {
   const isMine = msg.sender_type === myRole && msg.sender_id === myId;
   const isDeleted = !!msg.deleted_at;
 
   return (
     <View style={[styles.bubbleRow, isMine ? styles.bubbleRight : styles.bubbleLeft]}>
       <Pressable
-        onLongPress={!isDeleted && isMine ? () => onLongPress(msg) : undefined}
+        onLongPress={!isDeleted && isMine ? () => onOpenActions(msg) : undefined}
+        onPress={!isDeleted && isMine ? () => onOpenActions(msg) : undefined}
         style={({ pressed }) => [
           styles.bubble,
           isMine ? styles.bubbleMine : styles.bubbleTheirs,
@@ -96,25 +99,52 @@ export default function ChatScreen({ route, navigation }) {
   const [menuMsg, setMenuMsg] = useState(null);
   const [editingMsg, setEditingMsg] = useState(null);
   const [editText, setEditText] = useState('');
+  const [chatMenuOpen, setChatMenuOpen] = useState(false);
 
   const listRef = useRef(null);
   const pollRef = useRef(null);
+  const mountedRef = useRef(true);
+  const scrollTimeoutRef = useRef(null);
 
   const myRole = user?.role;
   const myId = user?.id;
 
   const participantName = conversation.participant_name || 'Chat';
 
+  const goBackToHome = useCallback(() => {
+    // Prefer switching to Home tab so back from chat never lands on Profile.
+    const parentNav = navigation.getParent?.();
+    const parentRouteNames = parentNav?.getState?.()?.routeNames || [];
+    if (parentRouteNames.includes('HomeTab')) {
+      parentNav.navigate('HomeTab');
+      return;
+    }
+
+    const grandParentNav = parentNav?.getParent?.();
+    const grandRouteNames = grandParentNav?.getState?.()?.routeNames || [];
+    if (grandRouteNames.includes('HomeTab')) {
+      grandParentNav.navigate('HomeTab');
+      return;
+    }
+
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+
+    navigation.navigate('Home');
+  }, [navigation]);
+
   // ── Load messages ─────────────────────────────────────────
   const loadMessages = useCallback(async (silent = false) => {
     try {
       if (!silent) setLoading(true);
       const { data } = await api.get(`/chat/conversations/${conversation.id}/messages`);
-      setMessages(data.messages || []);
+      if (mountedRef.current) setMessages(data.messages || []);
     } catch {
       // ignore silent poll failures
     } finally {
-      setLoading(false);
+      if (!silent && mountedRef.current) setLoading(false);
     }
   }, [conversation.id]);
 
@@ -122,21 +152,36 @@ export default function ChatScreen({ route, navigation }) {
   const markRead = useCallback(async () => {
     try {
       await api.post(`/chat/conversations/${conversation.id}/read`);
+      emitChatUnreadRefresh();
     } catch { /* non-critical */ }
   }, [conversation.id]);
 
   useEffect(() => {
-    loadMessages();
-    markRead();
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    };
+  }, []);
 
-    // Poll for new messages
-    pollRef.current = setInterval(() => {
-      loadMessages(true);
+  useFocusEffect(
+    useCallback(() => {
+      loadMessages();
       markRead();
-    }, POLL_INTERVAL);
 
-    return () => clearInterval(pollRef.current);
-  }, [loadMessages, markRead]);
+      pollRef.current = setInterval(() => {
+        loadMessages(true);
+        markRead();
+      }, POLL_INTERVAL);
+
+      return () => {
+        // Ensure unread counts are flushed when user leaves this conversation.
+        markRead();
+        if (pollRef.current) clearInterval(pollRef.current);
+      };
+    }, [loadMessages, markRead]),
+  );
 
   // ── Set nav header ────────────────────────────────────────
   useEffect(() => {
@@ -146,7 +191,8 @@ export default function ChatScreen({ route, navigation }) {
   // ── Scroll to bottom on new messages ─────────────────────
   useEffect(() => {
     if (messages.length > 0) {
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 80);
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+      scrollTimeoutRef.current = setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 80);
     }
   }, [messages.length]);
 
@@ -154,13 +200,42 @@ export default function ChatScreen({ route, navigation }) {
   const sendMessage = async () => {
     const content = text.trim();
     if (!content || sending) return;
+    const tempId = `tmp-${Date.now()}`;
+    const optimisticMsg = {
+      id: tempId,
+      conversation_id: conversation.id,
+      sender_id: myId,
+      sender_type: myRole,
+      content,
+      created_at: new Date().toISOString(),
+      reads: [],
+      _optimistic: true,
+    };
     try {
       setSending(true);
       setText('');
+      setMessages((prev) => [...prev, optimisticMsg]);
       const { data: msg } = await api.post(`/chat/conversations/${conversation.id}/messages`, { content });
-      setMessages((prev) => [...prev, { ...msg, reads: [] }]);
-    } catch {
-      Alert.alert('Error', 'Failed to send message. Please try again.');
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...msg, reads: [] } : m)));
+    } catch (err) {
+      // Reconcile once: some transient responses may fail client-side even though message was persisted.
+      try {
+        const { data } = await api.get(`/chat/conversations/${conversation.id}/messages`);
+        const serverMessages = data?.messages || [];
+        setMessages(serverMessages);
+        const sentOnServer = serverMessages.some((m) =>
+          m?.sender_id === myId &&
+          m?.sender_type === myRole &&
+          String(m?.content || '') === content,
+        );
+        if (sentOnServer) return;
+      } catch {
+        // Fall through to user-facing error below.
+      }
+
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      const msg = err?.response?.data?.message || 'Failed to send message. Please try again.';
+      Alert.alert('Error', msg);
       setText(content);
     } finally {
       setSending(false);
@@ -168,7 +243,34 @@ export default function ChatScreen({ route, navigation }) {
   };
 
   // ── Long press menu ───────────────────────────────────────
-  const onLongPress = (msg) => setMenuMsg(msg);
+  const onOpenActions = (msg) => setMenuMsg(msg);
+
+  const handleDeleteConversation = () => {
+    setChatMenuOpen(false);
+    Alert.alert(
+      'Delete Chat',
+      'Delete this complete chat and all messages?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Chat',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.delete(`/chat/conversations/${conversation.id}`);
+              emitChatUnreadRefresh();
+              Alert.alert('Deleted', 'Chat deleted successfully.', [
+                { text: 'OK', onPress: () => navigation.goBack() },
+              ]);
+            } catch (err) {
+              const msg = err?.response?.data?.message || 'Failed to delete chat.';
+              Alert.alert('Error', msg);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   const handleEdit = () => {
     setEditingMsg(menuMsg);
@@ -223,10 +325,14 @@ export default function ChatScreen({ route, navigation }) {
 
   // ── Render ────────────────────────────────────────────────
   return (
-    <View style={[styles.container, { paddingBottom: insets.bottom }]}>
+    <KeyboardAvoidingView
+      style={[styles.container, { paddingBottom: insets.bottom }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 12}
+    >
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top }]}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
+        <Pressable onPress={goBackToHome} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </Pressable>
         <View style={styles.headerAvatarWrap}>
@@ -242,6 +348,9 @@ export default function ChatScreen({ route, navigation }) {
             {conversation.participant_type === 'admin' ? 'Admin' : conversation.participant_type === 'parent' ? 'Parent' : 'Teacher'}
           </Text>
         </View>
+        <Pressable onPress={() => setChatMenuOpen(true)} style={styles.headerMenuBtn}>
+          <Ionicons name="ellipsis-vertical" size={20} color="#fff" />
+        </Pressable>
       </View>
 
       {/* Messages */}
@@ -259,7 +368,7 @@ export default function ChatScreen({ route, navigation }) {
               msg={item}
               myRole={myRole}
               myId={myId}
-              onLongPress={onLongPress}
+              onOpenActions={onOpenActions}
             />
           )}
           contentContainerStyle={styles.messageList}
@@ -275,34 +384,29 @@ export default function ChatScreen({ route, navigation }) {
       )}
 
       {/* Input area */}
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-      >
-        <View style={styles.inputRow}>
-          <TextInput
-            style={styles.input}
-            placeholder="Type a message…"
-            placeholderTextColor={C.textLight}
-            value={text}
-            onChangeText={setText}
-            multiline
-            maxLength={2000}
-            returnKeyType="default"
-          />
-          <Pressable
-            style={[styles.sendBtn, (!text.trim() || sending) && styles.sendBtnDisabled]}
-            onPress={sendMessage}
-            disabled={!text.trim() || sending}
-          >
-            {sending ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Ionicons name="send" size={20} color="#fff" />
-            )}
-          </Pressable>
-        </View>
-      </KeyboardAvoidingView>
+      <View style={styles.inputRow}>
+        <TextInput
+          style={styles.input}
+          placeholder="Type a message…"
+          placeholderTextColor={C.textLight}
+          value={text}
+          onChangeText={setText}
+          multiline
+          maxLength={2000}
+          returnKeyType="default"
+        />
+        <Pressable
+          style={[styles.sendBtn, (!text.trim() || sending) && styles.sendBtnDisabled]}
+          onPress={sendMessage}
+          disabled={!text.trim() || sending}
+        >
+          {sending ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Ionicons name="send" size={20} color="#fff" />
+          )}
+        </Pressable>
+      </View>
 
       {/* Long-press action modal */}
       <Modal
@@ -324,6 +428,28 @@ export default function ChatScreen({ route, navigation }) {
             </TouchableOpacity>
             <View style={styles.actionDivider} />
             <TouchableOpacity style={styles.actionItem} onPress={() => setMenuMsg(null)}>
+              <Ionicons name="close-outline" size={22} color={C.textMed} />
+              <Text style={[styles.actionText, { color: C.textMed }]}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Chat menu modal */}
+      <Modal
+        visible={chatMenuOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setChatMenuOpen(false)}
+      >
+        <TouchableOpacity style={styles.modalOverlay} onPress={() => setChatMenuOpen(false)}>
+          <View style={styles.actionSheet}>
+            <TouchableOpacity style={styles.actionItem} onPress={handleDeleteConversation}>
+              <Ionicons name="trash-outline" size={22} color={C.absent} />
+              <Text style={[styles.actionText, { color: C.absent }]}>Delete complete chat</Text>
+            </TouchableOpacity>
+            <View style={styles.actionDivider} />
+            <TouchableOpacity style={styles.actionItem} onPress={() => setChatMenuOpen(false)}>
               <Ionicons name="close-outline" size={22} color={C.textMed} />
               <Text style={[styles.actionText, { color: C.textMed }]}>Cancel</Text>
             </TouchableOpacity>
@@ -365,12 +491,12 @@ export default function ChatScreen({ route, navigation }) {
           </View>
         </TouchableOpacity>
       </Modal>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#ECE5DD' },
+  container: { flex: 1, backgroundColor: C.bg },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
 
   // Header
@@ -380,6 +506,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 12,
     paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.2)',
   },
   backBtn: { padding: 4, marginRight: 4 },
   headerAvatarWrap: { marginRight: 10 },
@@ -391,9 +519,13 @@ const styles = StyleSheet.create({
   headerInfo: { flex: 1 },
   headerName: { color: '#fff', fontSize: 17, fontWeight: '700' },
   headerSub: { color: 'rgba(255,255,255,0.75)', fontSize: 12 },
+  headerMenuBtn: {
+    padding: 6,
+    marginLeft: 8,
+  },
 
   // Messages
-  messageList: { padding: 12, paddingBottom: 4 },
+  messageList: { padding: 12, paddingBottom: 8 },
   bubbleRow: { marginBottom: 4, flexDirection: 'row' },
   bubbleLeft: { justifyContent: 'flex-start' },
   bubbleRight: { justifyContent: 'flex-end' },
@@ -402,6 +534,8 @@ const styles = StyleSheet.create({
     maxWidth: '78%',
     padding: 10,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.border,
     elevation: 1,
     shadowColor: '#000',
     shadowOpacity: 0.08,
@@ -411,9 +545,10 @@ const styles = StyleSheet.create({
   bubbleMine: {
     backgroundColor: C.primary,
     borderBottomRightRadius: 2,
+    borderColor: C.primary,
   },
   bubbleTheirs: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: C.card,
     borderBottomLeftRadius: 2,
   },
   bubbleTextMine: { color: '#fff', fontSize: 15, lineHeight: 20 },
@@ -432,7 +567,7 @@ const styles = StyleSheet.create({
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    backgroundColor: '#fff',
+    backgroundColor: C.card,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderTopWidth: 1,

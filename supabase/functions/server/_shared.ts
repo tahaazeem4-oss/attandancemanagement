@@ -223,6 +223,35 @@ export async function tokensForSchoolTeachers(
   return (data || []).map((r: { token: string }) => r.token).filter(Boolean);
 }
 
+export type TeacherRole = "class_teacher" | "floor_incharge" | "subject_teacher";
+
+export async function resolveTeacherRole(
+  db: ReturnType<typeof getDb>,
+  teacherId: number,
+): Promise<TeacherRole> {
+  const { data: teacher } = await db
+    .from("teachers")
+    .select("teacher_role")
+    .eq("id", teacherId)
+    .maybeSingle();
+
+  const explicitRole = (teacher as { teacher_role?: string } | null)?.teacher_role;
+  if (explicitRole === "class_teacher" || explicitRole === "floor_incharge" || explicitRole === "subject_teacher") {
+    return explicitRole;
+  }
+
+  // Backward-compatible fallback for older rows without teacher_role.
+  const { count } = await db
+    .from("teacher_classes")
+    .select("id", { count: "exact", head: true })
+    .eq("teacher_id", teacherId);
+
+  const n = Number(count || 0);
+  if (n === 0) return "subject_teacher";
+  if (n === 1) return "class_teacher";
+  return "floor_incharge";
+}
+
 // ── Email (SMTP via nodemailer) ───────────────────────────────
 export async function sendEmail(opts: {
   to: string;

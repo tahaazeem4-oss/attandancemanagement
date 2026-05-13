@@ -17,6 +17,7 @@ import { showDestructiveConfirm } from '../lib/confirmDialog';
 const EMPTY_FORM = { first_name: '', last_name: '', age: '', class_id: '', section_id: '', roll_no: '', school_id: '' };
 
 export default function StudentsManagerScreen({ navigation, mode }) {
+  const isTeacher = mode === 'teacher';
   const isOrg = mode === 'orgadmin';
   const isSuper = mode === 'superadmin';
 
@@ -129,14 +130,29 @@ export default function StudentsManagerScreen({ navigation, mode }) {
     setLoading(true);
     try {
       if (isSuper) {
-        if (!filterCampus) {
-          setStudents([]);
-        } else {
+        if (filterCampus) {
           const params = {};
           if (filterClass) params.class_id = filterClass;
           if (filterSection) params.section_id = filterSection;
           const { data } = await api.get(`/super-admin/schools/${filterCampus}/students`, { params });
           setStudents(data || []);
+        } else {
+          // "All campuses" for super admin: aggregate students across scoped campuses.
+          const { data: allCampuses } = await api.get('/super-admin/schools');
+          const scopedCampuses = (allCampuses || []).filter(c => !filterOrg || String(c.org_id) === String(filterOrg));
+          if (!scopedCampuses.length) {
+            setStudents([]);
+          } else {
+            const responses = await Promise.all(
+              scopedCampuses.map(campus =>
+                api.get(`/super-admin/schools/${campus.id}/students`).catch(() => ({ data: [] })),
+              ),
+            );
+            let merged = responses.flatMap(r => r.data || []);
+            if (filterClass) merged = merged.filter(s => String(s.class_id) === String(filterClass));
+            if (filterSection) merged = merged.filter(s => String(s.section_id) === String(filterSection));
+            setStudents(merged);
+          }
         }
       } else if (isOrg) {
         const params = {};
@@ -149,7 +165,7 @@ export default function StudentsManagerScreen({ navigation, mode }) {
         const params = {};
         if (filter.class_id) params.class_id = filter.class_id;
         if (filter.section_id) params.section_id = filter.section_id;
-        const { data } = await api.get('/admin/students', { params });
+        const { data } = await api.get(isTeacher ? '/students' : '/admin/students', { params });
         setStudents(data || []);
       }
     } catch {
@@ -157,7 +173,7 @@ export default function StudentsManagerScreen({ navigation, mode }) {
     } finally {
       setLoading(false);
     }
-  }, [isOrg, isSuper, filter, filterCampus, filterClass, filterSection]);
+  }, [isTeacher, isOrg, isSuper, filter, filterCampus, filterClass, filterSection, filterOrg]);
 
   useEffect(() => {
     load();
@@ -181,7 +197,7 @@ export default function StudentsManagerScreen({ navigation, mode }) {
       } else {
         setFormClasses([]);
       }
-      setForm(p => ({ ...p, class_id: '', section_id: '' }));
+      // NOTE: class_id/section_id resets are handled by the campus picker onChange
       return;
     }
 
@@ -193,7 +209,7 @@ export default function StudentsManagerScreen({ navigation, mode }) {
       } else {
         setFormClasses([]);
       }
-      setForm(p => ({ ...p, class_id: '', section_id: '' }));
+      // NOTE: class_id/section_id resets are handled by the campus picker onChange
       return;
     }
 
@@ -212,7 +228,7 @@ export default function StudentsManagerScreen({ navigation, mode }) {
     } else {
       setFormSections([]);
     }
-    setForm(p => ({ ...p, section_id: '' }));
+    // NOTE: section_id reset is handled by the class picker onChange
   }, [isOrg, isSuper, form.class_id, formClasses]);
 
   const openAdd = () => {
@@ -276,8 +292,13 @@ export default function StudentsManagerScreen({ navigation, mode }) {
           section_id: parseInt(form.section_id, 10),
           roll_no: form.roll_no || null,
         };
-        if (editing) await api.put(`/admin/students/${editing.id}`, payload);
-        else await api.post('/admin/students', payload);
+        if (isTeacher) {
+          if (editing) await api.put(`/students/${editing.id}`, payload);
+          else await api.post('/students', payload);
+        } else {
+          if (editing) await api.put(`/admin/students/${editing.id}`, payload);
+          else await api.post('/admin/students', payload);
+        }
       }
 
       setModal(false);
@@ -299,7 +320,9 @@ export default function StudentsManagerScreen({ navigation, mode }) {
             ? `/super-admin/schools/${item.school_id}/students/${item.id}`
             : isOrg
               ? `/org-admin/students/${item.id}`
-              : `/admin/students/${item.id}`;
+              : isTeacher
+                ? `/students/${item.id}`
+                : `/admin/students/${item.id}`;
           await api.delete(path);
           await load();
         } catch (err) {
@@ -382,14 +405,16 @@ export default function StudentsManagerScreen({ navigation, mode }) {
         </>
       ) : (
         <>
-          <ImportExportBar
-            templatePath={`${ieBase}/students/template`}
-            templateFilename="students_template.xlsx"
-            importPath={`${ieBase}/students/import`}
-            exportPath={`${ieBase}/students/export`}
-            exportFilename="students_export.xlsx"
-            onImportDone={load}
-          />
+          {!isTeacher && (
+            <ImportExportBar
+              templatePath={`${ieBase}/students/template`}
+              templateFilename="students_template.xlsx"
+              importPath={`${ieBase}/students/import`}
+              exportPath={`${ieBase}/students/export`}
+              exportFilename="students_export.xlsx"
+              onImportDone={load}
+            />
+          )}
           <View style={styles.filterBar}>
             <View style={styles.filterHeaderRow}>
               <View style={{ flex: 1 }}>
@@ -495,7 +520,7 @@ export default function StudentsManagerScreen({ navigation, mode }) {
               {(isOrg || isSuper) && (
                 <>
                   <Text style={styles.label}>Campus *</Text>
-                  <PickerField label="" value={form.school_id} onChange={v => F('school_id', v)} items={campuses.map(c => ({ label: c.name, value: String(c.id) }))} placeholder="Select campus" />
+                  <PickerField label="" value={form.school_id} onChange={v => setForm(p => ({ ...p, school_id: v, class_id: '', section_id: '' }))} items={campuses.map(c => ({ label: c.name, value: String(c.id) }))} placeholder="Select campus" />
                 </>
               )}
 
@@ -503,7 +528,7 @@ export default function StudentsManagerScreen({ navigation, mode }) {
               <PickerField
                 label="Class"
                 value={form.class_id}
-                onChange={v => F('class_id', v)}
+                onChange={v => setForm(p => ({ ...p, class_id: v, section_id: '' }))}
                 placeholder="Select class"
                 items={((isOrg || isSuper) ? formClasses : classes).map(c => ({ label: c.class_name, value: String(c.id) }))}
               />

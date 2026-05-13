@@ -3,6 +3,7 @@ import { View, Text, FlatList, Pressable, StyleSheet, Alert, ActivityIndicator, 
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import api from '../../services/api';
 import { C } from '../../config/theme';
 import { useAuth } from '../../context/AuthContext';
@@ -14,6 +15,7 @@ export default function ParentDashboardScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [overviewLoading, setOverviewLoading] = useState(false);
+  const [chatUnread, setChatUnread] = useState(0);
   const [overview, setOverview] = useState({
     totalChildren: 0,
     markedToday: 0,
@@ -99,9 +101,27 @@ export default function ParentDashboardScreen({ navigation }) {
     }
   }, [summarizeChildren]);
 
+  const loadChatUnread = useCallback(async () => {
+    try {
+      const { data } = await api.get('/chat/conversations');
+      const total = (data || []).reduce((sum, conv) => sum + (Number(conv?.unread_count) || 0), 0);
+      setChatUnread(total);
+    } catch {
+      setChatUnread(0);
+    }
+  }, []);
+
   useEffect(() => {
     loadDashboard();
+    loadChatUnread();
   }, [loadDashboard]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadDashboard();
+      loadChatUnread();
+    }, [loadChatUnread, loadDashboard]),
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -110,12 +130,13 @@ export default function ParentDashboardScreen({ navigation }) {
       const list = data.children || [];
       setChildren(list);
       summarizeChildren(list);
+      loadChatUnread();
     } catch (err) {
       Alert.alert('Error', 'Failed to refresh');
     } finally {
       setRefreshing(false);
     }
-  }, [summarizeChildren]);
+  }, [summarizeChildren, loadChatUnread]);
 
   const handleChildPressed = (child) => {
     const selectionToken = Date.now();
@@ -215,6 +236,11 @@ export default function ParentDashboardScreen({ navigation }) {
                     <Ionicons name="chatbubbles-outline" size={20} color="#fff" />
                   </View>
                   <Text style={styles.quickLabel}>Messages</Text>
+                  {chatUnread > 0 ? (
+                    <View style={styles.quickBadge}>
+                      <Text style={styles.quickBadgeText}>{chatUnread > 99 ? '99+' : chatUnread}</Text>
+                    </View>
+                  ) : null}
                   <Ionicons name="chevron-forward" size={16} color={C.textLight} />
                 </Pressable>
               </View>
@@ -364,6 +390,16 @@ const styles = StyleSheet.create({
   },
   quickIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   quickLabel: { flex: 1, fontSize: 15, fontWeight: '600', color: C.textDark },
+  quickBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  quickBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   empty: { alignItems: 'center', marginTop: 60, paddingHorizontal: 32 },
   emptyIcon: { fontSize: 48, marginBottom: 12 },
   emptyTitle: { fontSize: 18, fontWeight: '700', color: C.textDark, marginBottom: 4 },

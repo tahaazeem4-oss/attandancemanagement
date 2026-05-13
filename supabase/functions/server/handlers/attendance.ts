@@ -5,6 +5,7 @@ import {
   verifyToken,
   sendPush,
   tokensForStudents,
+  resolveTeacherRole,
 } from "../_shared.ts";
 
 export async function handleAttendance(
@@ -29,6 +30,10 @@ export async function handleAttendance(
       return json({ message: "Forbidden" }, 403);
 
     try {
+      const teacherRole = await resolveTeacherRole(db, user.id as number);
+      if (teacherRole === "subject_teacher")
+        return json({ message: "Subject teachers cannot mark attendance" }, 403);
+
       const { date, records } = await req.json();
       if (!date || !Array.isArray(records) || !records.length)
         return json({ message: "date and records[] are required" }, 400);
@@ -80,6 +85,13 @@ export async function handleAttendance(
   // ── GET /attendance/report ───────────────────────────────────
   if (path === "/attendance/report" && method === "GET") {
     try {
+      if (user.role === "teacher") {
+        const teacherRole = await resolveTeacherRole(db, user.id as number);
+        if (teacherRole === "subject_teacher") {
+          return json({ message: "Subject teachers cannot access attendance reports" }, 403);
+        }
+      }
+
       const class_id = url.searchParams.get("class_id");
       const section_id = url.searchParams.get("section_id");
       const date = url.searchParams.get("date") || new Date().toISOString().slice(0, 10);
@@ -145,6 +157,13 @@ export async function handleAttendance(
   // Returns each student with per-day status + summary counts
   if (path === "/attendance/monthly" && method === "GET") {
     try {
+      if (user.role === "teacher") {
+        const teacherRole = await resolveTeacherRole(db, user.id as number);
+        if (teacherRole === "subject_teacher") {
+          return json({ message: "Subject teachers cannot access attendance reports" }, 403);
+        }
+      }
+
       const class_id   = url.searchParams.get("class_id");
       const section_id = url.searchParams.get("section_id");
       const studentIdParam = url.searchParams.get("student_id");

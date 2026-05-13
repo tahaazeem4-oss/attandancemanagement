@@ -142,6 +142,119 @@ export async function handleChat(
   const role = user.role as string;
   const userId = user.id as number;
   const schoolId = user.school_id as number;
+  const userEmail = String(user.email || "").trim().toLowerCase();
+  const userPhone = String(user.phone || "").trim();
+  const userFirst = String(user.first_name || "").trim();
+  const userLast = String(user.last_name || "").trim();
+
+  const resolveParentIdsByEmail = async (): Promise<number[]> => {
+    if (role !== "parent") return [userId];
+    const ids = new Set<number>([userId]);
+    if (!userEmail) return [...ids];
+
+    const { data: sameEmailParents } = await db
+      .from("parents")
+      .select("id")
+      .ilike("email", userEmail);
+
+    for (const row of (sameEmailParents || []) as { id: number }[]) {
+      if (Number.isFinite(row.id)) ids.add(row.id);
+    }
+
+    // Fallback cluster by phone or name (helps after migration-created duplicates).
+    if (userPhone) {
+      const { data: samePhoneParents } = await db
+        .from("parents")
+        .select("id")
+        .eq("phone", userPhone);
+      for (const row of (samePhoneParents || []) as { id: number }[]) {
+        if (Number.isFinite(row.id)) ids.add(row.id);
+      }
+    }
+
+    if (userFirst && userLast) {
+      let nameQuery = db
+        .from("parents")
+        .select("id")
+        .ilike("first_name", userFirst)
+        .ilike("last_name", userLast);
+      if (Number.isFinite(schoolId)) {
+        nameQuery = nameQuery.eq("school_id", schoolId);
+      }
+      const { data: sameNameParents } = await nameQuery;
+      for (const row of (sameNameParents || []) as { id: number }[]) {
+        if (Number.isFinite(row.id)) ids.add(row.id);
+      }
+    }
+
+    // Also include parent rows attached to the same students.
+    // This handles data states where duplicate parent records exist for one family.
+    const seedIds = [...ids];
+    const { data: myLinks } = await db
+      .from("parent_student")
+      .select("student_id")
+      .in("parent_id", seedIds);
+
+    const studentIds = [
+      ...new Set(
+        (myLinks || [])
+          .map((r: { student_id: number }) => Number(r.student_id))
+          .filter((id) => Number.isFinite(id)),
+      ),
+    ];
+
+    if (studentIds.length) {
+      const { data: relatedLinks } = await db
+        .from("parent_student")
+        .select("parent_id")
+        .in("student_id", studentIds);
+
+      for (const row of (relatedLinks || []) as { parent_id: number }[]) {
+        if (Number.isFinite(row.parent_id)) ids.add(row.parent_id);
+      }
+    }
+
+    return [...ids];
+  };
+
+  const resolveParentSchoolIds = async (parentIds: number[]): Promise<number[]> => {
+    if (role !== "parent") {
+      return Number.isFinite(schoolId) ? [schoolId] : [];
+    }
+
+    const ids = [...new Set(parentIds.filter((id) => Number.isFinite(id)))];
+    const schoolIds = new Set<number>();
+
+    if (Number.isFinite(schoolId)) schoolIds.add(schoolId);
+
+    if (!ids.length) return [...schoolIds];
+
+    const [{ data: parentRows }, { data: accessRows }, { data: linkRows }] = await Promise.all([
+      db.from("parents").select("school_id").in("id", ids),
+      db.from("parent_school_access").select("school_id").in("parent_id", ids),
+      db
+        .from("parent_student")
+        .select("students(school_id)")
+        .in("parent_id", ids),
+    ]);
+
+    for (const row of (parentRows || []) as { school_id: number | null }[]) {
+      const sid = Number(row.school_id);
+      if (Number.isFinite(sid)) schoolIds.add(sid);
+    }
+
+    for (const row of (accessRows || []) as { school_id: number | null }[]) {
+      const sid = Number(row.school_id);
+      if (Number.isFinite(sid)) schoolIds.add(sid);
+    }
+
+    for (const row of (linkRows || []) as { students: { school_id: number | null } | null }[]) {
+      const sid = Number(row.students?.school_id);
+      if (Number.isFinite(sid)) schoolIds.add(sid);
+    }
+
+    return [...schoolIds];
+  };
 
   if (!["parent", "teacher", "admin"].includes(role)) {
     return json({ message: "Forbidden" }, 403);
@@ -150,18 +263,23 @@ export async function handleChat(
   // ── GET /chat/conversations ───────────────────────────────────
   if (path === "/chat/conversations" && method === "GET") {
     try {
-      let query = db
-        .from("chat_conversations")
-        .select("*")
-        .eq("school_id", schoolId)
-        .order("last_message_at", { ascending: false });
-
+      let query;
       if (role === "parent") {
-        query = query.eq("parent_id", userId);
+        const parentIds = await resolveParentIdsByEmail();
+        // Parent inbox should not depend on JWT school_id, which can be stale/incomplete.
+        query = db
+          .from("chat_conversations")
+          .select("*")
+          .in("parent_id", parentIds)
+          .order("last_message_at", { ascending: false });
       } else {
-        query = query
+        query = db
+          .from("chat_conversations")
+          .select("*")
+          .eq("school_id", schoolId)
           .eq("participant_id", userId)
-          .eq("participant_type", role);
+          .eq("participant_type", role)
+          .order("last_message_at", { ascending: false });
       }
 
       const { data: convs, error } = await query;
@@ -183,6 +301,8 @@ export async function handleChat(
       let parentId: number;
       let participantId: number;
       let participantType: string;
+      let conversationSchoolId: number;
+      let parentIdsForUser: number[] = [userId];
 
       if (role === "parent") {
         // Parent initiates: provide participant_id + participant_type
@@ -190,50 +310,174 @@ export async function handleChat(
         if (!participant_id || !["teacher", "admin"].includes(participant_type)) {
           return json({ message: "participant_id and participant_type (teacher|admin) are required" }, 400);
         }
-        // Verify participant belongs to same school
+        const parentIds = await resolveParentIdsByEmail();
+        parentIdsForUser = parentIds.length ? parentIds : [userId];
+        const allowedSchoolIds = await resolveParentSchoolIds(parentIdsForUser);
+
+        // Verify participant belongs to one of the parent's schools.
         const table = participant_type === "teacher" ? "teachers" : "admins";
-        const { data: participant } = await db
+        let participantQuery = db
           .from(table)
-          .select("id")
-          .eq("id", participant_id)
-          .eq("school_id", schoolId)
-          .single();
+          .select("id, school_id")
+          .eq("id", participant_id);
+
+        if (allowedSchoolIds.length) {
+          participantQuery = participantQuery.in("school_id", allowedSchoolIds);
+        } else if (Number.isFinite(schoolId)) {
+          participantQuery = participantQuery.eq("school_id", schoolId);
+        }
+
+        const { data: participant } = await participantQuery.single();
         if (!participant) return json({ message: "Participant not found in this school" }, 404);
-        parentId = userId;
+
+        parentId = parentIdsForUser.includes(userId) ? userId : parentIdsForUser[0];
         participantId = participant_id;
         participantType = participant_type;
+        conversationSchoolId = Number(participant.school_id);
       } else {
-        // Teacher/admin initiates: provide parent_id
-        const { parent_id } = body;
-        if (!parent_id) return json({ message: "parent_id is required" }, 400);
-        // Verify parent belongs to same school
-        const { data: parent } = await db
-          .from("parents")
-          .select("id")
-          .eq("id", parent_id)
-          .eq("school_id", schoolId)
-          .single();
-        if (!parent) return json({ message: "Parent not found in this school" }, 404);
-        parentId = parent_id;
+        // Teacher/admin initiates: provide parent_id or student_id.
+        const { parent_id, student_id } = body;
+        if (!parent_id && !student_id) {
+          return json({ message: "parent_id or student_id is required" }, 400);
+        }
+
+        let resolvedParentId: number | null = null;
+
+        // If student_id is provided, resolve an eligible parent for that student in this school.
+        if (student_id) {
+          const { data: student } = await db
+            .from("students")
+            .select("id")
+            .eq("id", student_id)
+            .eq("school_id", schoolId)
+            .single();
+
+          if (!student) {
+            return json({ message: "Student not found in this school" }, 404);
+          }
+
+          const { data: parentLinks, error: linkError } = await db
+            .from("parent_student")
+            .select("parent_id")
+            .eq("student_id", student_id);
+
+          if (linkError) throw linkError;
+
+          const linkedParentIds = [...new Set((parentLinks || [])
+            .map((r: any) => Number(r.parent_id))
+            .filter((id: number) => Number.isFinite(id)))];
+
+          if (!linkedParentIds.length) {
+            return json({ message: "No parent account found for this student" }, 404);
+          }
+
+          const [{ data: parentsRows }, { data: accessRows }] = await Promise.all([
+            db
+              .from("parents")
+              .select("id, school_id")
+              .in("id", linkedParentIds),
+            db
+              .from("parent_school_access")
+              .select("parent_id")
+              .eq("school_id", schoolId)
+              .in("parent_id", linkedParentIds),
+          ]);
+
+          const accessSet = new Set((accessRows || []).map((r: any) => Number(r.parent_id)));
+          const eligible = (parentsRows || []).find((p: any) =>
+            Number(p.school_id) === Number(schoolId) || accessSet.has(Number(p.id)),
+          );
+
+          if (!eligible) {
+            return json({ message: "Parent not found in this school" }, 404);
+          }
+
+          resolvedParentId = Number(eligible.id);
+        }
+
+        // If parent_id is provided, validate it through multiple school-access paths.
+        if (!resolvedParentId && parent_id) {
+          const { data: parent } = await db
+            .from("parents")
+            .select("id, school_id")
+            .eq("id", parent_id)
+            .single();
+
+          if (!parent) return json({ message: "Parent not found" }, 404);
+
+          let allowed = Number((parent as any).school_id) === Number(schoolId);
+
+          if (!allowed) {
+            const { data: accessRow } = await db
+              .from("parent_school_access")
+              .select("parent_id")
+              .eq("parent_id", parent_id)
+              .eq("school_id", schoolId)
+              .maybeSingle();
+            allowed = !!accessRow;
+          }
+
+          // Fallback: if parent is linked to any student in this school, allow.
+          if (!allowed) {
+            const { data: links, error: pLinkError } = await db
+              .from("parent_student")
+              .select("student_id")
+              .eq("parent_id", parent_id);
+
+            if (pLinkError) throw pLinkError;
+
+            const studentIds = (links || [])
+              .map((r: any) => Number(r.student_id))
+              .filter((id: number) => Number.isFinite(id));
+
+            if (studentIds.length) {
+              const { data: studentMatch } = await db
+                .from("students")
+                .select("id")
+                .in("id", studentIds)
+                .eq("school_id", schoolId)
+                .limit(1);
+              allowed = !!(studentMatch && studentMatch.length > 0);
+            }
+          }
+
+          if (!allowed) return json({ message: "Parent not found in this school" }, 404);
+          resolvedParentId = Number(parent_id);
+        }
+
+        if (!resolvedParentId) return json({ message: "Parent not found in this school" }, 404);
+
+        parentId = resolvedParentId;
         participantId = userId;
         participantType = role;
+        conversationSchoolId = schoolId;
       }
 
       // Return existing conversation if present
-      const { data: existing } = await db
+      let existingQuery = db
         .from("chat_conversations")
         .select("*")
-        .eq("parent_id", parentId)
         .eq("participant_id", participantId)
-        .eq("participant_type", participantType)
-        .single();
+        .eq("participant_type", participantType);
+
+      if (role === "parent") {
+        existingQuery = existingQuery.in("parent_id", parentIdsForUser);
+      } else {
+        existingQuery = existingQuery.eq("parent_id", parentId);
+      }
+
+      const { data: existingRows } = await existingQuery
+        .order("id", { ascending: true })
+        .limit(1);
+
+      const existing = (existingRows || [])[0];
 
       if (existing) return json(existing);
 
       const { data: conv, error } = await db
         .from("chat_conversations")
         .insert({
-          school_id: schoolId,
+          school_id: conversationSchoolId,
           parent_id: parentId,
           participant_id: participantId,
           participant_type: participantType,
@@ -254,6 +498,8 @@ export async function handleChat(
   if (msgListMatch && method === "GET") {
     const convId = parseInt(msgListMatch[1]);
     try {
+      const parentIds = role === "parent" ? await resolveParentIdsByEmail() : [userId];
+
       // Verify access
       const { data: conv } = await db
         .from("chat_conversations")
@@ -264,7 +510,7 @@ export async function handleChat(
       if (!conv) return json({ message: "Conversation not found" }, 404);
 
       const hasAccess =
-        (role === "parent" && conv.parent_id === userId) ||
+        (role === "parent" && parentIds.includes(Number(conv.parent_id))) ||
         (role !== "parent" && conv.participant_id === userId && conv.participant_type === role);
 
       if (!hasAccess) return json({ message: "Forbidden" }, 403);
@@ -318,6 +564,8 @@ export async function handleChat(
   if (sendMsgMatch && method === "POST") {
     const convId = parseInt(sendMsgMatch[1]);
     try {
+      const parentIds = role === "parent" ? await resolveParentIdsByEmail() : [userId];
+
       const { content } = await req.json();
       if (!content?.trim()) return json({ message: "content is required" }, 400);
 
@@ -330,7 +578,7 @@ export async function handleChat(
       if (!conv) return json({ message: "Conversation not found" }, 404);
 
       const hasAccess =
-        (role === "parent" && conv.parent_id === userId) ||
+        (role === "parent" && parentIds.includes(Number(conv.parent_id))) ||
         (role !== "parent" && conv.participant_id === userId && conv.participant_type === role);
 
       if (!hasAccess) return json({ message: "Forbidden" }, 403);
@@ -360,11 +608,16 @@ export async function handleChat(
         .eq("id", convId);
 
       // Mark own message as read (sender always reads their own message)
-      await db.from("chat_message_reads").insert({
-        message_id: msg.id,
-        reader_id: userId,
-        reader_type: role,
-      }).onConflict("message_id, reader_id, reader_type").merge();
+      await db
+        .from("chat_message_reads")
+        .upsert(
+          {
+            message_id: msg.id,
+            reader_id: userId,
+            reader_type: role,
+          },
+          { onConflict: "message_id,reader_id,reader_type", ignoreDuplicates: true },
+        );
 
       // Push notification to recipient (non-blocking)
       (async () => {
@@ -411,6 +664,8 @@ export async function handleChat(
   if (readMatch && method === "POST") {
     const convId = parseInt(readMatch[1]);
     try {
+      const parentIds = role === "parent" ? await resolveParentIdsByEmail() : [userId];
+
       const { data: conv } = await db
         .from("chat_conversations")
         .select("*")
@@ -420,23 +675,26 @@ export async function handleChat(
       if (!conv) return json({ message: "Conversation not found" }, 404);
 
       const hasAccess =
-        (role === "parent" && conv.parent_id === userId) ||
+        (role === "parent" && parentIds.includes(Number(conv.parent_id))) ||
         (role !== "parent" && conv.participant_id === userId && conv.participant_type === role);
 
       if (!hasAccess) return json({ message: "Forbidden" }, 403);
 
-      // Get all messages in this conversation NOT sent by the viewer
+      // Get all messages and filter out viewer's own messages safely in code.
+      // We must compare sender_type + sender_id together because numeric ids can overlap across roles.
       const { data: msgs } = await db
         .from("chat_messages")
-        .select("id")
+        .select("id, sender_id, sender_type")
         .eq("conversation_id", convId)
-        .not("sender_id", "eq", userId)
-        .not("sender_type", "eq", role)
         .is("deleted_at", null);
 
       if (!msgs || !msgs.length) return json({ marked: 0 });
 
-      const msgIds = msgs.map((m: { id: number }) => m.id);
+      const msgIds = (msgs as { id: number; sender_id: number; sender_type: string }[])
+        .filter((m) => !(m.sender_id === userId && m.sender_type === role))
+        .map((m) => m.id);
+
+      if (!msgIds.length) return json({ marked: 0 });
 
       // Upsert read receipts
       const inserts = msgIds.map((mid: number) => ({
@@ -447,7 +705,7 @@ export async function handleChat(
 
       await db
         .from("chat_message_reads")
-        .upsert(inserts, { onConflict: "message_id, reader_id, reader_type", ignoreDuplicates: true });
+        .upsert(inserts, { onConflict: "message_id,reader_id,reader_type", ignoreDuplicates: true });
 
       return json({ marked: msgIds.length });
     } catch (err) {
@@ -518,45 +776,122 @@ export async function handleChat(
     }
   }
 
+  // ── DELETE /chat/conversations/:id (hard delete) ───────────────
+  const convDeleteMatch = path.match(/^\/chat\/conversations\/(\d+)$/);
+  if (convDeleteMatch && method === "DELETE") {
+    const convId = parseInt(convDeleteMatch[1], 10);
+    try {
+      const parentIds = role === "parent" ? await resolveParentIdsByEmail() : [userId];
+
+      const { data: conv } = await db
+        .from("chat_conversations")
+        .select("id, parent_id, participant_id, participant_type")
+        .eq("id", convId)
+        .single();
+
+      if (!conv) return json({ message: "Conversation not found" }, 404);
+
+      const hasAccess =
+        (role === "parent" && parentIds.includes(Number(conv.parent_id))) ||
+        (role !== "parent" && conv.participant_id === userId && conv.participant_type === role);
+
+      if (!hasAccess) return json({ message: "Forbidden" }, 403);
+
+      const { error } = await db
+        .from("chat_conversations")
+        .delete()
+        .eq("id", convId);
+
+      if (error) throw error;
+      return json({ message: "Conversation deleted" });
+    } catch (err) {
+      console.error("[chat/conversations/:id DELETE]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
   // ── GET /chat/teachers — parent lists teachers for their children ─
   if (path === "/chat/teachers" && method === "GET") {
     if (role !== "parent") return json({ message: "Forbidden" }, 403);
     try {
+      const parentIds = await resolveParentIdsByEmail();
+
       // Get children of this parent
       const { data: links } = await db
         .from("parent_student")
-        .select("student_id, students(class_id, section_id)")
-        .eq("parent_id", userId);
+        .select("student_id, students(school_id, class_id, section_id)")
+        .in("parent_id", parentIds);
 
       if (!links?.length) return json([]);
 
-      const classIds = [...new Set((links as Record<string, unknown>[]).map((l) => {
-        const s = l.students as Record<string, unknown> | null;
-        return s?.class_id as number;
-      }).filter(Boolean))];
+      const studentSchools = [
+        ...new Set(
+          (links as Record<string, unknown>[])
+            .map((l) => l.students as Record<string, unknown> | null)
+            .filter(Boolean)
+            .map((s) => Number(s?.school_id))
+            .filter((id) => Number.isFinite(id)),
+        ),
+      ];
 
-      const sectionIds = [...new Set((links as Record<string, unknown>[]).map((l) => {
-        const s = l.students as Record<string, unknown> | null;
-        return s?.section_id as number;
-      }).filter(Boolean))];
+      const fetchSchoolTeachers = async () => {
+        if (!studentSchools.length) return [];
+        const { data: teachers } = await db
+          .from("teachers")
+          .select("id, first_name, last_name, email")
+          .in("school_id", studentSchools)
+          .order("first_name");
+        return teachers || [];
+      };
 
-      // Find teachers assigned to these class/section combos
+      const childCombos = (links as Record<string, unknown>[])
+        .map((l) => l.students as Record<string, unknown> | null)
+        .filter(Boolean)
+        .map((s) => ({
+          class_id: Number(s?.class_id),
+          section_id: Number(s?.section_id),
+        }))
+        .filter((x) => Number.isFinite(x.class_id) && Number.isFinite(x.section_id));
+
+      if (!childCombos.length) {
+        // Child exists but class/section mapping is incomplete; still allow parent to message school teachers.
+        return json(await fetchSchoolTeachers());
+      }
+
+      const classIds = [...new Set(childCombos.map((x) => x.class_id))];
+      const sectionIds = [...new Set(childCombos.map((x) => x.section_id))];
+      const comboKeySet = new Set(childCombos.map((x) => `${x.class_id}:${x.section_id}`));
+
+      // Fetch candidate assignments, then keep only exact class-section matches.
       const { data: tcRows } = await db
         .from("teacher_classes")
-        .select("teacher_id, class_id, section_id")
+        .select("teacher_id, class_id, section_id, classes!inner(school_id)")
         .in("class_id", classIds)
         .in("section_id", sectionIds);
 
-      const teacherIds = [...new Set((tcRows || []).map((r: { teacher_id: number }) => r.teacher_id))];
-      if (!teacherIds.length) return json([]);
+      const teacherIds = [...new Set(
+        (tcRows || [])
+          .filter((r: { class_id: number; section_id: number; classes?: { school_id?: number } }) => {
+            const inCombo = comboKeySet.has(`${r.class_id}:${r.section_id}`);
+            const teacherSchoolId = Number(r.classes?.school_id);
+            const inStudentSchool = studentSchools.includes(teacherSchoolId);
+            return inCombo && inStudentSchool;
+          })
+          .map((r: { teacher_id: number }) => r.teacher_id),
+      )];
 
-      const { data: teachers } = await db
-        .from("teachers")
-        .select("id, first_name, last_name, email")
-        .in("id", teacherIds)
-        .eq("school_id", schoolId);
+      if (teacherIds.length) {
+        const { data: teachers } = await db
+          .from("teachers")
+          .select("id, first_name, last_name, email")
+          .in("id", teacherIds)
+          .order("first_name");
 
-      return json(teachers || []);
+        return json(teachers || []);
+      }
+
+      // Fallback: if assignments are missing, still allow parent to contact school teachers.
+      return json(await fetchSchoolTeachers());
     } catch (err) {
       console.error("[chat/teachers GET]", err);
       return json({ message: "Server error" }, 500);
@@ -567,10 +902,16 @@ export async function handleChat(
   if (path === "/chat/admins" && method === "GET") {
     if (role !== "parent") return json({ message: "Forbidden" }, 403);
     try {
+      const parentIds = await resolveParentIdsByEmail();
+      const schoolIds = await resolveParentSchoolIds(parentIds);
+
+      if (!schoolIds.length) return json([]);
+
       const { data: admins } = await db
         .from("admins")
         .select("id, first_name, last_name, email")
-        .eq("school_id", schoolId);
+        .in("school_id", schoolIds)
+        .order("first_name");
 
       return json(admins || []);
     } catch (err) {
@@ -601,6 +942,74 @@ export async function handleChat(
       return json(parents || []);
     } catch (err) {
       console.error("[chat/parents GET]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── GET /chat/student/:id/parents — get all parents for a specific student ─
+  if (path.match(/^\/chat\/student\/(\d+)\/parents$/i) && method === "GET") {
+    if (role === "parent") return json({ message: "Forbidden" }, 403);
+    try {
+      const studentId = parseInt(path.split('/')[3], 10);
+      if (!studentId) return json({ message: "Invalid student ID" }, 400);
+
+      // Verify student belongs to this school
+      const { data: student, error: studentError } = await db
+        .from("students")
+        .select("id, school_id")
+        .eq("id", studentId)
+        .single();
+
+      if (studentError || !student) return json({ message: "Student not found" }, 404);
+      if ((student as any).school_id !== schoolId) return json({ message: "Forbidden" }, 403);
+
+      // Get all parents for this student
+      const { data: parentStudentLinks, error: linkError } = await db
+        .from("parent_student")
+        .select(`
+          parent_id,
+          parents!inner(id, first_name, last_name, email, phone, school_id)
+        `)
+        .eq("student_id", studentId);
+
+      if (linkError) throw linkError;
+
+      if (!parentStudentLinks || parentStudentLinks.length === 0) {
+        return json([]);
+      }
+
+      // Get parent IDs and filter those that have access to this school
+      const parentIds = (parentStudentLinks || []).map((ps: any) => ps.parents.id);
+      
+      const { data: schoolAccessList, error: accessError } = await db
+        .from("parent_school_access")
+        .select("parent_id")
+        .eq("school_id", schoolId)
+        .in("parent_id", parentIds);
+
+      if (accessError) throw accessError;
+
+      // Filter parents: must have school_id set to this school OR be in parent_school_access
+      const allowedParentIds = new Set<number>();
+      const accessParentIds = new Set((schoolAccessList || []).map((a: any) => a.parent_id));
+
+      const parentList = (parentStudentLinks || [])
+        .filter((ps: any) => {
+          const parentId = ps.parents.id;
+          // Include if parent.school_id matches OR if they're in parent_school_access
+          return ps.parents.school_id === schoolId || accessParentIds.has(parentId);
+        })
+        .map((ps: any) => ({
+          id: ps.parents.id,
+          first_name: ps.parents.first_name,
+          last_name: ps.parents.last_name,
+          email: ps.parents.email,
+          phone: ps.parents.phone,
+        }));
+
+      return json(parentList);
+    } catch (err) {
+      console.error("[chat/student/:id/parents GET]", err);
       return json({ message: "Server error" }, 500);
     }
   }

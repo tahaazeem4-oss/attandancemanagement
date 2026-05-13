@@ -14,12 +14,25 @@ import ManagerSearchAddRow from './ManagerSearchAddRow';
 import ModalFooterActions from './ModalFooterActions';
 import { showDestructiveConfirm } from '../lib/confirmDialog';
 
-const EMPTY_FORM = { first_name: '', last_name: '', email: '', password: '', phone: '', assignments: [], school_id: '' };
+const EMPTY_FORM = { first_name: '', last_name: '', email: '', password: '', phone: '', assignments: [], school_id: '', teacher_role: 'subject_teacher' };
 
 const ROLE = {
   class_teacher: { label: 'Class Teacher', bg: '#ECFDF5', color: '#065F46' },
   floor_incharge: { label: 'Floor Incharge', bg: '#F5F3FF', color: '#5B21B6' },
   subject_teacher: { label: 'Subject Teacher', bg: '#FFFBEB', color: '#92400E' },
+};
+
+const ROLE_ITEMS = [
+  { label: 'Class Teacher', value: 'class_teacher' },
+  { label: 'Floor Incharge', value: 'floor_incharge' },
+  { label: 'Subject Teacher', value: 'subject_teacher' },
+];
+
+const deriveRoleFromAssignments = (assignments = []) => {
+  const n = Array.isArray(assignments) ? assignments.length : 0;
+  if (n === 0) return 'subject_teacher';
+  if (n === 1) return 'class_teacher';
+  return 'floor_incharge';
 };
 
 function MultiAssignmentPicker({ classes, assignments, onChange }) {
@@ -45,7 +58,7 @@ function MultiAssignmentPicker({ classes, assignments, onChange }) {
       <View style={{ gap: 6, marginBottom: 8 }}>
         {assignments.length === 0 && (
           <View style={mp.emptyTag}>
-            <Text style={mp.emptyTagTxt}>No assignment - Subject Teacher</Text>
+            <Text style={mp.emptyTagTxt}>No class/section assigned yet</Text>
           </View>
         )}
         {assignments.map((a, i) => (
@@ -137,13 +150,23 @@ export default function TeachersManagerScreen({ navigation, mode }) {
         setCampuses(filteredCampuses);
         setOrganizations(oRes.data || []);
 
-        if (!filterCampus) {
-          setTeachers([]);
-          return;
+        if (filterCampus) {
+          const { data } = await api.get(`/super-admin/schools/${filterCampus}/teachers`);
+          setTeachers(data || []);
+        } else {
+          // "All campuses" for super admin: aggregate teachers across scoped campuses.
+          const scopedCampuses = filteredCampuses || [];
+          if (!scopedCampuses.length) {
+            setTeachers([]);
+          } else {
+            const responses = await Promise.all(
+              scopedCampuses.map(campus =>
+                api.get(`/super-admin/schools/${campus.id}/teachers`).catch(() => ({ data: [] })),
+              ),
+            );
+            setTeachers(responses.flatMap(r => r.data || []));
+          }
         }
-
-        const { data } = await api.get(`/super-admin/schools/${filterCampus}/teachers`);
-        setTeachers(data || []);
       } else if (isOrg) {
         const params = filterCampus ? { campus_id: filterCampus } : {};
         const [tRes, cRes] = await Promise.all([
@@ -183,6 +206,10 @@ export default function TeachersManagerScreen({ navigation, mode }) {
       api.get(`/super-admin/schools/${form.school_id}/classes`)
         .then(({ data }) => setClasses(data || []))
         .catch(() => setClasses([]));
+    } else if (isOrg) {
+      api.get('/org-admin/classes', { params: { campus_id: form.school_id } })
+        .then(({ data }) => setClasses(data || []))
+        .catch(() => setClasses([]));
     }
   }, [isSuper, isOrg, form.school_id]);
 
@@ -218,6 +245,7 @@ export default function TeachersManagerScreen({ navigation, mode }) {
       phone: item.phone || '',
       assignments: item.assignments || [],
       school_id: String(item.school_id || ''),
+      teacher_role: item.teacher_role || deriveRoleFromAssignments(item.assignments || []),
     });
     setNewPw('');
     setShowCreatePw(false);
@@ -252,11 +280,13 @@ export default function TeachersManagerScreen({ navigation, mode }) {
             email: form.email,
             phone: form.phone,
             assignments: form.assignments,
+            teacher_role: form.teacher_role,
           });
         } else {
           await api.post(`/super-admin/schools/${schoolId}/teachers`, {
             ...form,
             assignments: form.assignments,
+            teacher_role: form.teacher_role,
           });
         }
       } else if (isOrg) {
@@ -266,9 +296,16 @@ export default function TeachersManagerScreen({ navigation, mode }) {
             last_name: form.last_name,
             email: form.email,
             phone: form.phone,
+            assignments: form.assignments,
+            teacher_role: form.teacher_role,
           });
         } else {
-          await api.post('/org-admin/teachers', { ...form, school_id: parseInt(form.school_id, 10) });
+          await api.post('/org-admin/teachers', {
+            ...form,
+            school_id: parseInt(form.school_id, 10),
+            assignments: form.assignments,
+            teacher_role: form.teacher_role,
+          });
         }
       } else if (editing) {
         await api.put(`/admin/teachers/${editing.id}`, {
@@ -277,9 +314,10 @@ export default function TeachersManagerScreen({ navigation, mode }) {
           email: form.email,
           phone: form.phone,
           assignments: form.assignments,
+          teacher_role: form.teacher_role,
         });
       } else {
-        await api.post('/admin/teachers', { ...form, assignments: form.assignments });
+        await api.post('/admin/teachers', { ...form, assignments: form.assignments, teacher_role: form.teacher_role });
       }
       setModal(false);
       await load();
@@ -413,7 +451,7 @@ export default function TeachersManagerScreen({ navigation, mode }) {
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                   <Text style={styles.name}>{item.first_name} {item.last_name}</Text>
-                  {!isOrg && !isSuper && item.teacher_role && ROLE[item.teacher_role] && (
+                  {item.teacher_role && ROLE[item.teacher_role] && (
                     <View style={[styles.rolePill, { backgroundColor: ROLE[item.teacher_role].bg }]}>
                       <Text style={[styles.rolePillTxt, { color: ROLE[item.teacher_role].color }]}>{ROLE[item.teacher_role].label}</Text>
                     </View>
@@ -478,9 +516,16 @@ export default function TeachersManagerScreen({ navigation, mode }) {
                 </>
               )}
 
-              {!isOrg && (
-                <MultiAssignmentPicker classes={classes} assignments={form.assignments} onChange={v => F('assignments', v)} />
-              )}
+              <Text style={styles.label}>Teacher Role *</Text>
+              <PickerField
+                label=""
+                value={form.teacher_role}
+                onChange={v => F('teacher_role', v)}
+                items={ROLE_ITEMS}
+                placeholder="Select role"
+              />
+
+              <MultiAssignmentPicker classes={classes} assignments={form.assignments} onChange={v => F('assignments', v)} />
 
               {editing && (
                 <>
