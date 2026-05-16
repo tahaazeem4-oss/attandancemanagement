@@ -22,6 +22,9 @@ export const listFeatureFlags = (params = {}) => api.get('/ai-tutor/admin/featur
 export const setQuotaPolicy   = (body) => api.post('/ai-tutor/admin/quota-policy', body);
 export const listQuotaPolicies = (params = {}) => api.get('/ai-tutor/admin/quota-policies', { params });
 export const fetchAiTutorHealth = () => api.get('/ai-tutor/admin/health');
+export const fetchScopeOptions  = (type, parentId) =>
+  api.get('/ai-tutor/admin/scope-options', { params: { type, ...(parentId ? { parent_id: parentId } : {}) } });
+export const fetchPolicySummary = () => api.get('/ai-tutor/admin/policy-summary');
 
 // ── Analytics ────────────────────────────────────────────────
 export const fetchUsageAnalytics = (days = 30) => api.get('/ai-tutor/analytics/usage', { params: { days } });

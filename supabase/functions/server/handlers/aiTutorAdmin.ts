@@ -123,5 +123,189 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
     });
   }
 
+  // GET /ai-tutor/admin/scope-options?type=organization|campus|class|section|student&parent_id=
+  // Returns [{ id, name, parent_id? }] filtered by caller's role.
+  if (path === "/ai-tutor/admin/scope-options" && req.method === "GET") {
+    if (!["super_admin", "org_admin", "admin"].includes(role)) {
+      return json({ message: "Forbidden" }, 403);
+    }
+    const url = new URL(req.url);
+    const type = String(url.searchParams.get("type") || "");
+    const parentIdRaw = url.searchParams.get("parent_id");
+    const parentId = parentIdRaw ? Number(parentIdRaw) : null;
+    const orgIdFromToken = Number(user.org_id || 0);
+    const schoolIdFromToken = Number(user.school_id || 0);
+
+    try {
+      if (type === "organization") {
+        if (role !== "super_admin") return json({ options: [] });
+        const { data } = await db.from("organizations").select("id, name").order("name");
+        return json({ options: (data || []).map((r: { id: number; name: string }) => ({ id: r.id, name: r.name })) });
+      }
+
+      if (type === "campus") {
+        let q = db.from("schools").select("id, name, org_id").order("name");
+        if (role === "org_admin") q = q.eq("org_id", orgIdFromToken);
+        if (role === "admin")     q = q.eq("id", schoolIdFromToken);
+        if (parentId) q = q.eq("org_id", parentId);
+        const { data } = await q;
+        return json({ options: (data || []).map((r: { id: number; name: string; org_id: number | null }) => ({ id: r.id, name: r.name, parent_id: r.org_id })) });
+      }
+
+      if (type === "class") {
+        // parent_id is the campus (school) id
+        let campusFilter: number | null = parentId;
+        if (role === "admin") campusFilter = schoolIdFromToken;
+        if (!campusFilter) return json({ options: [], message: "Pick a campus first" });
+        const { data } = await db.from("classes").select("id, class_name, school_id").eq("school_id", campusFilter).order("class_name");
+        return json({ options: (data || []).map((r: { id: number; class_name: string; school_id: number }) => ({ id: r.id, name: r.class_name, parent_id: r.school_id })) });
+      }
+
+      if (type === "section") {
+        if (!parentId) return json({ options: [], message: "Pick a class first" });
+        const { data } = await db.from("sections").select("id, section_name, class_id").eq("class_id", parentId).order("section_name");
+        return json({ options: (data || []).map((r: { id: number; section_name: string; class_id: number }) => ({ id: r.id, name: r.section_name, parent_id: r.class_id })) });
+      }
+
+      if (type === "student") {
+        if (!parentId) return json({ options: [], message: "Pick a section first" });
+        const { data } = await db.from("students")
+          .select("id, first_name, last_name, roll_no, section_id")
+          .eq("section_id", parentId)
+          .order("first_name");
+        return json({ options: (data || []).map((r: { id: number; first_name: string; last_name: string; roll_no: string | null; section_id: number }) => ({
+          id: r.id,
+          name: `${r.first_name} ${r.last_name}${r.roll_no ? ` (#${r.roll_no})` : ""}`,
+          parent_id: r.section_id,
+        })) });
+      }
+
+      return json({ message: "Unknown type" }, 400);
+    } catch (err) {
+      console.error("[ai-tutor scope-options]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // GET /ai-tutor/admin/policy-summary
+  // Returns flags + policies joined with human-readable names for each scope_id.
+  if (path === "/ai-tutor/admin/policy-summary" && req.method === "GET") {
+    if (!["super_admin", "org_admin", "admin"].includes(role)) {
+      return json({ message: "Forbidden" }, 403);
+    }
+    const orgIdFromToken = Number(user.org_id || 0);
+    const schoolIdFromToken = Number(user.school_id || 0);
+
+    try {
+      const [flagsRes, policiesRes, orgsRes, schoolsRes, classesRes, sectionsRes, studentsRes] = await Promise.all([
+        db.from("ai_feature_flags").select("*"),
+        db.from("ai_quota_policies").select("*"),
+        db.from("organizations").select("id, name"),
+        db.from("schools").select("id, name, org_id"),
+        db.from("classes").select("id, class_name, school_id"),
+        db.from("sections").select("id, section_name, class_id"),
+        db.from("students").select("id, first_name, last_name, roll_no, section_id, class_id, school_id"),
+      ]);
+
+      type Row = { id: number; [k: string]: unknown };
+      const orgs = new Map<number, { name: string }>(((orgsRes.data || []) as Row[]).map((r) => [Number(r.id), { name: String(r.name) }]));
+      const schools = new Map<number, { name: string; org_id: number | null }>(((schoolsRes.data || []) as Row[]).map((r) => [Number(r.id), { name: String(r.name), org_id: r.org_id as number | null }]));
+      const classes = new Map<number, { name: string; school_id: number }>(((classesRes.data || []) as Row[]).map((r) => [Number(r.id), { name: String(r.class_name), school_id: Number(r.school_id) }]));
+      const sections = new Map<number, { name: string; class_id: number }>(((sectionsRes.data || []) as Row[]).map((r) => [Number(r.id), { name: String(r.section_name), class_id: Number(r.class_id) }]));
+      const students = new Map<number, { name: string; school_id: number; class_id: number; section_id: number }>(((studentsRes.data || []) as Row[]).map((r) => [Number(r.id), {
+        name: `${r.first_name} ${r.last_name}${r.roll_no ? ` (#${r.roll_no})` : ""}`,
+        school_id: Number(r.school_id),
+        class_id: Number(r.class_id),
+        section_id: Number(r.section_id),
+      }]));
+
+      const resolveName = (st: string, sid: number | null): string => {
+        if (!sid) return "Everyone (global default)";
+        if (st === "organization") return orgs.get(sid)?.name ? `Org: ${orgs.get(sid)!.name}` : `Org #${sid}`;
+        if (st === "campus")       return schools.get(sid)?.name ? `Campus: ${schools.get(sid)!.name}` : `Campus #${sid}`;
+        if (st === "class") {
+          const c = classes.get(sid);
+          const campusName = c ? schools.get(c.school_id)?.name : null;
+          return c ? `Class: ${c.name}${campusName ? ` · ${campusName}` : ""}` : `Class #${sid}`;
+        }
+        if (st === "section") {
+          const s = sections.get(sid);
+          const c = s ? classes.get(s.class_id) : null;
+          return s ? `Section: ${c ? `${c.name} - ` : ""}${s.name}` : `Section #${sid}`;
+        }
+        if (st === "student") {
+          const st2 = students.get(sid);
+          return st2 ? `Student: ${st2.name}` : `Student #${sid}`;
+        }
+        return `${st} #${sid}`;
+      };
+
+      // Role-based visibility
+      const inOrg = (st: string, sid: number | null): boolean => {
+        if (role === "super_admin") return true;
+        if (!sid) return st === "global"; // org_admin/admin only see their own org's global default? hide global by default
+        if (role === "org_admin") {
+          if (st === "organization") return orgs.has(sid) ? Number((orgsRes.data as Row[]).find((r) => Number(r.id) === sid)?.id) === orgIdFromToken : false;
+          if (st === "campus")       return schools.get(sid)?.org_id === orgIdFromToken;
+          if (st === "class")        return classes.get(sid) ? schools.get(classes.get(sid)!.school_id)?.org_id === orgIdFromToken : false;
+          if (st === "section")      { const s = sections.get(sid); const c = s ? classes.get(s.class_id) : null; return c ? schools.get(c.school_id)?.org_id === orgIdFromToken : false; }
+          if (st === "student")      return students.get(sid) ? schools.get(students.get(sid)!.school_id)?.org_id === orgIdFromToken : false;
+          return false;
+        }
+        if (role === "admin") {
+          if (st === "campus")  return sid === schoolIdFromToken;
+          if (st === "class")   return classes.get(sid)?.school_id === schoolIdFromToken;
+          if (st === "section") { const s = sections.get(sid); return s ? classes.get(s.class_id)?.school_id === schoolIdFromToken : false; }
+          if (st === "student") return students.get(sid)?.school_id === schoolIdFromToken;
+          return false;
+        }
+        return false;
+      };
+
+      const flagsBy = new Map<string, Row>();
+      for (const f of (flagsRes.data || []) as Row[]) flagsBy.set(`${f.scope_type}#${f.scope_id ?? "null"}`, f);
+      const policiesBy = new Map<string, Row>();
+      for (const p of (policiesRes.data || []) as Row[]) policiesBy.set(`${p.scope_type}#${p.scope_id ?? "null"}`, p);
+
+      const keys = new Set<string>([...flagsBy.keys(), ...policiesBy.keys()]);
+      const rows: Array<Record<string, unknown>> = [];
+      for (const k of keys) {
+        const f = flagsBy.get(k);
+        const p = policiesBy.get(k);
+        const st = String((f?.scope_type ?? p?.scope_type) || "");
+        const sidRaw = (f?.scope_id ?? p?.scope_id) as number | null | undefined;
+        const sid = sidRaw === null || sidRaw === undefined ? null : Number(sidRaw);
+        if (!inOrg(st, sid)) continue;
+        rows.push({
+          scope_type: st,
+          scope_id: sid,
+          scope_name: resolveName(st, sid),
+          is_enabled: f ? Boolean(f.is_enabled) : null,
+          daily_requests: p?.daily_requests ?? null,
+          weekly_requests: p?.weekly_requests ?? null,
+          monthly_requests: p?.monthly_requests ?? null,
+          daily_tokens: p?.daily_tokens ?? null,
+          weekly_tokens: p?.weekly_tokens ?? null,
+          monthly_tokens: p?.monthly_tokens ?? null,
+          max_input_tokens: p?.max_input_tokens ?? null,
+          max_output_tokens: p?.max_output_tokens ?? null,
+          updated_at: (p?.updated_at || f?.updated_at) ?? null,
+        });
+      }
+      // Order: global, organization, campus, class, section, student, then by name
+      const order: Record<string, number> = { global: 0, organization: 1, campus: 2, class: 3, section: 4, student: 5 };
+      rows.sort((a, b) => {
+        const da = order[String(a.scope_type)] ?? 9;
+        const db_ = order[String(b.scope_type)] ?? 9;
+        if (da !== db_) return da - db_;
+        return String(a.scope_name).localeCompare(String(b.scope_name));
+      });
+      return json({ rows });
+    } catch (err) {
+      console.error("[ai-tutor policy-summary]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
   return json({ message: "Not found" }, 404);
 }
