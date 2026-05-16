@@ -9,7 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   setFeatureFlag, setQuotaPolicy,
   fetchAiTutorHealth, fetchScopeOptions, fetchPolicySummary,
-  deleteScopeConfig,
+  deleteScopeConfig, setFeatureFlagsBulk,
 } from '../api/aiTutorApi';
 import api from '../../../services/api';
 import { useAuth } from '../../../context/AuthContext';
@@ -222,6 +222,72 @@ export default function AdminAiPolicyScreen() {
   const [pickerKind, setPickerKind] = useState(null);
   const [pickerVisible, setPickerVisible] = useState(false);
 
+  // ── Bulk multi-select state ────────────────────────────
+  const [bulkScopeType, setBulkScopeType] = useState('campus');
+  const [bulkParents, setBulkParents] = useState({ organization: null, campus: null, class: null, section: null });
+  const [bulkSelected, setBulkSelected] = useState([]); // [{id,name}]
+  const [bulkEnabled, setBulkEnabled] = useState(true);
+  const [bulkPickerVisible, setBulkPickerVisible] = useState(false);
+  const [bulkParentPickerKind, setBulkParentPickerKind] = useState(null);
+  const [bulkParentPickerVisible, setBulkParentPickerVisible] = useState(false);
+
+  const bulkParentChainForType = (st) => {
+    // What needs to be picked before we can list `st` entities.
+    if (st === 'organization') return [];
+    if (st === 'campus')       return role === 'super_admin' ? ['organization'] : [];
+    if (st === 'class')        return role === 'super_admin' ? ['organization', 'campus'] : ['campus'];
+    if (st === 'section')      return role === 'super_admin' ? ['organization', 'campus', 'class'] : ['campus', 'class'];
+    if (st === 'student')      return role === 'super_admin' ? ['organization', 'campus', 'class', 'section'] : ['campus', 'class', 'section'];
+    return [];
+  };
+  const bulkParentIdForKind = (kind) => {
+    if (kind === 'campus') return bulkParents.organization?.id || null;
+    if (kind === 'class')  return bulkParents.campus?.id || null;
+    if (kind === 'section') return bulkParents.class?.id || null;
+    if (kind === 'student') return bulkParents.section?.id || null;
+    return null;
+  };
+  const bulkListParentId = () => bulkParentIdForKind(bulkScopeType);
+  const bulkParentsReady = bulkParentChainForType(bulkScopeType).every((k) => bulkParents[k]);
+
+  const onBulkParentPick = (kind, item) => {
+    setBulkParents((prev) => {
+      const next = { ...prev, [kind]: item };
+      const chain = ['organization', 'campus', 'class', 'section'];
+      const idx = chain.indexOf(kind);
+      for (let i = idx + 1; i < chain.length; i += 1) next[chain[i]] = null;
+      return next;
+    });
+    setBulkSelected([]);
+    setBulkParentPickerVisible(false);
+  };
+
+  const applyBulkFlag = async () => {
+    if (!bulkSelected.length) { Alert.alert('Pick targets', 'Select one or more entries first.'); return; }
+    Alert.alert(
+      `Turn AI Tutor ${bulkEnabled ? 'ON' : 'OFF'}?`,
+      `This will be applied to ${bulkSelected.length} ${bulkScopeType}(s).`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: bulkEnabled ? 'Enable all' : 'Disable all', style: 'destructive', onPress: async () => {
+          setBulkRunning(true);
+          try {
+            const r = await setFeatureFlagsBulk({
+              scope_type: bulkScopeType,
+              scope_ids: bulkSelected.map((x) => x.id),
+              is_enabled: bulkEnabled,
+            });
+            Alert.alert('Done', `Updated ${r.data?.count ?? bulkSelected.length} ${bulkScopeType}(s).`);
+            setBulkSelected([]);
+            refresh();
+          } catch (e) {
+            Alert.alert('Error', e?.response?.data?.message || 'Bulk update failed');
+          } finally { setBulkRunning(false); }
+        } },
+      ]
+    );
+  };
+
   // Filtered summary list ──────────────────────────────────
   const filteredSummary = useMemo(() => {
     const q = summaryFilter.trim().toLowerCase();
@@ -367,6 +433,82 @@ export default function AdminAiPolicyScreen() {
           )}
         </View>
 
+        {/* Bulk on/off for many entries at once */}
+        <View style={styles.card}>
+          <Text style={styles.label}>Bulk turn AI Tutor on or off</Text>
+          <Text style={styles.helpInline}>
+            Pick a level (organizations, campuses, classes, sections or students), select multiple entries, then apply ON or OFF to all of them at once.
+          </Text>
+          <View style={styles.scopeRow}>
+            {['organization','campus','class','section','student'].map((s) => {
+              if (s === 'organization' && role !== 'super_admin') return null;
+              return (
+                <TouchableOpacity
+                  key={s}
+                  onPress={() => { setBulkScopeType(s); setBulkSelected([]); }}
+                  style={[styles.chip, bulkScopeType === s && styles.chipOn]}
+                >
+                  <Text style={[styles.chipText, bulkScopeType === s && styles.chipTextOn]}>{s}s</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Parent cascade required before listing children */}
+          {bulkParentChainForType(bulkScopeType).map((kind) => (
+            <PickerRow
+              key={`bulk-${kind}`}
+              kind={kind}
+              picked={bulkParents[kind]}
+              disabled={
+                (kind === 'campus' && role === 'super_admin' && !bulkParents.organization) ||
+                (kind === 'class' && !bulkParents.campus) ||
+                (kind === 'section' && !bulkParents.class)
+              }
+              onPress={() => { setBulkParentPickerKind(kind); setBulkParentPickerVisible(true); }}
+            />
+          ))}
+
+          <TouchableOpacity
+            style={[styles.btnSecondary, !bulkParentsReady && styles.btnDisabled]}
+            disabled={!bulkParentsReady}
+            onPress={() => setBulkPickerVisible(true)}
+          >
+            <Text style={styles.btnSecondaryText}>
+              {bulkSelected.length
+                ? `Selected ${bulkSelected.length} ${bulkScopeType}(s) — tap to edit`
+                : `Choose ${bulkScopeType}s…`}
+            </Text>
+          </TouchableOpacity>
+
+          {bulkSelected.length > 0 && (
+            <View style={styles.bulkChipsRow}>
+              {bulkSelected.slice(0, 8).map((it) => (
+                <View key={it.id} style={styles.bulkChip}>
+                  <Text style={styles.bulkChipText} numberOfLines={1}>{it.name}</Text>
+                </View>
+              ))}
+              {bulkSelected.length > 8 && (
+                <View style={styles.bulkChip}><Text style={styles.bulkChipText}>+{bulkSelected.length - 8} more</Text></View>
+              )}
+            </View>
+          )}
+
+          <View style={styles.rowBetween}>
+            <Text style={styles.label}>Apply: {bulkEnabled ? 'ON' : 'OFF'}</Text>
+            <Switch value={bulkEnabled} onValueChange={setBulkEnabled} />
+          </View>
+          <TouchableOpacity
+            style={[styles.btn, (!bulkSelected.length || bulkRunning) && styles.btnDisabled]}
+            disabled={!bulkSelected.length || bulkRunning}
+            onPress={applyBulkFlag}
+          >
+            <Text style={styles.btnText}>
+              {bulkRunning ? 'Working…' : `Apply ${bulkEnabled ? 'ON' : 'OFF'} to ${bulkSelected.length || 0} ${bulkScopeType}(s)`}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Quota policy */}
         <View style={styles.card}>
           <Text style={styles.label}>Usage limits</Text>
@@ -456,6 +598,26 @@ export default function AdminAiPolicyScreen() {
         }
         onPick={(item) => onPicked(pickerKind, item)}
       />
+
+      {/* Bulk parent cascade picker (single-select) */}
+      <PickerModal
+        visible={bulkParentPickerVisible}
+        onClose={() => setBulkParentPickerVisible(false)}
+        kind={bulkParentPickerKind}
+        parentId={bulkParentIdForKind(bulkParentPickerKind)}
+        onPick={(item) => onBulkParentPick(bulkParentPickerKind, item)}
+      />
+
+      {/* Bulk targets multi-select picker */}
+      <PickerModal
+        visible={bulkPickerVisible}
+        onClose={() => setBulkPickerVisible(false)}
+        kind={bulkScopeType}
+        parentId={bulkListParentId()}
+        multiSelect
+        initialSelection={bulkSelected}
+        onApply={(items) => { setBulkSelected(items); setBulkPickerVisible(false); }}
+      />
     </SafeAreaView>
   );
 }
@@ -489,17 +651,23 @@ function Row2({ children }) {
   return <View style={{ flexDirection: 'row', gap: 8 }}>{children}</View>;
 }
 
-function PickerModal({ visible, onClose, kind, parentId, onPick }) {
+function PickerModal({ visible, onClose, kind, parentId, onPick, multiSelect, initialSelection, onApply }) {
   const [loading, setLoading] = useState(false);
   const [options, setOptions] = useState([]);
   const [search, setSearch] = useState('');
   const [errMsg, setErrMsg] = useState('');
+  const [selectedMap, setSelectedMap] = useState({}); // id -> item
 
   useEffect(() => {
     if (!visible || !kind) return;
     setLoading(true);
     setErrMsg('');
     setOptions([]);
+    if (multiSelect) {
+      const init = {};
+      (initialSelection || []).forEach((it) => { init[it.id] = it; });
+      setSelectedMap(init);
+    }
     fetchScopeOptions(kind, parentId)
       .then((r) => {
         setOptions(r.data?.options || []);
@@ -507,6 +675,7 @@ function PickerModal({ visible, onClose, kind, parentId, onPick }) {
       })
       .catch((e) => setErrMsg(e?.response?.data?.message || 'Failed to load list'))
       .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, kind, parentId]);
 
   const filtered = useMemo(() => {
@@ -516,12 +685,26 @@ function PickerModal({ visible, onClose, kind, parentId, onPick }) {
   }, [search, options]);
 
   const titles = {
-    organization: 'Pick an organization',
-    campus: 'Pick a campus',
-    class: 'Pick a class',
-    section: 'Pick a section',
-    student: 'Pick a student',
+    organization: multiSelect ? 'Pick organizations' : 'Pick an organization',
+    campus: multiSelect ? 'Pick campuses' : 'Pick a campus',
+    class: multiSelect ? 'Pick classes' : 'Pick a class',
+    section: multiSelect ? 'Pick sections' : 'Pick a section',
+    student: multiSelect ? 'Pick students' : 'Pick a student',
   };
+
+  const toggle = (item) => {
+    setSelectedMap((prev) => {
+      const next = { ...prev };
+      if (next[item.id]) delete next[item.id]; else next[item.id] = item;
+      return next;
+    });
+  };
+  const selectAll = () => {
+    const next = {};
+    filtered.forEach((it) => { next[it.id] = it; });
+    setSelectedMap(next);
+  };
+  const clearAll = () => setSelectedMap({});
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -532,6 +715,15 @@ function PickerModal({ visible, onClose, kind, parentId, onPick }) {
             <TouchableOpacity onPress={onClose}><Text style={styles.modalClose}>Close</Text></TouchableOpacity>
           </View>
           <TextInput style={styles.input} placeholder="Search…" value={search} onChangeText={setSearch} />
+          {multiSelect && (
+            <View style={styles.rowBetween}>
+              <Text style={styles.helpInline}>{Object.keys(selectedMap).length} selected</Text>
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <TouchableOpacity onPress={selectAll}><Text style={styles.modalClose}>Select all</Text></TouchableOpacity>
+                <TouchableOpacity onPress={clearAll}><Text style={styles.modalClose}>Clear</Text></TouchableOpacity>
+              </View>
+            </View>
+          )}
           {loading ? (
             <ActivityIndicator style={{ marginTop: 20 }} />
           ) : filtered.length === 0 ? (
@@ -540,13 +732,33 @@ function PickerModal({ visible, onClose, kind, parentId, onPick }) {
             <FlatList
               data={filtered}
               keyExtractor={(it) => String(it.id)}
-              renderItem={({ item }) => (
-                <TouchableOpacity style={styles.modalItem} onPress={() => onPick(item)}>
-                  <Text style={styles.modalItemText}>{item.name}</Text>
-                </TouchableOpacity>
-              )}
+              renderItem={({ item }) => {
+                const checked = !!selectedMap[item.id];
+                return (
+                  <TouchableOpacity
+                    style={styles.modalItem}
+                    onPress={() => multiSelect ? toggle(item) : onPick(item)}
+                  >
+                    {multiSelect && (
+                      <View style={[styles.checkbox, checked && styles.checkboxOn]}>
+                        {checked ? <Text style={styles.checkmark}>✓</Text> : null}
+                      </View>
+                    )}
+                    <Text style={styles.modalItemText}>{item.name}</Text>
+                  </TouchableOpacity>
+                );
+              }}
               style={{ maxHeight: 380 }}
             />
+          )}
+          {multiSelect && (
+            <TouchableOpacity
+              style={[styles.btn, !Object.keys(selectedMap).length && styles.btnDisabled]}
+              disabled={!Object.keys(selectedMap).length}
+              onPress={() => onApply(Object.values(selectedMap))}
+            >
+              <Text style={styles.btnText}>Apply selection ({Object.keys(selectedMap).length})</Text>
+            </TouchableOpacity>
           )}
         </View>
       </View>
@@ -599,6 +811,12 @@ const styles = StyleSheet.create({
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   modalSheet: { backgroundColor: '#fff', padding: 14, borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '75%' },
   modalClose: { color: '#2563EB', fontWeight: '700' },
-  modalItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
-  modalItemText: { fontSize: 14, color: '#111827' },
+  modalItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', flexDirection: 'row', alignItems: 'center', gap: 10 },
+  modalItemText: { fontSize: 14, color: '#111827', flex: 1 },
+  checkbox: { width: 20, height: 20, borderRadius: 4, borderWidth: 1.5, borderColor: '#9CA3AF', alignItems: 'center', justifyContent: 'center' },
+  checkboxOn: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
+  checkmark: { color: '#fff', fontWeight: '700', fontSize: 12, lineHeight: 14 },
+  bulkChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 },
+  bulkChip: { backgroundColor: '#EEF2FF', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, maxWidth: '48%' },
+  bulkChipText: { fontSize: 11, color: '#3730A3' },
 });

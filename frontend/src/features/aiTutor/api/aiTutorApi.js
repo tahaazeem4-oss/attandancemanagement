@@ -18,6 +18,7 @@ export const uploadMaterial = (formData) =>
 
 // ── Admin: flags & policies ──────────────────────────────────
 export const setFeatureFlag   = (body) => api.post('/ai-tutor/admin/feature-flag', body);
+export const setFeatureFlagsBulk = (body) => api.post('/ai-tutor/admin/feature-flag/bulk', body);
 export const listFeatureFlags = (params = {}) => api.get('/ai-tutor/admin/feature-flags', { params });
 export const setQuotaPolicy   = (body) => api.post('/ai-tutor/admin/quota-policy', body);
 export const listQuotaPolicies = (params = {}) => api.get('/ai-tutor/admin/quota-policies', { params });

@@ -39,6 +39,28 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
     return json({ flag: data });
   }
 
+  // POST /ai-tutor/admin/feature-flag/bulk
+  // body: { scope_type, scope_ids:number[], is_enabled, reason? }
+  if (path === "/ai-tutor/admin/feature-flag/bulk" && req.method === "POST") {
+    const b = await req.json().catch(() => ({}));
+    const scope_type = String(b.scope_type || "") as ScopeType;
+    const ids: number[] = Array.isArray(b.scope_ids) ? b.scope_ids.map((x: unknown) => Number(x)).filter((n: number) => Number.isFinite(n) && n > 0) : [];
+    const is_enabled = Boolean(b.is_enabled);
+    const reason     = b.reason ? String(b.reason) : null;
+    if (!ALLOWED_SCOPES.includes(scope_type) || scope_type === "global") return json({ message: "Bulk requires a non-global scope_type" }, 400);
+    if (!canManage(role, scope_type)) return json({ message: "Forbidden" }, 403);
+    if (!ids.length) return json({ message: "scope_ids must be a non-empty array" }, 400);
+
+    const now = new Date().toISOString();
+    const rows = ids.map((sid) => ({
+      scope_type, scope_id: sid, is_enabled, reason,
+      updated_by_role: role, updated_by_id: userId, updated_at: now,
+    }));
+    const { data, error } = await db.from("ai_feature_flags").upsert(rows, { onConflict: "scope_type,scope_id" }).select();
+    if (error) return json({ message: error.message }, 500);
+    return json({ count: (data || []).length, flags: data });
+  }
+
   // GET /ai-tutor/admin/feature-flags?scope_type=&scope_id=
   if (path === "/ai-tutor/admin/feature-flags" && req.method === "GET") {
     const url = new URL(req.url);
