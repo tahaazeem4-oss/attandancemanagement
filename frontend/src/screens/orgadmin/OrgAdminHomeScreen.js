@@ -14,6 +14,8 @@ const CARDS = [
   { key: 'OrgAdminParents',       icon: 'people-circle-outline', label: 'Parents',       tint: '#06B6D4', bg: '#ECFEFF' },
   { key: 'OrgAdminLeaves',        icon: 'mail-open-outline',     label: 'Leaves',        tint: '#EF4444', bg: '#FEF2F2' },
   { key: 'OrgAdminNotifications', icon: 'notifications-outline', label: 'Notifications', tint: '#8B5CF6', bg: '#F5F3FF' },
+  { key: 'AdminAiPolicy',         icon: 'shield-checkmark-outline', label: 'AI Policy',  tint: '#7C3AED', bg: '#F5F3FF' },
+  { key: 'AdminAiAnalytics',      icon: 'analytics-outline',     label: 'AI Analytics',  tint: '#F97316', bg: '#FFF7ED' },
 ];
 
 export default function OrgAdminHomeScreen({ navigation }) {

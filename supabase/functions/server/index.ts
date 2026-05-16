@@ -20,6 +20,11 @@ import { handleParent, handleAdminParents } from "./handlers/parents.ts";
 import { handleOrgAdmin } from "./handlers/orgAdmin.ts";
 import { handleOrgAdminImportExport } from "./handlers/orgAdmin.ts";
 import { handleChat } from "./handlers/chat.ts";
+import { handleAiTutorAdmin } from "./handlers/aiTutorAdmin.ts";
+import { handleAiTutorMaterials } from "./handlers/aiTutorMaterials.ts";
+import { handleAiTutorIngestion } from "./handlers/aiTutorIngestion.ts";
+import { handleAiTutorChat } from "./handlers/aiTutorChat.ts";
+import { handleAiTutorAnalytics } from "./handlers/aiTutorAnalytics.ts";
 
 Deno.serve(async (req: Request) => {
   // CORS preflight
@@ -58,6 +63,13 @@ Deno.serve(async (req: Request) => {
     if (path.startsWith("/schools"))         return await handleSchools(req, path, url);
     if (path.startsWith("/parent"))          return await handleParent(req, path, url);
     if (path.startsWith("/chat"))             return await handleChat(req, path, url);
+
+    // ── AI Tutor ───────────────────────────────────────────────
+    if (path.startsWith("/ai-tutor/admin"))            return await handleAiTutorAdmin(req, path, url);
+    if (path.startsWith("/ai-tutor/materials"))        return await handleAiTutorMaterials(req, path, url);
+    if (path.startsWith("/ai-tutor/jobs"))             return await handleAiTutorIngestion(req, path, url);
+    if (path.startsWith("/ai-tutor/analytics"))        return await handleAiTutorAnalytics(req, path, url);
+    if (path.startsWith("/ai-tutor"))                  return await handleAiTutorChat(req, path, url);
 
     // Health check
     if (path === "/" || path === "/health") {

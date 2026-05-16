@@ -16,6 +16,9 @@ const CARDS = [
   { key: 'AdminSubjects',           icon: 'book-outline',          label: 'Subjects',         tint: '#7C3AED', bg: '#F5F3FF' },
   { key: 'AdminParents',            icon: 'heart-outline',         label: 'Parents',          tint: '#EC4899', bg: '#FCE7F3' },
   { key: 'AdminTeacherAttendance',  icon: 'calendar-outline',      label: 'Teacher Report',   tint: '#10B981', bg: '#ECFDF5' },
+  { key: 'TeacherAiMaterials',      icon: 'cloud-upload-outline',  label: 'AI Materials',     tint: '#0EA5E9', bg: '#F0F9FF' },
+  { key: 'AdminAiPolicy',           icon: 'shield-checkmark-outline', label: 'AI Policy',     tint: '#7C3AED', bg: '#F5F3FF' },
+  { key: 'AdminAiAnalytics',        icon: 'analytics-outline',     label: 'AI Analytics',     tint: '#F97316', bg: '#FFF7ED' },
 ];
 
 export default function AdminHomeScreen({ navigation }) {

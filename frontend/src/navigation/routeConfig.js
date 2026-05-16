@@ -53,6 +53,14 @@ import StudentLecturesScreen from '../screens/student/StudentLecturesScreen';
 import StudentLectureDetailScreen from '../screens/student/StudentLectureDetailScreen';
 import StudentNotificationsScreen from '../screens/student/StudentNotificationsScreen';
 
+import {
+  StudentAiTutorHomeScreen,
+  StudentAiChatScreen,
+  TeacherAiMaterialsScreen,
+  AdminAiPolicyScreen,
+  AdminAiAnalyticsScreen,
+} from '../features/aiTutor';
+
 const HIDDEN_HEADER = { headerShown: false };
 
 export const teacherHomeScreens = [
@@ -71,6 +79,7 @@ export const teacherHomeScreens = [
   { name: 'ChatList', component: ChatListScreen },
   { name: 'Chat', component: ChatScreen, options: { headerShown: false } },
   { name: 'StaffNewChat', component: StaffNewChatScreen, options: { headerShown: false } },
+  { name: 'TeacherAiMaterials', component: TeacherAiMaterialsScreen, options: { title: 'AI Study Materials' } },
 ];
 
 export const adminHomeScreens = [
@@ -92,6 +101,9 @@ export const adminHomeScreens = [
   { name: 'ChatList', component: ChatListScreen },
   { name: 'Chat', component: ChatScreen, options: { headerShown: false } },
   { name: 'StaffNewChat', component: StaffNewChatScreen, options: { headerShown: false } },
+  { name: 'TeacherAiMaterials', component: TeacherAiMaterialsScreen, options: { title: 'AI Study Materials' } },
+  { name: 'AdminAiPolicy', component: AdminAiPolicyScreen, options: { title: 'AI Tutor Policies' } },
+  { name: 'AdminAiAnalytics', component: AdminAiAnalyticsScreen, options: { title: 'AI Tutor Analytics' } },
 ];
 
 export const orgAdminHomeScreens = [
@@ -106,6 +118,8 @@ export const orgAdminHomeScreens = [
   { name: 'OrgAdminNotifications', component: OrgAdminNotificationsScreen },
   { name: 'OrgAdminSubjects', component: OrgAdminSubjectsScreen },
   { name: 'StaffNotifications', component: StaffNotificationsScreen },
+  { name: 'AdminAiPolicy', component: AdminAiPolicyScreen, options: { title: 'AI Tutor Policies' } },
+  { name: 'AdminAiAnalytics', component: AdminAiAnalyticsScreen, options: { title: 'AI Tutor Analytics' } },
 ];
 
 export const superAdminHomeScreens = [
@@ -118,6 +132,8 @@ export const superAdminHomeScreens = [
   { name: 'SuperAdminSubjects', component: SuperAdminSubjectsScreen },
   { name: 'SuperAdminParents', component: SuperAdminParentsScreen },
   { name: 'StaffNotifications', component: StaffNotificationsScreen },
+  { name: 'AdminAiPolicy', component: AdminAiPolicyScreen, options: { title: 'AI Tutor Policies' } },
+  { name: 'AdminAiAnalytics', component: AdminAiAnalyticsScreen, options: { title: 'AI Tutor Analytics' } },
 ];
 
 export const studentHomeScreens = [
@@ -128,6 +144,8 @@ export const studentHomeScreens = [
   { name: 'StudentHomework', component: StudentLecturesScreen, initialParams: { fixedType: 'homework', title: 'Homework' } },
   { name: 'StudentLectureDetail', component: StudentLectureDetailScreen },
   { name: 'StudentNotifications', component: StudentNotificationsScreen },
+  { name: 'StudentAiTutorHome', component: StudentAiTutorHomeScreen, options: { title: 'AI Tutor' } },
+  { name: 'StudentAiChat', component: StudentAiChatScreen, options: { title: 'AI Tutor' } },
 ];
 
 export function buildParentChildScreens(activeChild) {

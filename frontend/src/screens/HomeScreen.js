@@ -45,9 +45,9 @@ export default function HomeScreen({ navigation }) {
   );
 
   // Card entrance animations
-  const aY = [useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current];
-  const aO = [useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current];
-  const sc = [useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current];
+  const aY = [useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current];
+  const aO = [useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current];
+  const sc = [useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current];
   const pulse = useRef(new Animated.Value(1)).current;
   const pi = (i) => () => Animated.spring(sc[i], { toValue: 0.97, useNativeDriver: true, speed: 50 }).start();
   const po = (i) => () => Animated.spring(sc[i], { toValue: 1,    useNativeDriver: true, speed: 20 }).start();
@@ -281,6 +281,11 @@ export default function HomeScreen({ navigation }) {
             i: 6, icon: 'notifications-outline', label: 'Send Notification',
             tint: '#0EA5E9', bg: '#F0F9FF',
             locked: false, badge: 0, onPress: () => navigation.navigate('SendNotification'),
+          },
+          {
+            i: 7, icon: 'sparkles-outline', label: 'AI Materials',
+            tint: '#7C3AED', bg: '#F5F3FF',
+            locked: false, badge: 0, onPress: () => navigation.navigate('TeacherAiMaterials'),
           },
         ]
           .filter(({ locked }) => !locked)

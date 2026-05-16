@@ -16,6 +16,7 @@ const ACTIONS = [
   { key: 'StudentLeaves',       icon: 'document-text-outline', label: 'Leave Applications',  sub: 'Apply for leave or check status',     tint: '#F59E0B', bg: '#FFFBEB' },
   { key: 'StudentClasswork',    icon: 'book-outline',          label: 'Class Work',          sub: 'Browse class work files',             tint: '#4F46E5', bg: '#EEF2FF' },
   { key: 'StudentHomework',     icon: 'clipboard-outline',     label: 'Homework',            sub: 'Browse homework files',               tint: '#D97706', bg: '#FFFBEB' },
+  { key: 'StudentAiTutorHome',  icon: 'sparkles-outline',      label: 'AI Tutor',            sub: 'Ask questions from your uploaded material', tint: '#7C3AED', bg: '#F5F3FF' },
 ];
 
 export default function StudentHomeScreen({ navigation, route }) {
