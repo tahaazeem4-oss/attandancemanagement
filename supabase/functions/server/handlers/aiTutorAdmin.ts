@@ -111,6 +111,107 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
     return json({ policies: data });
   }
 
+  // POST /ai-tutor/admin/cascade-flag
+  // body: { scope_type, scope_id, is_enabled, clear_subtree?: boolean }
+  // Sets this node's flag and (when clear_subtree, default true) removes any
+  // explicit feature-flag overrides in the entire subtree so children truly
+  // inherit. This is what an admin means by "turn ON the school".
+  if (path === "/ai-tutor/admin/cascade-flag" && req.method === "POST") {
+    const b = await req.json().catch(() => ({}));
+    const scope_type = String(b.scope_type || "") as ScopeType;
+    const scope_id   = b.scope_id === null || b.scope_id === undefined ? null : Number(b.scope_id);
+    const is_enabled = Boolean(b.is_enabled);
+    const reason     = b.reason ? String(b.reason) : null;
+    const clearSubtree = b.clear_subtree === undefined ? true : Boolean(b.clear_subtree);
+    if (!ALLOWED_SCOPES.includes(scope_type)) return json({ message: "Invalid scope_type" }, 400);
+    if (!canManage(role, scope_type))         return json({ message: "Forbidden" }, 403);
+    if (scope_type === "global" && scope_id !== null) return json({ message: "scope_id must be null for global" }, 400);
+    if (scope_type !== "global" && !scope_id)         return json({ message: "scope_id required" }, 400);
+
+    // Upsert the node's own flag.
+    const { error: upErr } = await db.from("ai_feature_flags").upsert({
+      scope_type, scope_id, is_enabled, reason,
+      updated_by_role: role, updated_by_id: userId, updated_at: new Date().toISOString(),
+    }, { onConflict: "scope_type,scope_id" });
+    if (upErr) return json({ message: upErr.message }, 500);
+
+    if (!clearSubtree) return json({ ok: true, cleared: 0 });
+
+    // Identify descendant scope rows to delete.
+    let cleared = 0;
+    const purge = async (t: string, ids: number[]) => {
+      if (!ids.length) return;
+      const { error } = await db.from("ai_feature_flags").delete().eq("scope_type", t).in("scope_id", ids);
+      if (error) throw new Error(error.message);
+      cleared += ids.length;
+    };
+
+    try {
+      if (scope_type === "global") {
+        // Wipe every non-global override.
+        const { error } = await db.from("ai_feature_flags").delete().neq("scope_type", "global");
+        if (error) return json({ message: error.message }, 500);
+        return json({ ok: true, cleared: -1 });
+      }
+
+      // Collect ids of the subtree.
+      let campusIds: number[] = [];
+      let classIds: number[] = [];
+      let sectionIds: number[] = [];
+      let studentIds: number[] = [];
+
+      if (scope_type === "organization") {
+        const { data: s } = await db.from("schools").select("id").eq("org_id", scope_id);
+        campusIds = ((s || []) as Array<{ id: number }>).map((r) => r.id);
+      } else if (scope_type === "campus") {
+        campusIds = [scope_id as number];
+      }
+      if (scope_type === "organization" || scope_type === "campus") {
+        if (campusIds.length) {
+          const { data: c } = await db.from("classes").select("id").in("school_id", campusIds);
+          classIds = ((c || []) as Array<{ id: number }>).map((r) => r.id);
+        }
+      } else if (scope_type === "class") {
+        classIds = [scope_id as number];
+      }
+      if (scope_type === "organization" || scope_type === "campus" || scope_type === "class") {
+        if (classIds.length) {
+          const { data: sec } = await db.from("sections").select("id").in("class_id", classIds);
+          sectionIds = ((sec || []) as Array<{ id: number }>).map((r) => r.id);
+        }
+      } else if (scope_type === "section") {
+        sectionIds = [scope_id as number];
+      }
+      if (scope_type === "organization" || scope_type === "campus" || scope_type === "class" || scope_type === "section") {
+        if (sectionIds.length) {
+          const { data: st } = await db.from("students").select("id").in("section_id", sectionIds);
+          studentIds = ((st || []) as Array<{ id: number }>).map((r) => r.id);
+        }
+      }
+
+      // Skip the node itself; delete only descendants.
+      if (scope_type === "organization") {
+        await purge("campus", campusIds);
+        await purge("class",  classIds);
+        await purge("section", sectionIds);
+        await purge("student", studentIds);
+      } else if (scope_type === "campus") {
+        await purge("class",  classIds);
+        await purge("section", sectionIds);
+        await purge("student", studentIds);
+      } else if (scope_type === "class") {
+        await purge("section", sectionIds);
+        await purge("student", studentIds);
+      } else if (scope_type === "section") {
+        await purge("student", studentIds);
+      }
+
+      return json({ ok: true, cleared });
+    } catch (e) {
+      return json({ message: e instanceof Error ? e.message : String(e) }, 500);
+    }
+  }
+
   // DELETE /ai-tutor/admin/scope?scope_type=&scope_id=&target=both|flag|policy
   if (path === "/ai-tutor/admin/scope" && req.method === "DELETE") {
     const url = new URL(req.url);

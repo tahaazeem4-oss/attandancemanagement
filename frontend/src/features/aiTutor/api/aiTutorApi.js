@@ -30,6 +30,7 @@ export const deleteScopeConfig  = (scopeType, scopeId, target = 'both') =>
   api.delete('/ai-tutor/admin/scope', { params: { scope_type: scopeType, scope_id: scopeId, target } });
 export const fetchHierarchy     = (nodeType = 'root', nodeId) =>
   api.get('/ai-tutor/admin/hierarchy', { params: { node_type: nodeType, ...(nodeId ? { node_id: nodeId } : {}) } });
+export const cascadeFeatureFlag = (body) => api.post('/ai-tutor/admin/cascade-flag', body);
 
 // ── Analytics ────────────────────────────────────────────────
 export const fetchUsageAnalytics = (days = 30) => api.get('/ai-tutor/analytics/usage', { params: { days } });

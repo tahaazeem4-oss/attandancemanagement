@@ -11,7 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import {
   fetchHierarchy, setFeatureFlag, setFeatureFlagsBulk,
-  setQuotaPolicy, deleteScopeConfig,
+  setQuotaPolicy, deleteScopeConfig, cascadeFeatureFlag,
 } from '../api/aiTutorApi';
 import { useAuth } from '../../../context/AuthContext';
 
@@ -105,19 +105,49 @@ export default function AdminAiHierarchyScreen() {
   // ── Current node's flag override ───────────────────────────────
   const setCurrentFlag = async (value) => {
     if (data?.is_root) return;
-    setBusyId('node');
-    try {
-      if (value === null) {
+    // For "Inherit" we just delete this node's flag and keep children as-is.
+    if (value === null) {
+      setBusyId('node');
+      try {
         await deleteScopeConfig(current.type, current.id, 'flag');
-      } else {
-        await setFeatureFlag({ scope_type: current.type, scope_id: current.id, is_enabled: value });
+        await load();
+      } catch (e) {
+        Alert.alert('Failed', e?.response?.data?.message || e?.message || 'Could not update');
+      } finally {
+        setBusyId(null);
       }
-      await load();
-    } catch (e) {
-      Alert.alert('Failed', e?.response?.data?.message || e?.message || 'Could not update');
-    } finally {
-      setBusyId(null);
+      return;
     }
+    // For ON / OFF we cascade so any conflicting child overrides are cleared
+    // and the subtree truly inherits this node's decision. Otherwise an
+    // earlier OFF on a campus could prevent enabling its org from giving
+    // anyone the token share.
+    const verb = value ? 'enable' : 'disable';
+    Alert.alert(
+      `${value ? 'Enable' : 'Disable'} ${current.name}?`,
+      `This will ${verb} AI Tutor for everyone under ${current.name} and clear any conflicting ON/OFF overrides on classes, sections, and students inside it. Their per-child custom token allocations (if any) are kept.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: value ? 'Enable & cascade' : 'Disable & cascade',
+          style: value ? 'default' : 'destructive',
+          onPress: async () => {
+            setBusyId('node');
+            try {
+              await cascadeFeatureFlag({
+                scope_type: current.type, scope_id: current.id,
+                is_enabled: value, clear_subtree: true,
+              });
+              await load();
+            } catch (e) {
+              Alert.alert('Failed', e?.response?.data?.message || e?.message || 'Could not update');
+            } finally {
+              setBusyId(null);
+            }
+          },
+        },
+      ]
+    );
   };
 
   // ── Quota allocation for current node ──────────────────────────
@@ -278,20 +308,23 @@ export default function AdminAiHierarchyScreen() {
                 busy={busyId === 'node'}
               />
               <TriButton
-                label="Force ON"
+                label="ON (cascade)"
                 active={node.own_flag?.is_enabled === true}
                 onPress={() => setCurrentFlag(true)}
                 busy={busyId === 'node'}
                 color="#16a34a"
               />
               <TriButton
-                label="Force OFF"
+                label="OFF (cascade)"
                 active={node.own_flag?.is_enabled === false}
                 onPress={() => setCurrentFlag(false)}
                 busy={busyId === 'node'}
                 color="#dc2626"
               />
             </View>
+            <Text style={styles.subtleSmall}>
+              ON/OFF clears conflicting overrides below so the whole subtree truly inherits this decision.
+            </Text>
 
             {/* Effective quota summary */}
             <Text style={styles.sectionLabel}>Current limits in effect</Text>
@@ -625,6 +658,7 @@ const styles = StyleSheet.create({
   statusOff: { backgroundColor: '#fee2e2' },
   statusPillText: { fontSize: 12, fontWeight: '700', color: '#111827' },
   subtle: { fontSize: 12, color: '#6b7280' },
+  subtleSmall: { fontSize: 10, color: '#9ca3af', marginTop: -4, marginBottom: 10, fontStyle: 'italic' },
 
   triRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   triBtn: { flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#d1d5db', alignItems: 'center', backgroundColor: '#fff' },
