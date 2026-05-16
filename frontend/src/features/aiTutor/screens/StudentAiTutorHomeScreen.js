@@ -6,28 +6,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import api from '../../../services/api';
 import useAiTutorConfig from '../hooks/useAiTutorConfig';
 import AiQuotaPill from '../components/AiQuotaPill';
+import AiQuotaBanner from '../components/AiQuotaBanner';
 
 export default function StudentAiTutorHomeScreen({ navigation, route }) {
   const initialSubjects = route?.params?.subjects;
   const [subjects, setSubjects] = useState(Array.isArray(initialSubjects) ? initialSubjects : []);
   const [subjLoading, setSubjLoading] = useState(!Array.isArray(initialSubjects));
-  const { loading, enabled, blockedAt, quota } = useAiTutorConfig();
-
-  useEffect(() => {
-    if (Array.isArray(initialSubjects)) return;
-    let mounted = true;
-    api.get('/subjects')
-      .then(({ data }) => {
-        if (!mounted) return;
-        const list = Array.isArray(data) ? data.filter((s) => s && s.id != null) : [];
-        setSubjects(list);
-      })
-      .catch(() => mounted && setSubjects([]))
-      .finally(() => mounted && setSubjLoading(false));
-    return () => { mounted = false; };
-  }, [initialSubjects]);
-
-  if (loading || subjL [subjLoading, setSubjLoading] = useState(!Array.isArray(initialSubjects));
   const { loading, enabled, blockedAt, quota } = useAiTutorConfig();
 
   useEffect(() => {
@@ -60,6 +44,7 @@ export default function StudentAiTutorHomeScreen({ navigation, route }) {
         <Text style={styles.title}>Pick a subject</Text>
         <AiQuotaPill quota={quota} />
       </View>
+      <AiQuotaBanner quota={quota} />
       <FlatList
         data={subjects}
         keyExtractor={(s) => String(s.id)}

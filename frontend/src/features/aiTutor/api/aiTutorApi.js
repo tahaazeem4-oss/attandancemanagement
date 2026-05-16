@@ -21,6 +21,7 @@ export const setFeatureFlag   = (body) => api.post('/ai-tutor/admin/feature-flag
 export const listFeatureFlags = (params = {}) => api.get('/ai-tutor/admin/feature-flags', { params });
 export const setQuotaPolicy   = (body) => api.post('/ai-tutor/admin/quota-policy', body);
 export const listQuotaPolicies = (params = {}) => api.get('/ai-tutor/admin/quota-policies', { params });
+export const fetchAiTutorHealth = () => api.get('/ai-tutor/admin/health');
 
 // ── Analytics ────────────────────────────────────────────────
 export const fetchUsageAnalytics = (days = 30) => api.get('/ai-tutor/analytics/usage', { params: { days } });

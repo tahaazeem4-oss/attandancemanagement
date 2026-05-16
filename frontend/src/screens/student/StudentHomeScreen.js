@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import { C } from '../../config/theme';
+import useAiTutorConfig from '../../features/aiTutor/hooks/useAiTutorConfig';
 
 // Action menu items — each navigates to a student sub-screen
 const ACTIONS = [
@@ -26,6 +27,7 @@ export default function StudentHomeScreen({ navigation, route }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [resolvedCampus, setResolvedCampus] = useState(null);
+  const { enabled: aiEnabled } = useAiTutorConfig();
 
   // Support parent viewing child's portal
   const childData = route?.params?.child;
@@ -200,7 +202,9 @@ export default function StudentHomeScreen({ navigation, route }) {
       </View>
 
       <View style={styles.grid}>
-        {ACTIONS.map(({ key, icon, label, tint, bg }, i) => (
+        {ACTIONS.map(({ key, icon, label, tint, bg }, i) => {
+          if (key === 'StudentAiTutorHome' && !aiEnabled) return null;
+          return (
           <Animated.View
             key={key}
             style={[styles.cardWrap, { opacity: fadeAnims[i], transform: [{ translateY: slideAnims[i] }] }]}
@@ -221,7 +225,8 @@ export default function StudentHomeScreen({ navigation, route }) {
               <Text style={styles.navLabel}>{label}</Text>
             </Pressable>
           </Animated.View>
-        ))}
+        );
+        })}
       </View>
       </ScrollView>
     </View>

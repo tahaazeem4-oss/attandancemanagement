@@ -89,5 +89,39 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
     return json({ policies: data });
   }
 
+  // GET /ai-tutor/admin/health
+  if (path === "/ai-tutor/admin/health" && req.method === "GET") {
+    if (!["super_admin", "org_admin", "admin"].includes(role)) {
+      return json({ message: "Forbidden" }, 403);
+    }
+    const openai_key_set    = Boolean(Deno.env.get("OPENAI_API_KEY"));
+    const cron_secret_set   = Boolean(Deno.env.get("AI_TUTOR_CRON_SECRET"));
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+    const { count: pending_jobs } = await db
+      .from("ai_document_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pending");
+
+    const { count: failed_jobs_last_24h } = await db
+      .from("ai_document_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "failed")
+      .gte("updated_at", since);
+
+    const { count: ready_documents } = await db
+      .from("ai_documents")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "ready");
+
+    return json({
+      openai_key_set,
+      cron_secret_set,
+      pending_jobs: pending_jobs ?? 0,
+      failed_jobs_last_24h: failed_jobs_last_24h ?? 0,
+      ready_documents: ready_documents ?? 0,
+    });
+  }
+
   return json({ message: "Not found" }, 404);
 }

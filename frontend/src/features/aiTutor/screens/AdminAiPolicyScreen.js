@@ -3,11 +3,17 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Switch, ScrollView, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { setFeatureFlag, setQuotaPolicy, listFeatureFlags, listQuotaPolicies } from '../api/aiTutorApi';
+import { setFeatureFlag, setQuotaPolicy, listFeatureFlags, listQuotaPolicies, fetchAiTutorHealth } from '../api/aiTutorApi';
+import api from '../../../services/api';
+import { useAuth } from '../../../context/AuthContext';
 
 const SCOPES = ['global','organization','campus','class','section','student'];
 
 export default function AdminAiPolicyScreen() {
+  const { user } = useAuth();
+  const role = user?.role;
+  const canBulk = role === 'super_admin' || role === 'org_admin';
+
   const [scopeType, setScopeType] = useState('campus');
   const [scopeId, setScopeId] = useState('');
   const [enabled, setEnabled] = useState(true);
@@ -21,6 +27,8 @@ export default function AdminAiPolicyScreen() {
 
   const [flags, setFlags] = useState([]);
   const [policies, setPolicies] = useState([]);
+  const [health, setHealth] = useState(null);
+  const [bulkRunning, setBulkRunning] = useState(false);
 
   const refresh = async () => {
     try {
@@ -29,6 +37,10 @@ export default function AdminAiPolicyScreen() {
       setFlags(f.data?.flags || []);
       setPolicies(p.data?.policies || []);
     } catch (_) { /* ignore */ }
+    try {
+      const h = await fetchAiTutorHealth();
+      setHealth(h.data || null);
+    } catch (_) { setHealth(null); }
   };
   useEffect(() => { refresh(); }, []);
 
@@ -68,6 +80,27 @@ export default function AdminAiPolicyScreen() {
       <ScrollView contentContainerStyle={{ padding: 14 }}>
         <Text style={styles.h1}>AI Tutor — Policies</Text>
 
+        <View style={[styles.card, styles.healthCard]}>
+          <Text style={styles.label}>Health</Text>
+          {!health ? (
+            <Text style={styles.subtle}>Loading…</Text>
+          ) : (
+            <>
+              <Text style={[styles.line, !health.openai_key_set && styles.lineBad]}>
+                {health.openai_key_set ? '✓' : '✕'} OPENAI_API_KEY {health.openai_key_set ? 'configured' : 'NOT set — ingestion and chat will fail'}
+              </Text>
+              <Text style={styles.line}>
+                {health.cron_secret_set ? '✓' : '✕'} AI_TUTOR_CRON_SECRET {health.cron_secret_set ? 'configured' : 'not set (optional)'}
+              </Text>
+              <Text style={styles.line}>Pending jobs: {health.pending_jobs}</Text>
+              <Text style={[styles.line, (health.failed_jobs_last_24h > 0) && styles.lineBad]}>
+                Failed jobs (24h): {health.failed_jobs_last_24h}
+              </Text>
+              <Text style={styles.line}>Ready documents: {health.ready_documents}</Text>
+            </>
+          )}
+        </View>
+
         <View style={styles.card}>
           <Text style={styles.label}>Scope</Text>
           <View style={styles.scopeRow}>
@@ -88,6 +121,11 @@ export default function AdminAiPolicyScreen() {
             <Switch value={enabled} onValueChange={setEnabled} />
           </View>
           <TouchableOpacity style={styles.btn} onPress={saveFlag}><Text style={styles.btnText}>Save feature flag</Text></TouchableOpacity>
+          {canBulk && (
+            <TouchableOpacity style={[styles.btnSecondary, bulkRunning && styles.btnDisabled]} disabled={bulkRunning} onPress={applyFlagToAllCampuses}>
+              <Text style={styles.btnSecondaryText}>{bulkRunning ? 'Working…' : `Apply ${enabled ? 'ON' : 'OFF'} to all campuses`}</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.card}>
@@ -99,6 +137,11 @@ export default function AdminAiPolicyScreen() {
           <TextInput style={styles.input} placeholder="Max input tokens"  value={maxInput}  onChangeText={setMaxInput}  keyboardType="numeric" />
           <TextInput style={styles.input} placeholder="Max output tokens" value={maxOutput} onChangeText={setMaxOutput} keyboardType="numeric" />
           <TouchableOpacity style={styles.btn} onPress={savePolicy}><Text style={styles.btnText}>Save quota policy</Text></TouchableOpacity>
+          {canBulk && (
+            <TouchableOpacity style={[styles.btnSecondary, bulkRunning && styles.btnDisabled]} disabled={bulkRunning} onPress={applyPolicyToAllCampuses}>
+              <Text style={styles.btnSecondaryText}>{bulkRunning ? 'Working…' : 'Apply this policy to all campuses'}</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <Text style={styles.h2}>Existing flags</Text>
@@ -131,5 +174,10 @@ const styles = StyleSheet.create({
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   btn: { backgroundColor: '#2563EB', padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 4 },
   btnText: { color: '#fff', fontWeight: '700' },
+  btnSecondary: { backgroundColor: '#E0E7FF', padding: 10, borderRadius: 10, alignItems: 'center', marginTop: 6 },
+  btnSecondaryText: { color: '#3730A3', fontWeight: '700' },
+  btnDisabled: { opacity: 0.6 },
+  healthCard: { backgroundColor: '#F1F5F9' },
+  lineBad: { color: '#B91C1C', fontWeight: '700' },
   line: { color: '#374151', paddingVertical: 2 },
 });

@@ -4,7 +4,7 @@ import { View, Text, TouchableOpacity, FlatList, TextInput, StyleSheet, Alert, A
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import api from '../../../services/api';
-import { deleteMaterial, listMaterials, uploadMaterial } from '../api/aiTutorApi';
+import { deleteMaterial, listMaterials, uploadMaterial, processIngestion } from '../api/aiTutorApi';
 
 const STATUS_COLORS = {
   uploaded: '#9CA3AF', processing: '#F59E0B', ready: '#10B981', failed: '#EF4444', archived: '#6B7280',
@@ -28,6 +28,7 @@ export default function TeacherAiMaterialsScreen({ route }) {
   const [title, setTitle] = useState('');
   const [topic, setTopic] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [processing, setProcessing] = useState(false);
 
   useEffect(() => {
     api.get('/subjects')
@@ -98,6 +99,18 @@ export default function TeacherAiMaterialsScreen({ route }) {
     ]);
   };
 
+  const runIngestion = async () => {
+    setProcessing(true);
+    try {
+      const { data } = await processIngestion();
+      const n = data?.processed ?? data?.count ?? 0;
+      Alert.alert('Processing complete', n ? `Processed ${n} job(s).` : 'No pending jobs.');
+      await refresh();
+    } catch (e) {
+      Alert.alert('Failed', e?.response?.data?.message || 'Could not process pending uploads');
+    } finally { setProcessing(false); }
+  };
+
   const classLabel = classSel
     ? (classes.find((c) => c.class_id === classSel.class_id && c.section_id === classSel.section_id)
         ? `${classes.find((c) => c.class_id === classSel.class_id && c.section_id === classSel.section_id).class_name} · ${classes.find((c) => c.class_id === classSel.class_id && c.section_id === classSel.section_id).section_name}`
@@ -144,6 +157,9 @@ export default function TeacherAiMaterialsScreen({ route }) {
           <Text style={styles.btnText}>{uploading ? 'Uploading…' : 'Choose file & upload'}</Text>
         </TouchableOpacity>
         <Text style={styles.hint}>PDF, DOCX, PPTX, TXT · up to 25 MB</Text>
+        <TouchableOpacity style={[styles.btnSecondary, processing && styles.btnDisabled]} onPress={runIngestion} disabled={processing}>
+          <Text style={styles.btnSecondaryText}>{processing ? 'Processing…' : 'Process pending uploads now'}</Text>
+        </TouchableOpacity>
       </View>
 
       {loading ? <ActivityIndicator style={{ marginTop: 20 }} /> : (
@@ -185,6 +201,8 @@ const styles = StyleSheet.create({
   btn: { backgroundColor: '#2563EB', paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
   btnDisabled: { backgroundColor: '#93C5FD' },
   btnText: { color: '#fff', fontWeight: '700' },
+  btnSecondary: { marginTop: 6, backgroundColor: '#E0E7FF', paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
+  btnSecondaryText: { color: '#3730A3', fontWeight: '700' },
   hint: { fontSize: 12, color: '#6B7280' },
   row: { flexDirection: 'row', padding: 12, borderBottomWidth: 1, borderColor: '#F3F4F6', alignItems: 'center' },
   rowTitle: { fontWeight: '700', color: '#111827' },

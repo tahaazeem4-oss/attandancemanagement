@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import useAiTutorConfig from '../hooks/useAiTutorConfig';
 import useAiTutorChat from '../hooks/useAiTutorChat';
 import AiQuotaPill from '../components/AiQuotaPill';
+import AiQuotaBanner from '../components/AiQuotaBanner';
 import AiChatMessageList from '../components/AiChatMessageList';
 
 export default function StudentAiChatScreen({ route }) {
@@ -36,10 +37,32 @@ export default function StudentAiChatScreen({ route }) {
   const onSend = async () => {
     const q = input.trim();
     if (!q || !subjectId) return;
+    if (quotaBlock) return;
     setInput('');
     try { await ask({ question: q, subjectId }); } catch (_) { /* shown inline */ }
     refresh();
   };
+
+  const quotaBlock = (() => {
+    if (!quota) return null;
+    const checks = [
+      ['daily',   quota.remaining_daily_requests,   quota.daily_requests,   'today'],
+      ['weekly',  quota.remaining_weekly_requests,  quota.weekly_requests,  'this week'],
+      ['monthly', quota.remaining_monthly_requests, quota.monthly_requests, 'this month'],
+    ];
+    for (const [p, remReq, limReq, label] of checks) {
+      if (limReq !== null && remReq !== null && remReq <= 0) return { period: p, label, kind: 'requests' };
+    }
+    const tokChecks = [
+      ['daily',   quota.used_today_tokens, quota.daily_tokens,   'today'],
+      ['weekly',  quota.used_week_tokens,  quota.weekly_tokens,  'this week'],
+      ['monthly', quota.used_month_tokens, quota.monthly_tokens, 'this month'],
+    ];
+    for (const [p, used, lim, label] of tokChecks) {
+      if (lim !== null && (used || 0) >= lim) return { period: p, label, kind: 'tokens' };
+    }
+    return null;
+  })();
 
   return (
     <SafeAreaView style={styles.container}>
@@ -47,6 +70,14 @@ export default function StudentAiChatScreen({ route }) {
         <Text style={styles.title}>AI Tutor{subjectName ? ` · ${subjectName}` : ''}</Text>
         <AiQuotaPill quota={quota} />
       </View>
+      <AiQuotaBanner quota={quota} />
+      {quotaBlock && (
+        <View style={styles.quotaWarn}>
+          <Text style={styles.quotaWarnText}>
+            You’ve reached your {quotaBlock.label} {quotaBlock.kind === 'tokens' ? 'token' : 'request'} limit. Try again later.
+          </Text>
+        </View>
+      )}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={{ flex: 1 }}>
           <AiChatMessageList messages={messages} />
@@ -60,7 +91,7 @@ export default function StudentAiChatScreen({ route }) {
             multiline
             maxLength={2000}
           />
-          <TouchableOpacity style={[styles.sendBtn, (sending || !input.trim()) && styles.sendBtnDisabled]} onPress={onSend} disabled={sending || !input.trim()}>
+          <TouchableOpacity style={[styles.sendBtn, (sending || !input.trim() || !!quotaBlock) && styles.sendBtnDisabled]} onPress={onSend} disabled={sending || !input.trim() || !!quotaBlock}>
             <Text style={styles.sendText}>{sending ? '…' : 'Ask'}</Text>
           </TouchableOpacity>
         </View>
@@ -81,4 +112,6 @@ const styles = StyleSheet.create({
   sendBtn: { marginLeft: 8, backgroundColor: '#2563EB', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10 },
   sendBtnDisabled: { backgroundColor: '#93C5FD' },
   sendText: { color: '#fff', fontWeight: '700' },
+  quotaWarn: { backgroundColor: '#FEF2F2', borderColor: '#FECACA', borderWidth: 1, marginHorizontal: 12, marginBottom: 8, padding: 10, borderRadius: 10 },
+  quotaWarnText: { color: '#B91C1C', fontWeight: '600', fontSize: 12 },
 });
