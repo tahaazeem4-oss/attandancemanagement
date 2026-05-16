@@ -12,8 +12,8 @@ const ACTIONS = [
   { key: 'SuperAdminClasses',       icon: 'library-outline',  label: 'Classes',       sub: 'Manage classes and sections across campuses',            tint: '#06B6D4', bg: '#ECFEFF' },
   { key: 'SuperAdminSubjects',      icon: 'book-outline',     label: 'Subjects',      sub: 'Manage subjects across campuses',                        tint: '#8B5CF6', bg: '#F5F3FF' },
   { key: 'SuperAdminParents',       icon: 'people-circle-outline', label: 'Parents',  sub: 'Manage parent accounts by campus',                       tint: '#EC4899', bg: '#FCE7F3' },
-  { key: 'AdminAiPolicy',           icon: 'shield-checkmark-outline', label: 'AI Tutor Policies', sub: 'Toggle AI Tutor & quotas across scopes',         tint: '#7C3AED', bg: '#F5F3FF' },
-  { key: 'AdminAiAnalytics',        icon: 'analytics-outline',     label: 'AI Tutor Analytics', sub: 'Usage, blocks, and costs across the system',          tint: '#F97316', bg: '#FFF7ED' },
+  { key: 'AdminAiPolicy',           icon: 'shield-checkmark-outline', label: 'AI Policy',     tint: '#7C3AED', bg: '#F5F3FF' },
+  { key: 'AdminAiAnalytics',        icon: 'analytics-outline',     label: 'AI Analytics',  tint: '#F97316', bg: '#FFF7ED' },
 ];
 
 export default function SuperAdminHomeScreen({ navigation }) {
