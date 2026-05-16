@@ -1,6 +1,7 @@
 // supabase/functions/server/handlers/aiTutorAdmin.ts
 // Endpoints for managing feature flags + quota policies at any scope.
 import { getDb, json, verifyToken } from "../_shared.ts";
+import { resolveParentPoolFor, DISTRIBUTABLE, NON_DISTRIBUTABLE, ALL_FIELDS, type PolicyField } from "../lib/aiPolicyResolver.ts";
 
 const ALLOWED_SCOPES = ["global","organization","campus","class","section","student"] as const;
 type ScopeType = typeof ALLOWED_SCOPES[number];
@@ -95,6 +96,60 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
       max_output_tokens: numOrNull(b.max_output_tokens),
       updated_by_role: role, updated_by_id: userId, updated_at: new Date().toISOString(),
     };
+
+    // ── Pool-cap validation ──────────────────────────────────────
+    // Non-global scopes can never allocate more than the parent has available.
+    // If the parent has no quota (null for that field), the child cannot set
+    // a value there either — there's nothing to take from.
+    if (scope_type !== "global") {
+      try {
+        const ctx = await resolveParentPoolFor(db, scope_type, scope_id);
+        if (ctx) {
+          const violations: Array<{ field: string; message: string; parent_pool: number | null; sibling_sum: number; max_allowed: number | null }> = [];
+          for (const F of ALL_FIELDS as readonly PolicyField[]) {
+            const newVal = row[F as keyof typeof row] as number | null;
+            if (newVal === null || newVal === undefined) continue;
+            if ((DISTRIBUTABLE as readonly string[]).includes(F)) {
+              const parentPool = ctx.parentEffective[F];
+              if (parentPool === null) {
+                violations.push({
+                  field: F, parent_pool: null, sibling_sum: ctx.siblingManualSum[F], max_allowed: null,
+                  message: `No quota is set for "${F}" anywhere above ${ctx.parentNode.name}. Set it at a higher level first.`,
+                });
+                continue;
+              }
+              const maxAllowed = Math.max(0, parentPool - ctx.siblingManualSum[F]);
+              if (newVal > maxAllowed) {
+                violations.push({
+                  field: F, parent_pool: parentPool, sibling_sum: ctx.siblingManualSum[F], max_allowed: maxAllowed,
+                  message: `"${F}" exceeds available pool. ${ctx.parentNode.name} has ${parentPool} total; siblings already use ${ctx.siblingManualSum[F]}; you can set up to ${maxAllowed}.`,
+                });
+              }
+            } else {
+              // Per-request cap: must not exceed strictest ancestor cap.
+              const cap = ctx.perRequestCap[F];
+              if (cap !== null && newVal > cap) {
+                violations.push({
+                  field: F, parent_pool: cap, sibling_sum: 0, max_allowed: cap,
+                  message: `"${F}" cannot exceed the strictest ancestor cap of ${cap}.`,
+                });
+              }
+            }
+          }
+          if (violations.length) {
+            return json({
+              message: "Quota policy exceeds available pool. See violations.",
+              violations,
+              parent: ctx.parentNode,
+            }, 400);
+          }
+        }
+      } catch (e) {
+        console.error("[ai-tutor quota-policy validate]", e);
+        // Don't block on resolver crash — fall through to upsert.
+      }
+    }
+
     const { data, error } = await db.from("ai_quota_policies").upsert(row, { onConflict: "scope_type,scope_id" }).select().single();
     if (error) return json({ message: error.message }, 500);
     return json({ policy: data });

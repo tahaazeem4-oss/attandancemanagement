@@ -92,7 +92,12 @@ export default function AdminAiHierarchyScreen() {
       if (value === null) {
         await deleteScopeConfig(child.type, child.id, 'flag');
       } else {
-        await setFeatureFlag({ scope_type: child.type, scope_id: child.id, is_enabled: value });
+        // Cascade so any conflicting overrides in this child's subtree are cleared
+        // and everyone below truly inherits the new decision.
+        await cascadeFeatureFlag({
+          scope_type: child.type, scope_id: child.id,
+          is_enabled: value, clear_subtree: true,
+        });
       }
       await load();
     } catch (e) {
@@ -183,7 +188,16 @@ export default function AdminAiHierarchyScreen() {
       setShowQuotaEditor(false);
       await load();
     } catch (e) {
-      Alert.alert('Failed', e?.response?.data?.message || e?.message || 'Could not save');
+      const data = e?.response?.data;
+      if (Array.isArray(data?.violations) && data.violations.length) {
+        const lines = data.violations.map((v) => `• ${v.message}`).join('\n');
+        Alert.alert(
+          'Cannot save — pool exceeded',
+          `${data.message || ''}\n\n${lines}`
+        );
+      } else {
+        Alert.alert('Failed', data?.message || e?.message || 'Could not save');
+      }
     } finally {
       setSavingQuota(false);
     }
