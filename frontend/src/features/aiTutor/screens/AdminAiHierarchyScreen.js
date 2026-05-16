@@ -77,6 +77,20 @@ export default function AdminAiHierarchyScreen() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Hijack the header back button (and Android hardware back): if we are
+  // deeper than the root of the hierarchy, walk one breadcrumb up instead of
+  // leaving the screen. Only at the top of the stack does it actually
+  // navigate back out of this screen.
+  useEffect(() => {
+    const unsub = navigation.addListener('beforeRemove', (e) => {
+      if (stack.length > 1) {
+        e.preventDefault();
+        setStack((s) => s.slice(0, -1));
+      }
+    });
+    return unsub;
+  }, [navigation, stack.length]);
+
   const goInto = (child) => {
     if (!child.has_children) return;
     setStack([...stack, { type: child.type, id: child.id, name: child.name }]);
