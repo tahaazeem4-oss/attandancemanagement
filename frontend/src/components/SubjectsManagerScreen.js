@@ -365,10 +365,11 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 18, fontWeight: '700', color: C.textDark, marginBottom: 8 },
   label: { fontSize: 13, fontWeight: '600', color: '#475569', marginBottom: 4, marginTop: 10 },
   input: {
-    flex: 1,
     backgroundColor: '#fff',
     borderRadius: 10,
-    padding: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minHeight: 44,
     fontSize: 14,
     color: C.textDark,
     borderWidth: 1,
