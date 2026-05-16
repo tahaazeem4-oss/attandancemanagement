@@ -75,6 +75,69 @@ export default function AdminAiPolicyScreen() {
     } catch (e) { Alert.alert('Error', e?.response?.data?.message || 'Save failed'); }
   };
 
+  const fetchCampusIds = async () => {
+    if (role === 'super_admin') {
+      const { data } = await api.get('/schools');
+      return (Array.isArray(data) ? data : []).map((s) => Number(s.id)).filter(Boolean);
+    }
+    if (role === 'org_admin') {
+      const { data } = await api.get('/org-admin/campuses');
+      const list = Array.isArray(data) ? data : (data?.campuses || []);
+      return list.map((s) => Number(s.id)).filter(Boolean);
+    }
+    return [];
+  };
+
+  const applyPolicyToAllCampuses = async () => {
+    if (!canBulk) return;
+    Alert.alert('Apply to all campuses?', 'This will overwrite the current quota policy on every campus you manage.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Apply', style: 'destructive', onPress: async () => {
+        setBulkRunning(true);
+        try {
+          const ids = await fetchCampusIds();
+          if (!ids.length) { Alert.alert('Nothing to do', 'No campuses found.'); return; }
+          let ok = 0, fail = 0;
+          const body = {
+            daily_requests: numOrNull(dailyRequests),
+            weekly_requests: numOrNull(weeklyRequests),
+            monthly_requests: numOrNull(monthlyRequests),
+            daily_tokens: numOrNull(dailyTokens),
+            max_input_tokens: numOrNull(maxInput),
+            max_output_tokens: numOrNull(maxOutput),
+          };
+          for (const id of ids) {
+            try { await setQuotaPolicy({ scope_type: 'campus', scope_id: id, ...body }); ok += 1; }
+            catch (_) { fail += 1; }
+          }
+          Alert.alert('Done', `Applied to ${ok} of ${ids.length} campus(es)${fail ? ` · ${fail} failed` : ''}.`);
+          refresh();
+        } finally { setBulkRunning(false); }
+      } },
+    ]);
+  };
+
+  const applyFlagToAllCampuses = async () => {
+    if (!canBulk) return;
+    Alert.alert(`Turn AI Tutor ${enabled ? 'ON' : 'OFF'} for all campuses?`, 'This overwrites the current feature flag for every campus you manage.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: enabled ? 'Enable all' : 'Disable all', style: 'destructive', onPress: async () => {
+        setBulkRunning(true);
+        try {
+          const ids = await fetchCampusIds();
+          if (!ids.length) { Alert.alert('Nothing to do', 'No campuses found.'); return; }
+          let ok = 0, fail = 0;
+          for (const id of ids) {
+            try { await setFeatureFlag({ scope_type: 'campus', scope_id: id, is_enabled: enabled }); ok += 1; }
+            catch (_) { fail += 1; }
+          }
+          Alert.alert('Done', `Applied to ${ok} of ${ids.length} campus(es)${fail ? ` · ${fail} failed` : ''}.`);
+          refresh();
+        } finally { setBulkRunning(false); }
+      } },
+    ]);
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
       <ScrollView contentContainerStyle={{ padding: 14 }}>
