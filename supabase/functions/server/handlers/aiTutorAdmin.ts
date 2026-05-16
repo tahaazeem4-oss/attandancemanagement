@@ -589,32 +589,78 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
       const NON_DISTRIBUTABLE = ["max_input_tokens","max_output_tokens"];
       const ALL_FIELDS = [...DISTRIBUTABLE, ...NON_DISTRIBUTABLE];
 
-      // Student-count for any entity in the tree.
+      // Precompute each student's effective AI flag by walking the chain.
+      // Only AI-enabled students contribute to pro-rata denominators, so a
+      // subtree turned OFF contributes 0 and the rest of the pool flows to
+      // its siblings.
+      const globalFlagRow = flagsBy.get(flagKey("global", null));
+      const globalEnabled = globalFlagRow ? Boolean(globalFlagRow.is_enabled) : false;
+      const studentEnabled = new Map<number, boolean>();
+      for (const st of students.values()) {
+        const school = schools.get(st.school_id);
+        const orgId = school?.org_id ?? null;
+        const chainSteps: Array<[string, number | null]> = [["global", null]];
+        if (orgId) chainSteps.push(["organization", orgId]);
+        chainSteps.push(["campus", st.school_id]);
+        chainSteps.push(["class", st.class_id]);
+        chainSteps.push(["section", st.section_id]);
+        chainSteps.push(["student", st.id]);
+        let on = globalEnabled;
+        for (const [t, id] of chainSteps) {
+          const f = flagsBy.get(flagKey(t, id));
+          if (f) on = Boolean(f.is_enabled);
+        }
+        studentEnabled.set(st.id, on);
+      }
+
+      // Student-count for any entity in the tree (only counts AI-enabled students).
       const studentCountFor = (type: string, id: number | null): number => {
-        if (type === "student") return 1;
+        if (type === "student") return id !== null && studentEnabled.get(id) ? 1 : 0;
         if (type === "section" && id !== null) {
           let n = 0;
-          for (const st of students.values()) if (st.section_id === id) n++;
+          for (const st of students.values()) if (st.section_id === id && studentEnabled.get(st.id)) n++;
           return n;
         }
         if (type === "class" && id !== null) {
           let n = 0;
-          for (const st of students.values()) if (st.class_id === id) n++;
+          for (const st of students.values()) if (st.class_id === id && studentEnabled.get(st.id)) n++;
           return n;
         }
         if (type === "campus" && id !== null) {
           let n = 0;
-          for (const st of students.values()) if (st.school_id === id) n++;
+          for (const st of students.values()) if (st.school_id === id && studentEnabled.get(st.id)) n++;
           return n;
         }
         if (type === "organization" && id !== null) {
           const orgSchoolIds = new Set<number>();
           for (const s of schools.values()) if (s.org_id === id) orgSchoolIds.add(s.id);
           let n = 0;
-          for (const st of students.values()) if (orgSchoolIds.has(st.school_id)) n++;
+          for (const st of students.values()) if (orgSchoolIds.has(st.school_id) && studentEnabled.get(st.id)) n++;
           return n;
         }
-        // global / root → all students
+        // global / root → all enabled students
+        let n = 0;
+        for (const flag of studentEnabled.values()) if (flag) n++;
+        return n;
+      };
+
+      // Raw student-count (ignoring flag state) — used to show "X students" in UI.
+      const studentCountRaw = (type: string, id: number | null): number => {
+        if (type === "student") return 1;
+        if (type === "section" && id !== null) {
+          let n = 0; for (const st of students.values()) if (st.section_id === id) n++; return n;
+        }
+        if (type === "class" && id !== null) {
+          let n = 0; for (const st of students.values()) if (st.class_id === id) n++; return n;
+        }
+        if (type === "campus" && id !== null) {
+          let n = 0; for (const st of students.values()) if (st.school_id === id) n++; return n;
+        }
+        if (type === "organization" && id !== null) {
+          const orgSchoolIds = new Set<number>();
+          for (const s of schools.values()) if (s.org_id === id) orgSchoolIds.add(s.id);
+          let n = 0; for (const st of students.values()) if (orgSchoolIds.has(st.school_id)) n++; return n;
+        }
         return students.size;
       };
 
@@ -770,6 +816,7 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
 
       const enrichedChildren = rawChildren.map((c) => {
         const my = childStudentCounts[`${c.type}#${c.id}`];
+        const myTotal = studentCountRaw(c.type, c.id);
         const allocation: FieldMap = {};
         for (const F of ALL_FIELDS) {
           const ownVal = c.own_policy?.[F];
@@ -804,7 +851,7 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
             },
           };
         }
-        return { ...c, student_count: my, allocation };
+        return { ...c, student_count: my, student_count_total: myTotal, allocation };
       });
 
       // Distribution summary at current node (per distributable field).
@@ -837,6 +884,7 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
           id: currentNode.id,
           name: currentNode.name,
           student_count: studentCountFor(currentNode.type, currentNode.id),
+          student_count_total: studentCountRaw(currentNode.type, currentNode.id),
           own_flag: currentNode.own_flag,
           own_policy: currentNode.own_policy,
           effective_flag: effFlag ? { ...effFlag, from_type: effFlagFrom.type, from_name: effFlagFrom.name } : null,

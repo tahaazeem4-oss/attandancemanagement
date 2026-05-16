@@ -191,29 +191,72 @@ export async function getEffectiveQuota(scope: AiScope): Promise<QuotaLimits> {
   return merged;
 }
 
-// Count of students under any entity.
+// Count of AI-enabled students under any entity. A student is enabled iff
+// the effective AI feature flag along its chain resolves to TRUE.
 async function countStudentsForEntity(type: string, id: number): Promise<number> {
   const db = getDb();
+  // Gather candidate students for the entity.
+  let candidates: Array<{ id: number; section_id: number; class_id: number; school_id: number }> = [];
   if (type === "section") {
-    const { count } = await db.from("students").select("id", { count: "exact", head: true }).eq("section_id", id);
-    return count ?? 0;
-  }
-  if (type === "class") {
-    const { count } = await db.from("students").select("id", { count: "exact", head: true }).eq("class_id", id);
-    return count ?? 0;
-  }
-  if (type === "campus") {
-    const { count } = await db.from("students").select("id", { count: "exact", head: true }).eq("school_id", id);
-    return count ?? 0;
-  }
-  if (type === "organization") {
-    const { data } = await db.from("schools").select("id").eq("org_id", id);
-    const schoolIds = ((data || []) as Array<{ id: number }>).map((r) => r.id);
+    const { data } = await db.from("students").select("id, section_id, class_id, school_id").eq("section_id", id);
+    candidates = (data || []) as typeof candidates;
+  } else if (type === "class") {
+    const { data } = await db.from("students").select("id, section_id, class_id, school_id").eq("class_id", id);
+    candidates = (data || []) as typeof candidates;
+  } else if (type === "campus") {
+    const { data } = await db.from("students").select("id, section_id, class_id, school_id").eq("school_id", id);
+    candidates = (data || []) as typeof candidates;
+  } else if (type === "organization") {
+    const { data: sData } = await db.from("schools").select("id").eq("org_id", id);
+    const schoolIds = ((sData || []) as Array<{ id: number }>).map((r) => r.id);
     if (!schoolIds.length) return 0;
-    const { count } = await db.from("students").select("id", { count: "exact", head: true }).in("school_id", schoolIds);
-    return count ?? 0;
+    const { data } = await db.from("students").select("id, section_id, class_id, school_id").in("school_id", schoolIds);
+    candidates = (data || []) as typeof candidates;
   }
-  return 0;
+  if (!candidates.length) return 0;
+
+  // Build the set of scope keys we need flags for.
+  const studentIds = candidates.map((c) => c.id);
+  const sectionIds = Array.from(new Set(candidates.map((c) => c.section_id)));
+  const classIds   = Array.from(new Set(candidates.map((c) => c.class_id)));
+  const schoolIds  = Array.from(new Set(candidates.map((c) => c.school_id)));
+  // Fetch org ids for schools.
+  const { data: schoolRows } = await db.from("schools").select("id, org_id").in("id", schoolIds);
+  const orgBySchool = new Map<number, number | null>();
+  for (const r of (schoolRows || []) as Array<{ id: number; org_id: number | null }>) orgBySchool.set(r.id, r.org_id);
+  const orgIds = Array.from(new Set(Array.from(orgBySchool.values()).filter((x): x is number => x !== null)));
+
+  // Fetch flags for global + each affected scope.
+  const orFilters: string[] = [`and(scope_type.eq.global,scope_id.is.null)`];
+  if (orgIds.length)     orFilters.push(`and(scope_type.eq.organization,scope_id.in.(${orgIds.join(",")}))`);
+  if (schoolIds.length)  orFilters.push(`and(scope_type.eq.campus,scope_id.in.(${schoolIds.join(",")}))`);
+  if (classIds.length)   orFilters.push(`and(scope_type.eq.class,scope_id.in.(${classIds.join(",")}))`);
+  if (sectionIds.length) orFilters.push(`and(scope_type.eq.section,scope_id.in.(${sectionIds.join(",")}))`);
+  if (studentIds.length) orFilters.push(`and(scope_type.eq.student,scope_id.in.(${studentIds.join(",")}))`);
+
+  const { data: flagRows } = await db
+    .from("ai_feature_flags")
+    .select("scope_type, scope_id, is_enabled")
+    .or(orFilters.join(","));
+  const flagBy = new Map<string, boolean>();
+  for (const r of (flagRows || []) as Array<{ scope_type: string; scope_id: number | null; is_enabled: boolean }>) {
+    const k = r.scope_id === null ? `${r.scope_type}#null` : `${r.scope_type}#${r.scope_id}`;
+    flagBy.set(k, Boolean(r.is_enabled));
+  }
+  const globalEnabled = flagBy.get("global#null") ?? false;
+
+  let n = 0;
+  for (const st of candidates) {
+    const orgId = orgBySchool.get(st.school_id) ?? null;
+    let on = globalEnabled;
+    if (orgId !== null && flagBy.has(`organization#${orgId}`))  on = flagBy.get(`organization#${orgId}`)!;
+    if (flagBy.has(`campus#${st.school_id}`))                    on = flagBy.get(`campus#${st.school_id}`)!;
+    if (flagBy.has(`class#${st.class_id}`))                      on = flagBy.get(`class#${st.class_id}`)!;
+    if (flagBy.has(`section#${st.section_id}`))                  on = flagBy.get(`section#${st.section_id}`)!;
+    if (flagBy.has(`student#${st.id}`))                          on = flagBy.get(`student#${st.id}`)!;
+    if (on) n++;
+  }
+  return n;
 }
 
 function periodStart(type: "daily" | "weekly" | "monthly"): string {

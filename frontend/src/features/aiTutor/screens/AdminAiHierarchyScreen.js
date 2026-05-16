@@ -245,6 +245,12 @@ export default function AdminAiHierarchyScreen() {
             <Text style={styles.cardTitle}>
               {TYPE_LABEL[node.type]}: {node.name}
             </Text>
+            {node.student_count_total !== undefined && (
+              <Text style={styles.subtle}>
+                {node.student_count?.toLocaleString?.() ?? 0} of {node.student_count_total?.toLocaleString?.() ?? 0} students are AI-enabled
+                {node.student_count !== node.student_count_total ? ' — only enabled students share the pool' : ''}
+              </Text>
+            )}
 
             {/* AI ON/OFF status + tri-state */}
             <View style={styles.statusRow}>
@@ -529,7 +535,9 @@ function ChildRow({ child, parentEffFlag, currentNodeName, busy, onTriState, onD
   }
 
   const studentLine = child.has_children
-    ? `${child.student_count?.toLocaleString?.() ?? '0'} students`
+    ? (child.student_count_total !== undefined && child.student_count !== child.student_count_total
+        ? `${child.student_count?.toLocaleString?.() ?? '0'} / ${child.student_count_total?.toLocaleString?.() ?? '0'} students AI-enabled`
+        : `${child.student_count?.toLocaleString?.() ?? '0'} students`)
     : null;
 
   return (
