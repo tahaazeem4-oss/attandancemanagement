@@ -22,6 +22,41 @@ function xlsxResponse(buffer: Uint8Array, filename: string): Response {
   });
 }
 
+function toCsv(rows: Record<string, unknown>[]): string {
+  if (!rows?.length) return "";
+  const headers = Object.keys(rows[0]);
+  const esc = (v: unknown) => {
+    const s = String(v ?? "");
+    if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const lines = [headers.join(",")];
+  for (const row of rows) {
+    lines.push(headers.map((h) => esc(row[h])).join(","));
+  }
+  return lines.join("\n");
+}
+
+function exportResponse(
+  rows: Record<string, unknown>[],
+  sheetName: string,
+  xlsxFilename: string,
+  url: URL,
+): Response {
+  const format = String(url.searchParams.get("format") || "xlsx").toLowerCase();
+  if (format === "csv") {
+    const csvFilename = xlsxFilename.replace(/\.xlsx$/i, ".csv");
+    return new Response(toCsv(rows), {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${csvFilename}"`,
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
+  }
+  return xlsxResponse(toXlsx(rows, sheetName), xlsxFilename);
+}
+
 function parseUpload(buffer: ArrayBuffer): Record<string, unknown>[] {
   const wb = XLSX.read(new Uint8Array(buffer), { type: "buffer" });
   const ws = wb.Sheets[wb.SheetNames[0]];
@@ -44,7 +79,7 @@ export async function handleImportExport(
     return json({ message: "Unauthorized" }, 401);
   }
 
-  if (user.role !== "admin" && user.role !== "super_admin" && user.role !== "teacher")
+  if (user.role !== "admin" && user.role !== "super_admin" && user.role !== "teacher" && user.role !== "org_admin")
     return json({ message: "Forbidden" }, 403);
 
   // Attendance and leave report exports are open to teachers; all other import/export routes require admin+
@@ -54,7 +89,15 @@ export async function handleImportExport(
     return json({ message: "Forbidden" }, 403);
 
   const db = getDb();
-  const schoolId = user.school_id as number;
+  const campusParamRaw = url.searchParams.get("campus_id") || url.searchParams.get("school_id");
+  const campusParam = campusParamRaw ? Number(campusParamRaw) : null;
+  const schoolId = (user.role === "super_admin" || user.role === "org_admin")
+    ? campusParam
+    : (user.school_id as number);
+
+  if (!schoolId) {
+    return json({ message: "campus_id is required" }, 400);
+  }
 
   if (user.role === "teacher" && isTeacherAllowed) {
     const teacherRole = await resolveTeacherRole(db, user.id as number);
@@ -79,7 +122,7 @@ export async function handleImportExport(
         .select("first_name, last_name, email, phone, created_at")
         .eq("school_id", schoolId)
         .order("last_name");
-      return xlsxResponse(toXlsx(data || [], "Teachers"), "teachers_export.xlsx");
+      return exportResponse((data || []) as Record<string, unknown>[], "Teachers", "teachers_export.xlsx", url);
     } catch (err) {
       console.error("[import-export/teachers/export]", err);
       return json({ message: "Server error" }, 500);
@@ -184,7 +227,7 @@ export async function handleImportExport(
         class_id: s.class_id,
         section_id: s.section_id,
       }));
-      return xlsxResponse(toXlsx(rows, "Students"), "students_export.xlsx");
+      return exportResponse(rows as Record<string, unknown>[], "Students", "students_export.xlsx", url);
     } catch (err) {
       console.error("[import-export/students/export]", err);
       return json({ message: "Server error" }, 500);
@@ -257,7 +300,7 @@ export async function handleImportExport(
         .select("name, created_at")
         .eq("school_id", schoolId)
         .order("name");
-      return xlsxResponse(toXlsx(data || [], "Subjects"), "subjects_export.xlsx");
+      return exportResponse((data || []) as Record<string, unknown>[], "Subjects", "subjects_export.xlsx", url);
     } catch (err) {
       console.error("[import-export/subjects/export]", err);
       return json({ message: "Server error" }, 500);
@@ -332,7 +375,7 @@ export async function handleImportExport(
           rows.push({ class_id: cls.id, class_name: cls.class_name, section_id: sec.id, section_name: sec.section_name });
         }
       }
-      return xlsxResponse(toXlsx(rows, "Classes"), "classes_export.xlsx");
+      return exportResponse(rows, "Classes", "classes_export.xlsx", url);
     } catch (err) {
       console.error("[import-export/classes/export]", err);
       return json({ message: "Server error" }, 500);
@@ -474,7 +517,12 @@ export async function handleImportExport(
           Status: ABBR[lookup[s.id]?.[d] || "not_marked"] || "–",
           Date: d,
         }));
-        return xlsxResponse(toXlsx(data, "Attendance"), `attendance_${clsName}_${secName}_${d}.xlsx`);
+        return exportResponse(
+          data as Record<string, unknown>[],
+          "Attendance",
+          `attendance_${clsName}_${secName}_${d}.xlsx`,
+          url,
+        );
       }
 
       const data = (students as any[]).map((s: any) => {
@@ -497,9 +545,11 @@ export async function handleImportExport(
         return row;
       });
 
-      return xlsxResponse(
-        toXlsx(data, "Attendance"),
+      return exportResponse(
+        data as Record<string, unknown>[],
+        "Attendance",
         `attendance_${clsName}_${secName}_${fromDate}_to_${toDate}.xlsx`,
+        url,
       );
     } catch (err) {
       console.error("[import-export/attendance/export]", err);
@@ -545,7 +595,7 @@ export async function handleImportExport(
           "Applied On": r.created_at,
         }));
 
-      return xlsxResponse(toXlsx(rows, "Leaves"), "leaves_report.xlsx");
+      return exportResponse(rows as Record<string, unknown>[], "Leaves", "leaves_report.xlsx", url);
     } catch (err) {
       console.error("[import-export/leaves/export]", err);
       return json({ message: "Server error" }, 500);

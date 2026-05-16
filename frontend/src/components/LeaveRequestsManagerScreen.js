@@ -10,6 +10,7 @@ import AppHeader from './AppHeader';
 import PickerField from './PickerField';
 import EntityEmptyState from './EntityEmptyState';
 import ImportExportBar from './ImportExportBar';
+import { buildImportExportScope } from '../lib/importExportScope';
 
 const STATUS_COLOR = {
   pending: '#F59E0B', approved: '#10B981',
@@ -211,6 +212,11 @@ export default function LeaveRequestsManagerScreen({ navigation, mode }) {
   const getStudentName = item => item.student_name || `${item.first_name || ''} ${item.last_name || ''}`.trim();
 
   const campusItems = [{ label: 'All Campuses', value: '' }, ...campuses.map(c => ({ label: c.name, value: String(c.id) }))];
+  const ieScope = buildImportExportScope({
+    mode,
+    campusId: filterCampus,
+    requireCampusForScopedRoles: true,
+  });
 
   const renderItem = ({ item }) => {
     const isActing = acting === item.group_id;
@@ -323,11 +329,22 @@ export default function LeaveRequestsManagerScreen({ navigation, mode }) {
         ))}
       </ScrollView>
 
-      <ImportExportBar
-        exportPath="/import-export/leaves/export"
-        exportFilename="leaves_export.xlsx"
-        onImportDone={load}
-      />
+      {isOrg ? (
+        ieScope.showBar ? (
+          <ImportExportBar
+            exportPath="/import-export/leaves/export"
+            exportParams={ieScope.params}
+            exportFilename="leaves_export.xlsx"
+            onImportDone={load}
+          />
+        ) : null
+      ) : (
+        <ImportExportBar
+          exportPath="/import-export/leaves/export"
+          exportFilename="leaves_export.xlsx"
+          onImportDone={load}
+        />
+      )}
 
       {loading ? (
         <ActivityIndicator color={C.primary} style={{ flex: 1 }} />

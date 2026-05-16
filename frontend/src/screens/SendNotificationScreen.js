@@ -61,11 +61,16 @@ export default function SendNotificationScreen({ navigation, route }) {
   const [loadingStu,  setLoadingStu]  = useState(false);
   const [sending,     setSending]     = useState(false);
   const [deleting,    setDeleting]    = useState(null);
+  const [savingEdit,  setSavingEdit]  = useState(false);
 
   // Sent history
   const [sent,        setSent]        = useState([]);
   const [loadingSent, setLoadingSent] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
+  const [editingNotif, setEditingNotif] = useState(null);
+  const [editCategory, setEditCategory] = useState('general');
+  const [editTitle, setEditTitle] = useState('');
+  const [editMessage, setEditMessage] = useState('');
 
   // ── Load classes ───────────────────────────────────────────
   useEffect(() => {
@@ -173,6 +178,42 @@ export default function SendNotificationScreen({ navigation, route }) {
     }
   };
 
+  const startEdit = (notif) => {
+    setEditingNotif(notif);
+    setEditCategory(notif.category || 'general');
+    setEditTitle(notif.title || '');
+    setEditMessage(notif.message || '');
+  };
+
+  const cancelEdit = () => {
+    setEditingNotif(null);
+    setEditCategory('general');
+    setEditTitle('');
+    setEditMessage('');
+  };
+
+  const saveEdit = async () => {
+    if (!editingNotif?.id) return;
+    if (!editTitle.trim()) return Alert.alert('Required', 'Enter a title');
+    if (!editMessage.trim()) return Alert.alert('Required', 'Enter a message');
+
+    setSavingEdit(true);
+    try {
+      const { data } = await api.put(`/notifications/${editingNotif.id}`, {
+        category: editCategory,
+        title: editTitle.trim(),
+        message: editMessage.trim(),
+      });
+
+      setSent(prev => prev.map(n => (n.id === editingNotif.id ? { ...n, ...data } : n)));
+      cancelEdit();
+    } catch (err) {
+      Alert.alert('Error', err?.response?.data?.message || 'Failed to update notification');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   // ── Category color helper ──────────────────────────────────
   const catInfo = (v) => CATEGORIES.find(c => c.value === v) || CATEGORIES[0];
 
@@ -223,6 +264,9 @@ export default function SendNotificationScreen({ navigation, route }) {
                             <Text style={[styles.catChipTxt, { color: cat.color }]}>{cat.label}</Text>
                           </View>
                           <Text style={styles.histTime}>{timeAgo(n.created_at)}</Text>
+                          <Pressable onPress={() => startEdit(n)} style={styles.editBtn}>
+                            <Text style={styles.editBtnTxt}>✏️</Text>
+                          </Pressable>
                           <Pressable onPress={() => confirmDelete(n.id)} disabled={deleting === n.id} style={styles.delBtn}>
                             {deleting === n.id
                               ? <ActivityIndicator size="small" color="#DC2626" />
@@ -392,6 +436,67 @@ export default function SendNotificationScreen({ navigation, route }) {
           </View>
         )}
       </ScrollView>
+
+      <Modal
+        visible={!!editingNotif}
+        transparent
+        animationType="fade"
+        onRequestClose={cancelEdit}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Edit Notification</Text>
+
+            <Text style={styles.label}>Category</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }}>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {CATEGORIES.map(cat => (
+                  <Pressable
+                    key={cat.value}
+                    style={[styles.catBtn, editCategory === cat.value && { backgroundColor: cat.color + '20', borderColor: cat.color }]}
+                    onPress={() => setEditCategory(cat.value)}
+                  >
+                    <Text style={[styles.catBtnTxt, editCategory === cat.value && { color: cat.color, fontWeight: '800' }]}>
+                      {cat.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </ScrollView>
+
+            <Text style={styles.label}>Title</Text>
+            <TextInput
+              style={styles.input}
+              value={editTitle}
+              onChangeText={setEditTitle}
+              placeholder="Notification title"
+              placeholderTextColor={C.textLight}
+              maxLength={200}
+            />
+
+            <Text style={styles.label}>Message</Text>
+            <TextInput
+              style={[styles.input, styles.textarea]}
+              value={editMessage}
+              onChangeText={setEditMessage}
+              placeholder="Notification message"
+              placeholderTextColor={C.textLight}
+              multiline
+              numberOfLines={5}
+              textAlignVertical="top"
+            />
+
+            <View style={styles.modalActions}>
+              <Pressable style={styles.modalCancelBtn} onPress={cancelEdit}>
+                <Text style={styles.modalCancelTxt}>Cancel</Text>
+              </Pressable>
+              <Pressable style={[styles.modalSaveBtn, savingEdit && { opacity: 0.7 }]} onPress={saveEdit} disabled={savingEdit}>
+                {savingEdit ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalSaveTxt}>Save</Text>}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -455,9 +560,59 @@ const styles = StyleSheet.create({
   catChip:       { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 3 },
   catChipTxt:    { fontSize: 11, fontWeight: '800' },
   histTime:      { fontSize: 11, color: C.textLight, flex: 1 },
+  editBtn:       { padding: 4 },
+  editBtnTxt:    { fontSize: 16 },
   delBtn:        { padding: 4 },
   delBtnTxt:     { fontSize: 16 },
   histTitle:     { fontSize: 15, fontWeight: '800', color: C.text, marginBottom: 3 },
   histMsg:       { fontSize: 13, color: C.textMed },
   histTarget:    { fontSize: 12, color: C.primary, fontWeight: '600', marginTop: 6 },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(2,6,23,0.45)',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    backgroundColor: C.card,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: C.text,
+    marginBottom: 8,
+  },
+  modalActions: {
+    marginTop: 14,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  modalCancelBtn: {
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    backgroundColor: C.bg,
+  },
+  modalCancelTxt: {
+    fontWeight: '700',
+    color: C.textMed,
+  },
+  modalSaveBtn: {
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    backgroundColor: C.primary,
+  },
+  modalSaveTxt: {
+    fontWeight: '800',
+    color: '#fff',
+  },
 });

@@ -7,7 +7,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TextInput, FlatList, Pressable,
-  StyleSheet, Alert, ActivityIndicator,
+  StyleSheet, Alert, ActivityIndicator, Modal,
 } from 'react-native';
 import { Linking } from 'react-native';
 import api from '../services/api';
@@ -52,6 +52,13 @@ export default function LectureListScreen({ navigation }) {
   const [lectures,    setLectures]    = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [deleting,    setDeleting]    = useState(null);
+  const [savingEdit,  setSavingEdit]  = useState(false);
+  const [editingLecture, setEditingLecture] = useState(null);
+  const [editName, setEditName] = useState('');
+  const [editSubject, setEditSubject] = useState('');
+  const [editType, setEditType] = useState('classwork');
+  const [editDate, setEditDate] = useState('');
+  const [editMessage, setEditMessage] = useState('');
 
   const [search,        setSearch]        = useState('');
   const [filtersOpen,   setFiltersOpen]   = useState(false);
@@ -174,8 +181,54 @@ export default function LectureListScreen({ navigation }) {
     }
   };
 
-  const renderItem = ({ item }) => (
-    <View style={styles.card}>
+  const startEdit = (lecture) => {
+    setEditingLecture(lecture);
+    setEditName(lecture.lecture_name || '');
+    setEditSubject(lecture.subject_name || '');
+    setEditType(lecture.type || 'classwork');
+    setEditDate((lecture.date || '').slice(0, 10));
+    setEditMessage(lecture.message || '');
+  };
+
+  const cancelEdit = () => {
+    setEditingLecture(null);
+    setEditName('');
+    setEditSubject('');
+    setEditType('classwork');
+    setEditDate('');
+    setEditMessage('');
+  };
+
+  const saveEdit = async () => {
+    if (!editingLecture?.id) return;
+    if (!editName.trim()) return Alert.alert('Required', 'Enter topic / title');
+    if (!editSubject.trim()) return Alert.alert('Required', 'Enter subject');
+    if (!editDate.trim()) return Alert.alert('Required', 'Enter date (YYYY-MM-DD)');
+
+    setSavingEdit(true);
+    try {
+      const { data } = await api.put(`/lectures/${editingLecture.id}`, {
+        lecture_name: editName.trim(),
+        subject_name: editSubject.trim(),
+        type: editType,
+        date: editDate.trim(),
+        message: editMessage.trim() || null,
+      });
+
+      setLectures(prev => prev.map(l => (l.id === editingLecture.id ? { ...l, ...data } : l)));
+      cancelEdit();
+    } catch (err) {
+      Alert.alert('Error', err?.response?.data?.message || 'Could not update lecture');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const renderItem = ({ item }) => {
+    const canManage = user?.role !== 'teacher' || belongsToCurrentTeacher(item);
+
+    return (
+      <View style={styles.card}>
       <View style={styles.cardTop}>
         <View style={[styles.typePill, { backgroundColor: TYPE_BG[item.type] }]}>
           <Text style={[styles.typePillTxt, { color: TYPE_COLOR[item.type] }]}>{TYPE_LABEL[item.type]}</Text>
@@ -192,16 +245,22 @@ export default function LectureListScreen({ navigation }) {
         <Pressable style={styles.viewBtn} onPress={() => openLecture(item)}>
           <Text style={styles.viewBtnTxt}>⬇ View / Download</Text>
         </Pressable>
-        {(belongsToCurrentTeacher(item) || (user?.role === 'admin' && item.teacher_id == null)) && (
-          <Pressable style={styles.delBtn} onPress={() => confirmDelete(item)} disabled={deleting === item.id}>
-            {deleting === item.id
-              ? <ActivityIndicator size="small" color="#DC2626" />
-              : <Text style={styles.delBtnTxt}>🗑</Text>}
-          </Pressable>
+        {canManage && (
+          <>
+            <Pressable style={styles.editBtn} onPress={() => startEdit(item)}>
+              <Text style={styles.editBtnTxt}>✏️</Text>
+            </Pressable>
+            <Pressable style={styles.delBtn} onPress={() => confirmDelete(item)} disabled={deleting === item.id}>
+              {deleting === item.id
+                ? <ActivityIndicator size="small" color="#DC2626" />
+                : <Text style={styles.delBtnTxt}>🗑</Text>}
+            </Pressable>
+          </>
         )}
       </View>
-    </View>
-  );
+      </View>
+    );
+  };
 
   const ListHeader = (
     <View style={styles.filterCard}>
@@ -335,6 +394,83 @@ export default function LectureListScreen({ navigation }) {
           keyboardShouldPersistTaps="handled"
         />
       )}
+
+      <Modal
+        visible={!!editingLecture}
+        transparent
+        animationType="fade"
+        onRequestClose={cancelEdit}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Edit {editType === 'homework' ? 'Homework' : 'Classwork'}</Text>
+
+            <Text style={styles.filterLabel}>Topic / Title</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={editName}
+              onChangeText={setEditName}
+              placeholder="Topic / Title"
+              placeholderTextColor={C.textLight}
+            />
+
+            <Text style={styles.filterLabel}>Subject</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={editSubject}
+              onChangeText={setEditSubject}
+              placeholder="Subject"
+              placeholderTextColor={C.textLight}
+            />
+
+            <Text style={styles.filterLabel}>Date (YYYY-MM-DD)</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={editDate}
+              onChangeText={setEditDate}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor={C.textLight}
+            />
+
+            <Text style={styles.filterLabel}>Type</Text>
+            <View style={styles.chipRow}>
+              {[
+                { value: 'classwork', label: '📖 Classwork' },
+                { value: 'homework', label: '📝 Homework' },
+              ].map(t => (
+                <Pressable
+                  key={t.value}
+                  style={[styles.chip, editType === t.value && styles.chipActive]}
+                  onPress={() => setEditType(t.value)}
+                >
+                  <Text style={[styles.chipTxt, editType === t.value && styles.chipTxtActive]}>{t.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={styles.filterLabel}>Message</Text>
+            <TextInput
+              style={[styles.modalInput, styles.modalTextarea]}
+              value={editMessage}
+              onChangeText={setEditMessage}
+              placeholder="Optional message"
+              placeholderTextColor={C.textLight}
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+            />
+
+            <View style={styles.modalActions}>
+              <Pressable style={styles.modalCancelBtn} onPress={cancelEdit}>
+                <Text style={styles.modalCancelTxt}>Cancel</Text>
+              </Pressable>
+              <Pressable style={[styles.modalSaveBtn, savingEdit && { opacity: 0.7 }]} onPress={saveEdit} disabled={savingEdit}>
+                {savingEdit ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalSaveTxt}>Save</Text>}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -418,8 +554,72 @@ const styles = StyleSheet.create({
   cardActions: { flexDirection: 'row', gap: 10, marginTop: 14 },
   viewBtn:     { flex: 1, backgroundColor: C.primaryLight, borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
   viewBtnTxt:  { color: C.primary, fontWeight: '700', fontSize: 13 },
+  editBtn:     { backgroundColor: '#EFF6FF', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, alignItems: 'center' },
+  editBtnTxt:  { fontSize: 16 },
   delBtn:      { backgroundColor: '#FEF2F2', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10, alignItems: 'center' },
   delBtnTxt:   { fontSize: 16 },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(2,6,23,0.45)',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    backgroundColor: C.card,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: C.text,
+    marginBottom: 8,
+  },
+  modalInput: {
+    backgroundColor: C.bg,
+    borderWidth: 1.5,
+    borderColor: C.border,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: C.text,
+  },
+  modalTextarea: {
+    minHeight: 90,
+    paddingTop: 10,
+  },
+  modalActions: {
+    marginTop: 14,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  modalCancelBtn: {
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    backgroundColor: C.bg,
+  },
+  modalCancelTxt: {
+    fontWeight: '700',
+    color: C.textMed,
+  },
+  modalSaveBtn: {
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    backgroundColor: C.primary,
+  },
+  modalSaveTxt: {
+    fontWeight: '800',
+    color: '#fff',
+  },
 
   empty:     { alignItems: 'center', paddingTop: 60 },
   emptyIcon: { fontSize: 48, marginBottom: 12 },

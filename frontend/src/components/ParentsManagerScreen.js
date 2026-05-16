@@ -14,6 +14,7 @@ import EntityEmptyState from './EntityEmptyState';
 import ManagerSearchAddRow from './ManagerSearchAddRow';
 import ModalFooterActions from './ModalFooterActions';
 import { showDestructiveConfirm } from '../lib/confirmDialog';
+import { buildImportExportScope } from '../lib/importExportScope';
 
 const EMPTY_FORM = { email: '', password: '', first_name: '', last_name: '', phone: '', school_id: '' };
 
@@ -60,6 +61,28 @@ export default function ParentsManagerScreen({ navigation, mode }) {
   const [nameQ, setNameQ] = useState('');
   const [stuLoading, setStuLoading] = useState(false);
   const [linking, setLinking] = useState(false);
+  const [childCampusId, setChildCampusId] = useState(null);
+
+  const dedupeParentsById = useCallback((list) => {
+    const map = new Map();
+    for (const p of (list || [])) {
+      const id = Number(p?.id);
+      if (!Number.isFinite(id)) continue;
+      const existing = map.get(id);
+      if (!existing) {
+        map.set(id, {
+          ...p,
+          campus_names: Array.isArray(p?.campus_names) ? [...new Set(p.campus_names)] : [],
+          campus_ids: Array.isArray(p?.campus_ids) ? [...new Set(p.campus_ids.map(Number).filter(Boolean))] : [],
+        });
+      } else {
+        const mergedCampusNames = [...new Set([...(existing.campus_names || []), ...((p?.campus_names || []))])];
+        const mergedCampusIds = [...new Set([...(existing.campus_ids || []), ...((p?.campus_ids || []).map(Number).filter(Boolean))])];
+        map.set(id, { ...existing, ...p, campus_names: mergedCampusNames, campus_ids: mergedCampusIds });
+      }
+    }
+    return [...map.values()];
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -79,11 +102,11 @@ export default function ParentsManagerScreen({ navigation, mode }) {
         if (filterCampus) {
           // Specific campus selected — load parents for that campus
           const { data } = await api.get(`/super-admin/schools/${filterCampus}/parents`);
-          setParents(data?.parents || data || []);
+          setParents(dedupeParentsById(data?.parents || data || []));
         } else if (filterOrg) {
           // Org selected but no specific campus — load all parents across the org
           const { data } = await api.get(`/super-admin/organizations/${filterOrg}/parents`);
-          setParents(Array.isArray(data) ? data : []);
+          setParents(dedupeParentsById(Array.isArray(data) ? data : []));
         } else {
           // All orgs + all campuses — aggregate parents across all campuses.
           const responses = await Promise.all(
@@ -92,7 +115,7 @@ export default function ParentsManagerScreen({ navigation, mode }) {
             ),
           );
           const merged = responses.flatMap(r => (r.data?.parents || r.data || []));
-          setParents(merged);
+          setParents(dedupeParentsById(merged));
         }
       } else if (isOrg) {
         const params = filterCampus ? { campus_id: filterCampus } : {};
@@ -330,12 +353,18 @@ export default function ParentsManagerScreen({ navigation, mode }) {
     setSelClass(null);
     setSelSection(null);
     setNameQ('');
+    const defaultCampusId = Number(filterCampus || p.school_id || (Array.isArray(p.campus_ids) ? p.campus_ids[0] : null) || 0) || null;
+    setChildCampusId(defaultCampusId);
     setChildModal(true);
     setChildrenLoading(true);
     try {
+      const childPath = isSuper ? `/super-admin/parents/${p.id}/children` : `/admin/parents/${p.id}/children`;
+      const classReq = isSuper
+        ? (defaultCampusId ? api.get(`/super-admin/schools/${defaultCampusId}/classes`) : Promise.resolve({ data: [] }))
+        : api.get('/classes');
       const [childRes, classRes] = await Promise.all([
-        api.get(`/admin/parents/${p.id}/children`),
-        api.get('/classes'),
+        api.get(childPath),
+        classReq,
       ]);
       setChildren(childRes.data.children || []);
       setClasses(Array.isArray(classRes.data) ? classRes.data : classRes.data.classes || []);
@@ -350,6 +379,10 @@ export default function ParentsManagerScreen({ navigation, mode }) {
     setSelClass(cls);
     setSelSection(null);
     setStudents([]);
+    if (isSuper) {
+      setSections(Array.isArray(cls.sections) ? cls.sections : []);
+      return;
+    }
     setSections([]);
     try {
       const { data } = await api.get(`/classes/${cls.id}/sections`);
@@ -364,7 +397,10 @@ export default function ParentsManagerScreen({ navigation, mode }) {
     setStudents([]);
     setStuLoading(true);
     try {
-      const { data } = await api.get('/students', { params: { class_id: selClass.id, section_id: sec.id } });
+      const req = isSuper
+        ? api.get(`/super-admin/schools/${childCampusId}/students`, { params: { class_id: selClass.id, section_id: sec.id } })
+        : api.get('/students', { params: { class_id: selClass.id, section_id: sec.id } });
+      const { data } = await req;
       setStudents(Array.isArray(data) ? data : data.students || []);
     } catch {
       Alert.alert('Error', 'Failed to load students');
@@ -376,8 +412,14 @@ export default function ParentsManagerScreen({ navigation, mode }) {
   const onLink = async student => {
     setLinking(true);
     try {
-      await api.post(`/admin/parents/${selectedParent.id}/link-child`, { student_id: student.id, relationship: 'parent' });
-      const { data } = await api.get(`/admin/parents/${selectedParent.id}/children`);
+      const linkPath = isSuper
+        ? `/super-admin/parents/${selectedParent.id}/link-child`
+        : `/admin/parents/${selectedParent.id}/link-child`;
+      const childPath = isSuper
+        ? `/super-admin/parents/${selectedParent.id}/children`
+        : `/admin/parents/${selectedParent.id}/children`;
+      await api.post(linkPath, { student_id: student.id, relationship: 'parent' });
+      const { data } = await api.get(childPath);
       setChildren(data.children || []);
     } catch (err) {
       Alert.alert('Error', err?.response?.data?.message || 'Failed to link');
@@ -394,7 +436,10 @@ export default function ParentsManagerScreen({ navigation, mode }) {
         style: 'destructive',
         onPress: async () => {
           try {
-            await api.delete(`/admin/parents/${selectedParent.id}/children/${studentId}`);
+            const unlinkPath = isSuper
+              ? `/super-admin/parents/${selectedParent.id}/children/${studentId}`
+              : `/admin/parents/${selectedParent.id}/children/${studentId}`;
+            await api.delete(unlinkPath);
             setChildren(prev => prev.filter(c => c.student_id !== studentId));
           } catch {
             Alert.alert('Error', 'Failed to unlink');
@@ -426,6 +471,16 @@ export default function ParentsManagerScreen({ navigation, mode }) {
 
   const orgFilterItems = [{ label: 'All Organizations', value: '' }, ...organizations.map(o => ({ label: o.name, value: String(o.id) }))];
   const campusFilterItems = [{ label: 'All Campuses', value: '' }, ...campuses.map(c => ({ label: c.name, value: String(c.id) }))];
+  const orgIeScope = buildImportExportScope({
+    mode: 'orgadmin',
+    campusId: filterCampus,
+    requireCampusForScopedRoles: false,
+  });
+  const superIeScope = buildImportExportScope({
+    mode: 'superadmin',
+    campusId: filterCampus,
+    requireCampusForScopedRoles: true,
+  });
 
   return (
     <View style={styles.container}>
@@ -450,19 +505,25 @@ export default function ParentsManagerScreen({ navigation, mode }) {
       {isOrg ? (
         <ImportExportBar
           templatePath="/org-admin/import-export/parents/template"
+          templateParams={orgIeScope.params}
           importPath="/org-admin/import-export/parents/import"
+          importFields={orgIeScope.params}
           exportPath="/org-admin/import-export/parents/export"
+          exportParams={orgIeScope.params}
           exportFilename="parents_export.xlsx"
           templateFilename="parents_template.xlsx"
           onImportDone={load}
         />
       ) : null}
       {isSuper ? (
-        filterCampus ? (
+        superIeScope.showBar ? (
           <ImportExportBar
             templatePath="/org-admin/import-export/parents/template"
+            templateParams={superIeScope.params}
             importPath="/org-admin/import-export/parents/import"
+            importFields={superIeScope.params}
             exportPath="/org-admin/import-export/parents/export"
+            exportParams={superIeScope.params}
             exportFilename="parents_export.xlsx"
             templateFilename="parents_template.xlsx"
             onImportDone={load}
@@ -515,7 +576,7 @@ export default function ParentsManagerScreen({ navigation, mode }) {
                     <Ionicons name="business-outline" size={17} color="#7C3AED" />
                   </TouchableOpacity>
                 ) : null}
-                {!isOrg && !isSuper ? (
+                {!isOrg ? (
                   <TouchableOpacity onPress={() => openChildren(item)} style={styles.actionBtn}><Ionicons name="people-outline" size={17} color={C.primary} /></TouchableOpacity>
                 ) : null}
                 <TouchableOpacity onPress={() => openEdit(item)} style={styles.actionBtn}><Ionicons name="pencil-outline" size={17} color="#2563EB" /></TouchableOpacity>
@@ -634,7 +695,7 @@ export default function ParentsManagerScreen({ navigation, mode }) {
                 <Text style={styles.empty2}>No children linked yet</Text>
               ) : (
                 children.map(c => {
-                  const isOwnCampus = c.school_id === mySchoolId;
+                  const isOwnCampus = isSuper ? true : c.school_id === mySchoolId;
                   return (
                     <View key={c.student_id} style={styles.childRow}>
                       <View style={[styles.childAvatar, !isOwnCampus && { backgroundColor: '#F1F5F9' }]}>

@@ -1,7 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem     from 'expo-file-system/legacy';
 import * as Sharing        from 'expo-sharing';
-import { Alert }           from 'react-native';
+import { Alert, Platform, Linking } from 'react-native';
 import api from './api';
 
 // Convert an ArrayBuffer to a base64 string (needed to write binary via FileSystem)
@@ -44,29 +44,45 @@ export async function exportFile(path, filename, params = {}) {
     }
 
     // Use axios so the Authorization header is sent automatically
+    const format = String(params?.format || '').toLowerCase() === 'csv' ? 'csv' : 'xlsx';
+    const requestParams = { ...(params || {}) };
+    if (format === 'csv') requestParams.format = 'csv';
+
     const response = await api.get(path, {
-      params,
+      params: requestParams,
       responseType: 'arraybuffer',
       timeout: 30000,
     });
 
     // Write binary to cache as base64
     const base64 = arrayBufferToBase64(response.data);
-    const localUri = FileSystem.cacheDirectory + filename;
+    const localUri = (FileSystem.documentDirectory || FileSystem.cacheDirectory) + filename;
     await FileSystem.writeAsStringAsync(localUri, base64, {
       encoding: FileSystem.EncodingType.Base64,
     });
 
-    // Share / save via native sheet
+    // Compatibility-first flow:
+    // 1) Share sheet works on most Android/iOS devices, including phones without Excel.
+    // 2) If sharing is unavailable, try direct open.
     const canShare = await Sharing.isAvailableAsync();
     if (canShare) {
+      const isCsv = format === 'csv' || String(filename || '').toLowerCase().endsWith('.csv');
       await Sharing.shareAsync(localUri, {
-        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        dialogTitle: 'Save or share the report',
-        UTI: 'com.microsoft.excel.xlsx',
+        mimeType: isCsv ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        dialogTitle: 'Open, save, or share file',
+        UTI: isCsv ? 'public.comma-separated-values-text' : 'org.openxmlformats.spreadsheetml.sheet',
       });
     } else {
-      Alert.alert('Saved', `File saved to: ${localUri}`);
+      try {
+        if (Platform.OS === 'android') {
+          const contentUri = await FileSystem.getContentUriAsync(localUri);
+          await Linking.openURL(contentUri);
+        } else {
+          await Linking.openURL(localUri);
+        }
+      } catch {
+        Alert.alert('Saved', `File saved to: ${localUri}`);
+      }
     }
     return true;
   } catch (err) {
@@ -78,6 +94,13 @@ export async function exportFile(path, filename, params = {}) {
     Alert.alert('Export Failed', msg || (status ? `Server error ${status}` : err.message) || 'Unknown error');
     return false;
   }
+}
+
+export async function exportCsvFile(path, filename, params = {}) {
+  const target = String(filename || 'export.csv').toLowerCase().endsWith('.csv')
+    ? filename
+    : `${String(filename || 'export').replace(/\.[^/.]+$/, '')}.csv`;
+  return exportFile(path, target, { ...(params || {}), format: 'csv' });
 }
 
 // ── Download Template ─────────────────────────────────────────────────────

@@ -10,6 +10,7 @@ import AppHeader from '../../components/AppHeader';
 import ImportExportBar from '../../components/ImportExportBar';
 import PickerField from '../../components/PickerField';
 import { showDestructiveConfirm } from '../../lib/confirmDialog';
+import { buildImportExportScope } from '../../lib/importExportScope';
 
 const EMPTY_FORM = { first_name: '', last_name: '', email: '', password: '', school_id: '' };
 
@@ -53,6 +54,11 @@ export default function OrgAdminAdminsScreen({ navigation }) {
   });
 
   const campusItems = [{ label: 'All Campuses', value: '' }, ...campuses.map(c => ({ label: c.name, value: String(c.id) }))];
+  const ieScope = buildImportExportScope({
+    mode: 'orgadmin',
+    campusId: filterCampus,
+    requireCampusForScopedRoles: false,
+  });
 
   const openAdd = () => { setEditing(null); setForm(EMPTY_FORM); setShowCreatePw(false); setShowResetPw(false); setModalVisible(true); };
   const openEdit = (item) => {
@@ -153,8 +159,11 @@ export default function OrgAdminAdminsScreen({ navigation }) {
       </View>
       <ImportExportBar
         templatePath="/org-admin/import-export/admins/template"
+        templateParams={ieScope.params}
         importPath="/org-admin/import-export/admins/import"
+        importFields={ieScope.params}
         exportPath="/org-admin/import-export/admins/export"
+        exportParams={ieScope.params}
         exportFilename="admins_export.xlsx"
         templateFilename="admins_template.xlsx"
         onImportDone={load}

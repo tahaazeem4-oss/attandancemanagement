@@ -31,6 +31,35 @@ export async function handleNotifications(
   const userId = user.id as number;
   const role = user.role as string;
 
+  const canManageNotification = async (notification: Record<string, unknown>) => {
+    const notifSchoolId = Number(notification.school_id || 0);
+    const notifSenderId = Number(notification.sender_id || 0);
+
+    if (role === "super_admin") return true;
+
+    if (role === "org_admin") {
+      const orgId = user.org_id as number;
+      if (!orgId || !notifSchoolId) return false;
+      const { data: school } = await db
+        .from("schools")
+        .select("id")
+        .eq("id", notifSchoolId)
+        .eq("org_id", orgId)
+        .maybeSingle();
+      return !!school;
+    }
+
+    if (role === "admin") {
+      return !!schoolId && !!notifSchoolId && notifSchoolId === schoolId;
+    }
+
+    if (role === "teacher") {
+      return notifSenderId === userId;
+    }
+
+    return false;
+  };
+
   // ── GET /notifications/inbox (teacher/admin) ─────────────────
   if (path === "/notifications/inbox" && method === "GET") {
     if (role !== "teacher" && role !== "admin" && role !== "super_admin")
@@ -433,15 +462,72 @@ export async function handleNotifications(
         .single();
 
       if (!data) return json({ message: "Not found" }, 404);
-      if (role === "teacher" && data.sender_id !== userId)
-        return json({ message: "Forbidden" }, 403);
-      if (role === "admin" && data.school_id !== schoolId)
+      if (!(await canManageNotification(data as Record<string, unknown>)))
         return json({ message: "Forbidden" }, 403);
 
       await db.from("notifications").delete().eq("id", id);
       return json({ message: "Notification deleted" });
     } catch (err) {
       console.error("[notifications DELETE]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── PUT /notifications/:id ───────────────────────────────────
+  const updateMatch = path.match(/^\/notifications\/(\d+)$/);
+  if (updateMatch && method === "PUT") {
+    const id = parseInt(updateMatch[1]);
+    try {
+      const {
+        title,
+        message,
+        category,
+      } = await req.json();
+
+      const { data: notif } = await db
+        .from("notifications")
+        .select("id, sender_id, school_id")
+        .eq("id", id)
+        .single();
+
+      if (!notif) return json({ message: "Not found" }, 404);
+      if (!(await canManageNotification(notif as Record<string, unknown>)))
+        return json({ message: "Forbidden" }, 403);
+
+      const updates: Record<string, unknown> = {};
+      if (typeof title === "string") {
+        const t = title.trim();
+        if (!t) return json({ message: "title cannot be empty" }, 400);
+        updates.title = t;
+      }
+      if (typeof message === "string") {
+        const m = message.trim();
+        if (!m) return json({ message: "message cannot be empty" }, 400);
+        updates.message = m;
+      }
+      if (typeof category === "string") {
+        const VALID_CATS = ["general", "holiday", "complaint", "announcement", "homework", "exam"];
+        if (!VALID_CATS.includes(category)) {
+          return json({ message: "Invalid category" }, 400);
+        }
+        updates.category = category;
+      }
+
+      if (!Object.keys(updates).length) {
+        return json({ message: "No changes provided" }, 400);
+      }
+
+      const { data: updated, error: updateErr } = await db
+        .from("notifications")
+        .update(updates)
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (updateErr) throw updateErr;
+      return json(updated);
+    } catch (err) {
+      console.error("[notifications PUT]", err);
       return json({ message: "Server error" }, 500);
     }
   }

@@ -6,7 +6,6 @@ import {
   sendPush,
   tokensForClassStudents,
   SUPABASE_URL,
-  resolveTeacherRole,
 } from "../_shared.ts";
 
 const BUCKET = "lectures";
@@ -31,6 +30,37 @@ export async function handleLectures(
   }
 
   const schoolId = user.school_id as number;
+  const userId = user.id as number;
+  const role = user.role as string;
+
+  const canManageLecture = async (lecture: Record<string, unknown>) => {
+    const lectureSchoolId = Number(lecture.school_id || 0);
+    const lectureTeacherId = lecture.teacher_id == null ? null : Number(lecture.teacher_id);
+
+    if (role === "super_admin") return true;
+
+    if (role === "org_admin") {
+      const orgId = user.org_id as number;
+      if (!orgId || !lectureSchoolId) return false;
+      const { data: school } = await db
+        .from("schools")
+        .select("id")
+        .eq("id", lectureSchoolId)
+        .eq("org_id", orgId)
+        .maybeSingle();
+      return !!school;
+    }
+
+    if (role === "admin") {
+      return !!schoolId && !!lectureSchoolId && lectureSchoolId === schoolId;
+    }
+
+    if (role === "teacher") {
+      return lectureTeacherId !== null && lectureTeacherId === userId;
+    }
+
+    return false;
+  };
 
   // ── GET /lectures/classes ────────────────────────────────────
   if (path === "/lectures/classes" && method === "GET") {
@@ -120,7 +150,7 @@ export async function handleLectures(
         .order("date", { ascending: false });
 
       // Students only see their own class/section lectures
-      if (user.role === "student") {
+      if (role === "student") {
         const cid = user.class_id as number;
         const sid = user.section_id as number;
         q = q.eq("class_id", cid).or(`section_id.eq.${sid},section_id.is.null`);
@@ -144,7 +174,7 @@ export async function handleLectures(
 
   // ── POST /lectures (multipart upload) ────────────────────────
   if (path === "/lectures" && method === "POST") {
-    if (user.role === "student")
+    if (role === "student")
       return json({ message: "Forbidden" }, 403);
     try {
       const formData = await req.formData();
@@ -161,7 +191,7 @@ export async function handleLectures(
       if (!lecture_name || !subject_name || !date || !class_id)
         return json({ message: "Missing required fields" }, 400);
 
-      const teacherId = user.role === "teacher" ? (user.id as number) : null;
+      const teacherId = role === "teacher" ? userId : null;
       const uploaderName = `${user.first_name} ${user.last_name}`;
 
       let storagePath: string | null = null;
@@ -223,21 +253,14 @@ export async function handleLectures(
   if (deleteMatch && method === "DELETE") {
     const id = parseInt(deleteMatch[1]);
     try {
-      if (user.role === "teacher") {
-        const teacherRole = await resolveTeacherRole(db, user.id as number);
-        if (teacherRole === "subject_teacher") {
-          return json({ message: "Subject teachers cannot delete classwork/homework" }, 403);
-        }
-      }
-
       const { data } = await db
         .from("lectures")
-        .select("file_path, school_id")
+        .select("id, file_path, school_id, teacher_id")
         .eq("id", id)
         .single();
 
       if (!data) return json({ message: "Lecture not found" }, 404);
-      if (data.school_id !== schoolId)
+      if (!(await canManageLecture(data as Record<string, unknown>)))
         return json({ message: "Forbidden" }, 403);
 
       if (data.file_path) await db.storage.from(BUCKET).remove([data.file_path]);
@@ -245,6 +268,90 @@ export async function handleLectures(
       return json({ message: "Lecture deleted" });
     } catch (err) {
       console.error("[lectures DELETE]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── PUT /lectures/:id ────────────────────────────────────────
+  const updateMatch = path.match(/^\/lectures\/(\d+)$/);
+  if (updateMatch && method === "PUT") {
+    const id = parseInt(updateMatch[1]);
+    try {
+      const {
+        lecture_name,
+        subject_name,
+        type,
+        date,
+        message,
+      } = await req.json();
+
+      const { data: lecture } = await db
+        .from("lectures")
+        .select("id, school_id, teacher_id")
+        .eq("id", id)
+        .single();
+
+      if (!lecture) return json({ message: "Lecture not found" }, 404);
+      if (!(await canManageLecture(lecture as Record<string, unknown>)))
+        return json({ message: "Forbidden" }, 403);
+
+      const updates: Record<string, unknown> = {};
+
+      if (typeof lecture_name === "string") {
+        const value = lecture_name.trim();
+        if (!value) return json({ message: "lecture_name cannot be empty" }, 400);
+        updates.lecture_name = value;
+      }
+
+      if (typeof subject_name === "string") {
+        const value = subject_name.trim();
+        if (!value) return json({ message: "subject_name cannot be empty" }, 400);
+        updates.subject_name = value;
+      }
+
+      if (typeof type === "string") {
+        if (!["classwork", "homework"].includes(type)) {
+          return json({ message: "type must be classwork or homework" }, 400);
+        }
+        updates.type = type;
+      }
+
+      if (typeof date === "string") {
+        const value = date.trim();
+        if (!value) return json({ message: "date cannot be empty" }, 400);
+        updates.date = value;
+      }
+
+      if (message === null) {
+        updates.message = null;
+      } else if (typeof message === "string") {
+        updates.message = message.trim() || null;
+      }
+
+      if (!Object.keys(updates).length) {
+        return json({ message: "No changes provided" }, 400);
+      }
+
+      const { data: updated, error: updateErr } = await db
+        .from("lectures")
+        .update(updates)
+        .eq("id", id)
+        .select(`id, teacher_id, subject_name, lecture_name, type, date, file_path, message, uploaded_by, created_at, class_id, section_id,
+                 classes!inner(class_name), sections(section_name)`)
+        .single();
+
+      if (updateErr) throw updateErr;
+
+      return json({
+        ...updated,
+        class_name: (updated.classes as Record<string, unknown>).class_name,
+        section_name: updated.section_id
+          ? (updated.sections as Record<string, unknown>)?.section_name
+          : "All Sections",
+        file_url: updated.file_path ? publicUrl(updated.file_path as string) : null,
+      });
+    } catch (err) {
+      console.error("[lectures PUT]", err);
       return json({ message: "Server error" }, 500);
     }
   }
@@ -261,7 +368,7 @@ export async function handleLectures(
         .single();
 
       if (!data) return json({ message: "Lecture not found" }, 404);
-      if (data.school_id !== schoolId)
+      if (role !== "super_admin" && data.school_id !== schoolId)
         return json({ message: "Forbidden" }, 403);
 
       const fileUrl = publicUrl(data.file_path);

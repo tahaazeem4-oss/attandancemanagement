@@ -815,9 +815,9 @@ export async function handleSuperAdmin(
         .select("parent_id")
         .eq("school_id", schoolId);
       const directIds = new Set((directParents || []).map((p: Record<string, unknown>) => p.id as number));
-      const junctionIds = (accessRows || [])
+      const junctionIds = [...new Set((accessRows || [])
         .map((r: Record<string, unknown>) => r.parent_id as number)
-        .filter(id => !directIds.has(id));
+        .filter(id => !directIds.has(id)))];
       let junctionParents: Record<string, unknown>[] = [];
       if (junctionIds.length) {
         const { data } = await db.from("parents")
@@ -825,7 +825,12 @@ export async function handleSuperAdmin(
           .in("id", junctionIds);
         junctionParents = (data || []) as Record<string, unknown>[];
       }
-      const allParents = [...(directParents || []) as Record<string, unknown>[], ...junctionParents];
+      const allParentsRaw = [...(directParents || []) as Record<string, unknown>[], ...junctionParents];
+      const allParentsMap = new Map<number, Record<string, unknown>>();
+      for (const p of allParentsRaw) {
+        allParentsMap.set(p.id as number, p);
+      }
+      const allParents = [...allParentsMap.values()];
 
       // Enrich each parent with all campus names + ids they're linked to
       const allParentIds = allParents.map(p => p.id as number);
@@ -953,6 +958,117 @@ export async function handleSuperAdmin(
       return json({ message: "Parent deleted" });
     } catch (err) {
       console.error("[super-admin/schools/:id/parents DELETE]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── GET /super-admin/parents/:id/children ───────────────────
+  const parentChildrenMatch = path.match(/^\/super-admin\/parents\/(\d+)\/children$/);
+  if (parentChildrenMatch && method === "GET") {
+    const parentId = parseInt(parentChildrenMatch[1]);
+    try {
+      const { data: parent } = await db
+        .from("parents")
+        .select("id")
+        .eq("id", parentId)
+        .maybeSingle();
+      if (!parent) return json({ message: "Parent not found" }, 404);
+
+      const { data: children, error } = await db
+        .from("parent_student")
+        .select("student_id, relationship, students(id, first_name, last_name, school_id)")
+        .eq("parent_id", parentId);
+
+      if (error) throw error;
+      return json({
+        children: (children || []).map((c: any) => ({
+          student_id: c.student_id,
+          first_name: c.students?.first_name,
+          last_name: c.students?.last_name,
+          relationship: c.relationship,
+          school_id: c.students?.school_id,
+        })),
+      });
+    } catch (err) {
+      console.error("[super-admin/parents/:id/children GET]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── POST /super-admin/parents/:id/link-child ────────────────
+  const parentLinkChildMatch = path.match(/^\/super-admin\/parents\/(\d+)\/link-child$/);
+  if (parentLinkChildMatch && method === "POST") {
+    const parentId = parseInt(parentLinkChildMatch[1]);
+    try {
+      const { student_id, relationship } = await req.json();
+      if (!student_id) return json({ message: "student_id is required" }, 400);
+
+      const { data: parent } = await db
+        .from("parents")
+        .select("id")
+        .eq("id", parentId)
+        .maybeSingle();
+      if (!parent) return json({ message: "Parent not found" }, 404);
+
+      const { data: student } = await db
+        .from("students")
+        .select("id, first_name, last_name, school_id")
+        .eq("id", student_id)
+        .maybeSingle();
+      if (!student) return json({ message: "Student not found" }, 404);
+
+      // A student can only be linked to one parent.
+      const { data: existingLink } = await db
+        .from("parent_student")
+        .select("parent_id")
+        .eq("student_id", student_id)
+        .neq("parent_id", parentId)
+        .maybeSingle();
+      if (existingLink) return json({ message: "This student is already linked to another parent" }, 409);
+
+      const { error } = await db
+        .from("parent_student")
+        .upsert(
+          { parent_id: parentId, student_id, relationship: relationship || null, verified: true },
+          { onConflict: "parent_id,student_id" },
+        );
+      if (error) throw error;
+
+      await db
+        .from("parent_school_access")
+        .upsert({ parent_id: parentId, school_id: (student as any).school_id }, { onConflict: "parent_id,school_id" })
+        .then(() => {})
+        .catch(() => {});
+
+      return json({
+        message: "Child linked",
+        student: {
+          id: (student as any).id,
+          first_name: (student as any).first_name,
+          last_name: (student as any).last_name,
+        },
+      });
+    } catch (err) {
+      console.error("[super-admin/parents/:id/link-child POST]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── DELETE /super-admin/parents/:parentId/children/:studentId ─
+  const parentUnlinkChildMatch = path.match(/^\/super-admin\/parents\/(\d+)\/children\/(\d+)$/);
+  if (parentUnlinkChildMatch && method === "DELETE") {
+    const parentId = parseInt(parentUnlinkChildMatch[1]);
+    const studentId = parseInt(parentUnlinkChildMatch[2]);
+    try {
+      const { error } = await db
+        .from("parent_student")
+        .delete()
+        .eq("parent_id", parentId)
+        .eq("student_id", studentId);
+      if (error) throw error;
+      return json({ message: "Child unlinked" });
+    } catch (err) {
+      console.error("[super-admin/parents/:id/children/:studentId DELETE]", err);
       return json({ message: "Server error" }, 500);
     }
   }

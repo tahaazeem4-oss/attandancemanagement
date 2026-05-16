@@ -13,7 +13,7 @@
 import React, { useState } from 'react';
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { exportFile, downloadTemplate, importFile } from '../services/importExport';
+import { exportFile, exportCsvFile, downloadTemplate, importFile } from '../services/importExport';
 import { C } from '../config/theme';
 
 export default function ImportExportBar({
@@ -24,10 +24,12 @@ export default function ImportExportBar({
   exportPath,
   exportParams = {},
   exportFilename = 'export.xlsx',
+  exportCsvFilename,
+  showCsvExport = true,
   templateFilename = 'template.xlsx',
   onImportDone,
 }) {
-  const [loading, setLoading] = useState(null); // 'template' | 'import' | 'export'
+  const [loading, setLoading] = useState(null); // 'template' | 'import' | 'export' | 'exportCsv'
 
   const handle = async (type, fn) => {
     setLoading(type);
@@ -48,6 +50,11 @@ export default function ImportExportBar({
   });
 
   const doExport = () => handle('export', () => exportFile(exportPath, exportFilename, exportParams));
+  const doExportCsv = () => handle('exportCsv', () => exportCsvFile(
+    exportPath,
+    exportCsvFilename || exportFilename,
+    exportParams,
+  ));
 
   const ACTIONS = [
     {
@@ -76,12 +83,23 @@ export default function ImportExportBar({
       key: 'export',
       visible: !!exportPath,
       icon: 'arrow-down-circle-outline',
-      label: 'Export',
+      label: 'Excel',
       onPress: doExport,
       loadingColor: '#F59E0B',
       style: styles.exportBtn,
       labelStyle: styles.exportTxt,
       iconColor: '#F59E0B',
+    },
+    {
+      key: 'exportCsv',
+      visible: !!exportPath && showCsvExport,
+      icon: 'document-text-outline',
+      label: 'CSV',
+      onPress: doExportCsv,
+      loadingColor: '#0EA5E9',
+      style: styles.csvBtn,
+      labelStyle: styles.csvTxt,
+      iconColor: '#0EA5E9',
     },
   ].filter(a => a.visible);
 
@@ -159,9 +177,14 @@ const styles = StyleSheet.create({
     borderColor: '#FEF3C7', 
     backgroundColor: '#FFFBEB',
   },
+  csvBtn: {
+    borderColor: '#DBEAFE',
+    backgroundColor: '#F0F9FF',
+  },
   templateTxt: { fontSize: 13, fontWeight: '700', color: '#3B82F6' },
   importTxt: { fontSize: 13, fontWeight: '700', color: '#10B981' },
   exportTxt: { fontSize: 13, fontWeight: '700', color: '#F59E0B' },
+  csvTxt: { fontSize: 13, fontWeight: '700', color: '#0EA5E9' },
   lightSub: { fontSize: 10, color: '#64748B', fontWeight: '600' },
   darkSub: { fontSize: 10, color: '#E2E8F0', fontWeight: '600' },
 });

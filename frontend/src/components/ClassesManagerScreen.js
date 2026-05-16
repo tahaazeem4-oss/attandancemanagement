@@ -22,6 +22,7 @@ import EntityEmptyState from './EntityEmptyState';
 import ManagerSearchAddRow from './ManagerSearchAddRow';
 import ModalFooterActions from './ModalFooterActions';
 import { showDestructiveConfirm } from '../lib/confirmDialog';
+import { buildImportExportScope, getImportExportBase } from '../lib/importExportScope';
 
 const EMPTY_CLASS = { class_name: '', school_id: '' };
 
@@ -339,7 +340,12 @@ export default function ClassesManagerScreen({ navigation, mode }) {
     { label: 'All Campuses', value: '' },
     ...campuses.map(c => ({ label: c.name, value: String(c.id) })),
   ];
-  const ieBase = isOrg ? '/org-admin/import-export' : '/import-export';
+  const ieBase = getImportExportBase(mode);
+  const ieScope = buildImportExportScope({
+    mode,
+    campusId: filterCampus,
+    requireCampusForScopedRoles: true,
+  });
 
   const visibleClasses = (isOrg || isSuper)
     ? classes.filter(c => {
@@ -387,14 +393,14 @@ export default function ClassesManagerScreen({ navigation, mode }) {
       )}
 
       {(isOrg || isSuper) ? (
-        filterCampus && (
+        ieScope.showBar && (
           <ImportExportBar
             templatePath={`${ieBase}/classes/template`}
-            templateParams={{ campus_id: filterCampus }}
+            templateParams={ieScope.params}
             importPath={`${ieBase}/classes/import`}
-            importFields={{ campus_id: filterCampus }}
+            importFields={ieScope.params}
             exportPath={`${ieBase}/classes/export`}
-            exportParams={{ campus_id: filterCampus }}
+            exportParams={ieScope.params}
             exportFilename="classes_export.xlsx"
             templateFilename="classes_template.xlsx"
             onImportDone={loadClasses}

@@ -175,13 +175,8 @@ export default function StaffNewChatScreen({ navigation }) {
         throw new Error(`Chat creation failed: ${errMsg}`);
       }
 
-      // Open chat
-      const enriched = {
-        ...conv,
-        participant_name: `${parent.first_name} ${parent.last_name}`,
-        participant_role: 'parent',
-      };
-      navigation.replace('Chat', { conversation: enriched });
+      // Return to message list so re-initiation always lands on Messages page.
+      navigation.navigate('ChatList', { refreshAt: Date.now(), openedConversationId: conv?.id || null });
     } catch (err) {
       Alert.alert('Error Starting Chat', err.message);
     } finally {

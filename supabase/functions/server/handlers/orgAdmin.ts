@@ -26,7 +26,11 @@ export async function handleOrgAdmin(
     return json({ message: "Forbidden" }, 403);
 
   const db = getDb();
-  const orgId = user.org_id as number;
+  const orgId = Number(user.org_id);
+
+  if (!Number.isFinite(orgId)) {
+    return json({ message: "Invalid organization scope" }, 403);
+  }
 
   async function getCampusIds(): Promise<number[]> {
     const { data } = await db.from("schools").select("id").eq("org_id", orgId);
@@ -1062,6 +1066,40 @@ function xlsxResp(buf: Uint8Array, filename: string): Response {
     },
   });
 }
+function toCsvOrg(rows: Record<string, unknown>[]): string {
+  if (!rows?.length) return "";
+  const headers = Object.keys(rows[0]);
+  const esc = (v: unknown) => {
+    const s = String(v ?? "");
+    if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const lines = [headers.join(",")];
+  for (const row of rows) {
+    lines.push(headers.map((h) => esc(row[h])).join(","));
+  }
+  return lines.join("\n");
+}
+function exportResp(
+  rows: Record<string, unknown>[],
+  sheetName: string,
+  xlsxFilename: string,
+  url: URL,
+): Response {
+  const format = String(url.searchParams.get("format") || "xlsx").toLowerCase();
+  if (format === "csv") {
+    const csv = toCsvOrg(rows);
+    const csvFilename = xlsxFilename.replace(/\.xlsx$/i, ".csv");
+    return new Response(csv, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${csvFilename}"`,
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
+  }
+  return xlsxResp(toXlsxOrg(rows, sheetName), xlsxFilename);
+}
 function parseUploadOrg(buffer: ArrayBuffer): Record<string, unknown>[] {
   const wb = XLSX.read(new Uint8Array(buffer), { type: "buffer" });
   const ws = wb.Sheets[wb.SheetNames[0]];
@@ -1080,18 +1118,52 @@ export async function handleOrgAdminImportExport(
     return json({ message: "Forbidden" }, 403);
 
   const db = getDb();
-  const orgId = user.org_id as number;
+  const orgIdFromTokenRaw = Number(user.org_id);
+  const orgIdFromToken = Number.isFinite(orgIdFromTokenRaw) ? orgIdFromTokenRaw : null;
+  const orgIdFromQuery = url.searchParams.get("org_id") ? parseInt(url.searchParams.get("org_id")!) : null;
+  const orgId = user.role === "super_admin" ? (orgIdFromQuery || orgIdFromToken || null) : orgIdFromToken;
+
+  if (user.role === "org_admin" && !orgId) {
+    return json({ message: "Invalid organization scope" }, 403);
+  }
 
   async function getCampusIds(): Promise<number[]> {
-    const { data } = await db.from("schools").select("id").eq("org_id", orgId);
-    return (data || []).map((s: any) => s.id as number);
+    if (orgId) {
+      const { data } = await db.from("schools").select("id").eq("org_id", orgId);
+      return (data || []).map((s: any) => s.id as number);
+    }
+    if (user.role === "super_admin") {
+      const { data } = await db.from("schools").select("id");
+      return (data || []).map((s: any) => s.id as number);
+    }
+    return [];
   }
   async function verifyCampus(id: number): Promise<boolean> {
+    if (user.role === "super_admin") {
+      if (orgId) {
+        const { data } = await db.from("schools").select("id").eq("id", id).eq("org_id", orgId).single();
+        return !!data;
+      }
+      const { data } = await db.from("schools").select("id").eq("id", id).single();
+      return !!data;
+    }
+    if (!orgId) {
+      const { data } = await db.from("schools").select("id").eq("id", id).single();
+      return !!data;
+    }
     const { data } = await db.from("schools").select("id").eq("id", id).eq("org_id", orgId).single();
     return !!data;
   }
 
   const campusIdParam = url.searchParams.get("campus_id") ? parseInt(url.searchParams.get("campus_id")!) : null;
+
+  async function getScopedCampusIds(): Promise<number[]> {
+    if (campusIdParam) {
+      const ok = await verifyCampus(campusIdParam);
+      return ok ? [campusIdParam] : [];
+    }
+    return await getCampusIds();
+  }
 
   // ── CAMPUSES ──────────────────────────────────────────────────
   if (path === "/org-admin/import-export/campuses/template" && method === "GET") {
@@ -1100,8 +1172,10 @@ export async function handleOrgAdminImportExport(
   }
   if (path === "/org-admin/import-export/campuses/export" && method === "GET") {
     try {
-      const { data } = await db.from("schools").select("name, city, address, phone").eq("org_id", orgId).order("name");
-      return xlsxResp(toXlsxOrg(data || [], "Campuses"), "campuses_export.xlsx");
+      let q = db.from("schools").select("name, city, address, phone").order("name");
+      if (orgId) q = q.eq("org_id", orgId);
+      const { data } = await q;
+      return exportResp((data || []) as Record<string, unknown>[], "Campuses", "campuses_export.xlsx", url);
     } catch (err) { console.error("[org-admin/ie/campuses/export]", err); return json({ message: "Server error" }, 500); }
   }
   if (path === "/org-admin/import-export/campuses/import" && method === "POST") {
@@ -1135,11 +1209,11 @@ export async function handleOrgAdminImportExport(
   }
   if (path === "/org-admin/import-export/admins/export" && method === "GET") {
     try {
-      const campusIds = await getCampusIds();
-      if (!campusIds.length) return xlsxResp(toXlsxOrg([], "Admins"), "admins_export.xlsx");
+      const campusIds = await getScopedCampusIds();
+      if (!campusIds.length) return exportResp([], "Admins", "admins_export.xlsx", url);
       const { data } = await db.from("admins").select("first_name, last_name, email, phone, school_id, schools(name)").in("school_id", campusIds).order("last_name");
       const rows = (data || []).map((a: any) => ({ first_name: a.first_name, last_name: a.last_name, email: a.email, phone: a.phone || "", campus_id: a.school_id, campus_name: a.schools?.name }));
-      return xlsxResp(toXlsxOrg(rows, "Admins"), "admins_export.xlsx");
+      return exportResp(rows as Record<string, unknown>[], "Admins", "admins_export.xlsx", url);
     } catch (err) { console.error("[org-admin/ie/admins/export]", err); return json({ message: "Server error" }, 500); }
   }
   if (path === "/org-admin/import-export/admins/import" && method === "POST") {
@@ -1169,7 +1243,7 @@ export async function handleOrgAdminImportExport(
 
   // ── TEACHERS ──────────────────────────────────────────────────
   if (path === "/org-admin/import-export/teachers/template" && method === "GET") {
-    const campusIds = await getCampusIds();
+    const campusIds = await getScopedCampusIds();
     const { data: campuses } = await db.from("schools").select("id, name").in("id", campusIds).order("name");
     const sample = (campuses || []).slice(0, 1).map((c: any) => ({
       first_name: "Ali", last_name: "Khan", email: "ali@school.com", password: "Pass@123", phone: "03001234567",
@@ -1180,13 +1254,11 @@ export async function handleOrgAdminImportExport(
   }
   if (path === "/org-admin/import-export/teachers/export" && method === "GET") {
     try {
-      const campusIds = await getCampusIds();
-      if (!campusIds.length) return xlsxResp(toXlsxOrg([], "Teachers"), "teachers_export.xlsx");
-      let q = db.from("teachers").select("first_name, last_name, email, phone, school_id, schools(name)").in("school_id", campusIds).order("last_name");
-      if (campusIdParam) q = db.from("teachers").select("first_name, last_name, email, phone, school_id, schools(name)").eq("school_id", campusIdParam).order("last_name");
-      const { data } = await q;
+      const campusIds = await getScopedCampusIds();
+      if (!campusIds.length) return exportResp([], "Teachers", "teachers_export.xlsx", url);
+      const { data } = await db.from("teachers").select("first_name, last_name, email, phone, school_id, schools(name)").in("school_id", campusIds).order("last_name");
       const rows = (data || []).map((t: any) => ({ first_name: t.first_name, last_name: t.last_name, email: t.email, phone: t.phone || "", campus_id: t.school_id, campus_name: t.schools?.name }));
-      return xlsxResp(toXlsxOrg(rows, "Teachers"), "teachers_export.xlsx");
+      return exportResp(rows as Record<string, unknown>[], "Teachers", "teachers_export.xlsx", url);
     } catch (err) { console.error("[org-admin/ie/teachers/export]", err); return json({ message: "Server error" }, 500); }
   }
   if (path === "/org-admin/import-export/teachers/import" && method === "POST") {
@@ -1217,8 +1289,7 @@ export async function handleOrgAdminImportExport(
   // ── STUDENTS ──────────────────────────────────────────────────
   if (path === "/org-admin/import-export/students/template" && method === "GET") {
     try {
-      const campusIds = await getCampusIds();
-      const scopedIds = (campusIdParam && campusIds.includes(campusIdParam)) ? [campusIdParam] : campusIds;
+      const scopedIds = await getScopedCampusIds();
       const { data: classes } = await db.from("classes").select("id, class_name, school_id, sections(id, section_name), schools(name)").in("school_id", scopedIds).order("class_name");
       const rows: Record<string, unknown>[] = [];
       for (const cls of (classes || []) as any[]) {
@@ -1234,12 +1305,11 @@ export async function handleOrgAdminImportExport(
   }
   if (path === "/org-admin/import-export/students/export" && method === "GET") {
     try {
-      const campusIds = await getCampusIds();
-      if (!campusIds.length) return xlsxResp(toXlsxOrg([], "Students"), "students_export.xlsx");
-      const scopedIds = (campusIdParam && campusIds.includes(campusIdParam)) ? [campusIdParam] : campusIds;
+      const scopedIds = await getScopedCampusIds();
+      if (!scopedIds.length) return exportResp([], "Students", "students_export.xlsx", url);
       const { data } = await db.from("students").select("first_name, last_name, age, roll_no, school_id, class_id, section_id, schools(name), classes(class_name), sections(section_name)").in("school_id", scopedIds).order("last_name");
       const rows = (data || []).map((s: any) => ({ first_name: s.first_name, last_name: s.last_name, age: s.age || "", roll_no: s.roll_no || "", campus_id: s.school_id, campus_name: s.schools?.name, class_id: s.class_id, class_name: s.classes?.class_name, section_id: s.section_id, section_name: s.sections?.section_name }));
-      return xlsxResp(toXlsxOrg(rows, "Students"), "students_export.xlsx");
+      return exportResp(rows as Record<string, unknown>[], "Students", "students_export.xlsx", url);
     } catch (err) { console.error("[org-admin/ie/students/export]", err); return json({ message: "Server error" }, 500); }
   }
   if (path === "/org-admin/import-export/students/import" && method === "POST") {
@@ -1267,7 +1337,7 @@ export async function handleOrgAdminImportExport(
 
   // ── CLASSES / SECTIONS ────────────────────────────────────────
   if (path === "/org-admin/import-export/classes/template" && method === "GET") {
-    const campusIds = await getCampusIds();
+    const campusIds = await getScopedCampusIds();
     const { data: campuses } = await db.from("schools").select("id, name").in("id", campusIds).order("name");
     const sample = (campuses || []).slice(0, 1).flatMap((c: any) => [
       { campus_id: c.id, campus_name: c.name, class_name: "Grade 1", section_name: "A" },
@@ -1278,9 +1348,8 @@ export async function handleOrgAdminImportExport(
   }
   if (path === "/org-admin/import-export/classes/export" && method === "GET") {
     try {
-      const campusIds = await getCampusIds();
-      if (!campusIds.length) return xlsxResp(toXlsxOrg([], "Classes"), "classes_export.xlsx");
-      const scopedIds = (campusIdParam && campusIds.includes(campusIdParam)) ? [campusIdParam] : campusIds;
+      const scopedIds = await getScopedCampusIds();
+      if (!scopedIds.length) return exportResp([], "Classes", "classes_export.xlsx", url);
       const { data: classes } = await db.from("classes").select("id, class_name, school_id, sections(id, section_name), schools(name)").in("school_id", scopedIds).order("class_name");
       const rows: Record<string, unknown>[] = [];
       for (const cls of (classes || []) as any[]) {
@@ -1288,7 +1357,7 @@ export async function handleOrgAdminImportExport(
           rows.push({ campus_id: cls.school_id, campus_name: cls.schools?.name, class_id: cls.id, class_name: cls.class_name, section_id: sec.id, section_name: sec.section_name });
         }
       }
-      return xlsxResp(toXlsxOrg(rows, "Classes"), "classes_export.xlsx");
+      return exportResp(rows, "Classes", "classes_export.xlsx", url);
     } catch (err) { console.error("[org-admin/ie/classes/export]", err); return json({ message: "Server error" }, 500); }
   }
   if (path === "/org-admin/import-export/classes/import" && method === "POST") {
@@ -1325,10 +1394,51 @@ export async function handleOrgAdminImportExport(
   }
   if (path === "/org-admin/import-export/parents/export" && method === "GET") {
     try {
-      const campusIds = await getCampusIds();
-      if (!campusIds.length) return xlsxResp(toXlsxOrg([], "Parents"), "parents_export.xlsx");
-      const { data } = await db.from("parents").select("first_name, last_name, email, phone").in("school_id", campusIds).order("last_name");
-      return xlsxResp(toXlsxOrg(data || [], "Parents"), "parents_export.xlsx");
+      const scopedIds = await getScopedCampusIds();
+      if (!scopedIds.length) return exportResp([], "Parents", "parents_export.xlsx", url);
+
+      // Include both directly assigned parents and multi-campus linked parents.
+      const { data: directRows } = await db
+        .from("parents")
+        .select("id, first_name, last_name, email, phone, school_id")
+        .in("school_id", scopedIds)
+        .order("last_name");
+
+      const { data: accessRows } = await db
+        .from("parent_school_access")
+        .select("parent_id")
+        .in("school_id", scopedIds);
+
+      const existingIds = new Set((directRows || []).map((p: any) => p.id));
+      const viaAccessIds = [...new Set((accessRows || []).map((r: any) => r.parent_id))]
+        .filter((id: number) => !existingIds.has(id));
+
+      let linkedRows: any[] = [];
+      if (viaAccessIds.length) {
+        const { data } = await db
+          .from("parents")
+          .select("id, first_name, last_name, email, phone, school_id")
+          .in("id", viaAccessIds)
+          .order("last_name");
+        linkedRows = data || [];
+      }
+
+      const merged = [...(directRows || []), ...linkedRows];
+      const seen = new Set<number>();
+      const rows = merged
+        .filter((p: any) => {
+          if (!p?.id || seen.has(p.id)) return false;
+          seen.add(p.id);
+          return true;
+        })
+        .map((p: any) => ({
+          first_name: p.first_name || "",
+          last_name: p.last_name || "",
+          email: p.email || "",
+          phone: p.phone || "",
+        }));
+
+      return exportResp(rows as Record<string, unknown>[], "Parents", "parents_export.xlsx", url);
     } catch (err) { console.error("[org-admin/ie/parents/export]", err); return json({ message: "Server error" }, 500); }
   }
   if (path === "/org-admin/import-export/parents/import" && method === "POST") {
