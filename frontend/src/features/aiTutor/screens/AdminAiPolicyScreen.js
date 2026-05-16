@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   setFeatureFlag, setQuotaPolicy,
   fetchAiTutorHealth, fetchScopeOptions, fetchPolicySummary,
+  deleteScopeConfig,
 } from '../api/aiTutorApi';
 import api from '../../../services/api';
 import { useAuth } from '../../../context/AuthContext';
@@ -230,6 +231,52 @@ export default function AdminAiPolicyScreen() {
 
   const fmt = (v) => (v === null || v === undefined) ? '∞' : Number(v).toLocaleString();
 
+  // Load a row into the editor for updating ─────────────────
+  const editRow = async (row) => {
+    const st = String(row.scope_type);
+    setScopeType(st);
+    setEnabled(row.is_enabled === null ? true : Boolean(row.is_enabled));
+    setDailyRequests(row.daily_requests != null ? String(row.daily_requests) : '');
+    setWeeklyRequests(row.weekly_requests != null ? String(row.weekly_requests) : '');
+    setMonthlyRequests(row.monthly_requests != null ? String(row.monthly_requests) : '');
+    setDailyTokens(row.daily_tokens != null ? String(row.daily_tokens) : '');
+    setWeeklyTokens(row.weekly_tokens != null ? String(row.weekly_tokens) : '');
+    setMonthlyTokens(row.monthly_tokens != null ? String(row.monthly_tokens) : '');
+    setMaxInput(row.max_input_tokens != null ? String(row.max_input_tokens) : '');
+    setMaxOutput(row.max_output_tokens != null ? String(row.max_output_tokens) : '');
+    if (st === 'global') {
+      setPicked({ organization: null, campus: null, class: null, section: null, student: null });
+    } else {
+      // Pre-fill the picked entity so the scope label resolves correctly.
+      const stripped = String(row.scope_name || '').replace(/^[^:]+:\s*/, '').split(' · ')[0].split(' - ').pop();
+      setPicked((prev) => ({ ...prev, [st]: { id: row.scope_id, name: stripped || `#${row.scope_id}` } }));
+    }
+    Alert.alert('Loaded', 'Values copied into the editor above. Make changes and tap Save.');
+  };
+
+  // Delete a row (both flag + policy) ───────────────────────
+  const deleteRow = (row) => {
+    if (row.scope_type === 'global') {
+      Alert.alert('Not allowed', 'Global defaults cannot be deleted.');
+      return;
+    }
+    Alert.alert(
+      'Delete this rule?',
+      `Removing "${row.scope_name}" will let it inherit limits from the next higher level. This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: async () => {
+          try {
+            await deleteScopeConfig(row.scope_type, row.scope_id, 'both');
+            refresh();
+          } catch (e) {
+            Alert.alert('Error', e?.response?.data?.message || 'Delete failed');
+          }
+        } },
+      ]
+    );
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
       <ScrollView contentContainerStyle={{ padding: 14 }}>
@@ -382,6 +429,16 @@ export default function AdminAiPolicyScreen() {
             {(r.max_input_tokens || r.max_output_tokens) ? (
               <Text style={styles.allocLine}>Per call · in {fmt(r.max_input_tokens)} / out {fmt(r.max_output_tokens)}</Text>
             ) : null}
+            <View style={styles.allocActions}>
+              <TouchableOpacity style={styles.editBtn} onPress={() => editRow(r)}>
+                <Text style={styles.editBtnText}>Edit</Text>
+              </TouchableOpacity>
+              {r.scope_type !== 'global' && (
+                <TouchableOpacity style={styles.deleteBtn} onPress={() => deleteRow(r)}>
+                  <Text style={styles.deleteBtnText}>Delete</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
         ))}
       </ScrollView>
@@ -528,6 +585,11 @@ const styles = StyleSheet.create({
   allocCard: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 10, padding: 10, marginTop: 8, gap: 4 },
   allocTitle: { fontWeight: '700', color: '#111827', flex: 1, marginRight: 8 },
   allocLine: { color: '#374151', fontSize: 12 },
+  allocActions: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  editBtn: { backgroundColor: '#E0E7FF', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+  editBtnText: { color: '#3730A3', fontWeight: '700', fontSize: 12 },
+  deleteBtn: { backgroundColor: '#FEE2E2', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+  deleteBtnText: { color: '#991B1B', fontWeight: '700', fontSize: 12 },
   pill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
   pillOn: { backgroundColor: '#D1FAE5' },
   pillOff: { backgroundColor: '#FEE2E2' },

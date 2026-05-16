@@ -25,6 +25,8 @@ export const fetchAiTutorHealth = () => api.get('/ai-tutor/admin/health');
 export const fetchScopeOptions  = (type, parentId) =>
   api.get('/ai-tutor/admin/scope-options', { params: { type, ...(parentId ? { parent_id: parentId } : {}) } });
 export const fetchPolicySummary = () => api.get('/ai-tutor/admin/policy-summary');
+export const deleteScopeConfig  = (scopeType, scopeId, target = 'both') =>
+  api.delete('/ai-tutor/admin/scope', { params: { scope_type: scopeType, scope_id: scopeId, target } });
 
 // ── Analytics ────────────────────────────────────────────────
 export const fetchUsageAnalytics = (days = 30) => api.get('/ai-tutor/analytics/usage', { params: { days } });

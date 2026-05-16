@@ -89,6 +89,30 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
     return json({ policies: data });
   }
 
+  // DELETE /ai-tutor/admin/scope?scope_type=&scope_id=&target=both|flag|policy
+  if (path === "/ai-tutor/admin/scope" && req.method === "DELETE") {
+    const url = new URL(req.url);
+    const scope_type = String(url.searchParams.get("scope_type") || "") as ScopeType;
+    const sidRaw = url.searchParams.get("scope_id");
+    const scope_id = sidRaw === null || sidRaw === "" || sidRaw === "null" ? null : Number(sidRaw);
+    const target = String(url.searchParams.get("target") || "both");
+    if (!ALLOWED_SCOPES.includes(scope_type)) return json({ message: "Invalid scope_type" }, 400);
+    if (!canManage(role, scope_type))         return json({ message: "Forbidden" }, 403);
+    if (scope_type === "global") return json({ message: "Global defaults cannot be deleted" }, 400);
+    if (!scope_id)               return json({ message: "scope_id required" }, 400);
+
+    const results: Record<string, unknown> = {};
+    if (target === "both" || target === "flag") {
+      const { error } = await db.from("ai_feature_flags").delete().eq("scope_type", scope_type).eq("scope_id", scope_id);
+      results.flag = error ? { ok: false, message: error.message } : { ok: true };
+    }
+    if (target === "both" || target === "policy") {
+      const { error } = await db.from("ai_quota_policies").delete().eq("scope_type", scope_type).eq("scope_id", scope_id);
+      results.policy = error ? { ok: false, message: error.message } : { ok: true };
+    }
+    return json({ deleted: true, ...results });
+  }
+
   // GET /ai-tutor/admin/health
   if (path === "/ai-tutor/admin/health" && req.method === "GET") {
     if (!["super_admin", "org_admin", "admin"].includes(role)) {
