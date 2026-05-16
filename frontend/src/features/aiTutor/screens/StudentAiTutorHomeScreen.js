@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, FlatList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import api from '../../../services/api';
 import useAiTutorConfig from '../hooks/useAiTutorConfig';
 import AiQuotaPill from '../components/AiQuotaPill';
@@ -10,9 +11,11 @@ import AiQuotaBanner from '../components/AiQuotaBanner';
 
 export default function StudentAiTutorHomeScreen({ navigation, route }) {
   const initialSubjects = route?.params?.subjects;
+  const childStudentId = route?.params?.child?.student_id ?? route?.params?.child?.id ?? null;
+  const child = route?.params?.child || null;
   const [subjects, setSubjects] = useState(Array.isArray(initialSubjects) ? initialSubjects : []);
   const [subjLoading, setSubjLoading] = useState(!Array.isArray(initialSubjects));
-  const { loading, enabled, blockedAt, quota } = useAiTutorConfig();
+  const { loading, enabled, blockedAt, quota, error, refresh } = useAiTutorConfig({ studentId: childStudentId });
 
   useEffect(() => {
     if (Array.isArray(initialSubjects)) return;
@@ -28,12 +31,19 @@ export default function StudentAiTutorHomeScreen({ navigation, route }) {
     return () => { mounted = false; };
   }, [initialSubjects]);
 
+  useFocusEffect(
+    React.useCallback(() => {
+      refresh();
+    }, [refresh])
+  );
+
   if (loading || subjLoading) return <SafeAreaView style={styles.center}><ActivityIndicator /></SafeAreaView>;
   if (!enabled) {
     return (
       <SafeAreaView style={styles.center}>
         <Text style={styles.title}>AI Tutor unavailable</Text>
         <Text style={styles.body}>Disabled{blockedAt ? ` at ${blockedAt} level` : ''}.</Text>
+        {!!error && <Text style={styles.errorText}>{error}</Text>}
       </SafeAreaView>
     );
   }
@@ -53,7 +63,11 @@ export default function StudentAiTutorHomeScreen({ navigation, route }) {
         renderItem={({ item }) => (
           <TouchableOpacity
             style={styles.card}
-            onPress={() => navigation.navigate('StudentAiChat', { subjectId: item.id, subjectName: item.name })}
+            onPress={() => navigation.navigate('StudentAiChat', {
+              subjectId: item.id,
+              subjectName: item.name,
+              ...(child ? { child } : {}),
+            })}
           >
             <Text style={styles.cardTitle}>{item.name}</Text>
             <Text style={styles.cardHint}>Ask grounded questions from your uploaded material</Text>
@@ -69,6 +83,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14 },
   title: { fontSize: 18, fontWeight: '700' },
   body: { color: '#6B7280', marginTop: 6 },
+  errorText: { color: '#B91C1C', marginTop: 8, textAlign: 'center' },
   empty: { color: '#6B7280', textAlign: 'center', marginTop: 30 },
   card: { padding: 14, backgroundColor: '#F3F4F6', borderRadius: 12, marginBottom: 10 },
   cardTitle: { fontWeight: '700', fontSize: 16, color: '#111827' },

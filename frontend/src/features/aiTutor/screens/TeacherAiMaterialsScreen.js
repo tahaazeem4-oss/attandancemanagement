@@ -61,7 +61,13 @@ export default function TeacherAiMaterialsScreen({ route }) {
     if (!title.trim()) { Alert.alert('Title required'); return; }
     if (!subjectId)   { Alert.alert('Please pick a subject'); return; }
     const res = await DocumentPicker.getDocumentAsync({
-      type: ['application/pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.openxmlformats-officedocument.presentationml.presentation','text/plain'],
+      type: [
+        'application/pdf',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.ms-powerpoint', // legacy PPT
+        'text/plain',
+      ],
       copyToCacheDirectory: true, multiple: false,
     });
     if (res.canceled || !res.assets?.length) return;
@@ -156,7 +162,7 @@ export default function TeacherAiMaterialsScreen({ route }) {
         <TouchableOpacity style={[styles.btn, uploading && styles.btnDisabled]} onPress={pickAndUpload} disabled={uploading}>
           <Text style={styles.btnText}>{uploading ? 'Uploading…' : 'Choose file & upload'}</Text>
         </TouchableOpacity>
-        <Text style={styles.hint}>PDF, DOCX, PPTX, TXT · up to 25 MB</Text>
+          <Text style={styles.hint}>PDF, DOCX, PPTX, PPT, TXT · up to 25 MB</Text>
         <TouchableOpacity style={[styles.btnSecondary, processing && styles.btnDisabled]} onPress={runIngestion} disabled={processing}>
           <Text style={styles.btnSecondaryText}>{processing ? 'Processing…' : 'Process pending uploads now'}</Text>
         </TouchableOpacity>

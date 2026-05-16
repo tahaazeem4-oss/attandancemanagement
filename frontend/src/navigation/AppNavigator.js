@@ -266,7 +266,13 @@ function ParentStudentPortalTabs({ route, navigation }) {
     },
     {
       name: 'HomeTab',
-      children: (props) => <ParentChildHomeStack {...props} child={currentChild} />,
+      children: (props) => (
+        <ParentChildHomeStack
+          key={currentChild?.student_id ? `child-home-${currentChild.student_id}` : 'child-home-none'}
+          {...props}
+          child={currentChild}
+        />
+      ),
       options: { title: 'Home', tabBarIcon: ({ focused }) => tabIcon(focused, 'home', 'home-outline', 26) },
     },
     {

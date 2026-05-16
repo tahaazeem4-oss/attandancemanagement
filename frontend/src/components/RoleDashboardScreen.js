@@ -36,8 +36,10 @@ export default function RoleDashboardScreen({
   const statusInset = StatusBar.currentHeight ?? 0;
   const headerTopPad = Math.max(insets.top, statusInset) + 18;
 
-  const fadeAnims = useRef(cards.map(() => new Animated.Value(0))).current;
-  const slideAnims = useRef(cards.map(() => new Animated.Value(20))).current;
+  // Pre-allocate 25 slots so adding cards (e.g. when AI flag turns on) never
+  // accesses an undefined Animated.Value.
+  const fadeAnims = useRef([...Array(25)].map(() => new Animated.Value(0))).current;
+  const slideAnims = useRef([...Array(25)].map(() => new Animated.Value(20))).current;
 
   useEffect(() => {
     Animated.stagger(

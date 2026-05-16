@@ -2,6 +2,7 @@
 // Endpoints for managing feature flags + quota policies at any scope.
 import { getDb, json, verifyToken } from "../_shared.ts";
 import { resolveParentPoolFor, DISTRIBUTABLE, NON_DISTRIBUTABLE, ALL_FIELDS, type PolicyField } from "../lib/aiPolicyResolver.ts";
+import { getEffectiveAiAccessForUser } from "../lib/aiScope.ts";
 
 const ALLOWED_SCOPES = ["global","organization","campus","class","section","student"] as const;
 type ScopeType = typeof ALLOWED_SCOPES[number];
@@ -19,6 +20,13 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
   const role = String(user.role || "");
   const userId = Number(user.id || 0);
   const db = getDb();
+
+  if (["org_admin", "admin", "teacher"].includes(role)) {
+    const access = await getEffectiveAiAccessForUser(user);
+    if (!access.enabled) {
+      return json({ message: "AI Tutor disabled", blocked_at: access.blocked_at }, 403);
+    }
+  }
 
   // POST /ai-tutor/admin/feature-flag
   if (path === "/ai-tutor/admin/feature-flag" && req.method === "POST") {

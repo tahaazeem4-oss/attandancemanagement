@@ -113,7 +113,74 @@ export async function handleAuth(
         return json({ token, role: "teacher", user, school, teacher: user });
       }
 
-      // 4. Org Admin
+      // 4. Student (student_accounts)
+      const { data: studentAccounts } = await db
+        .from("student_accounts")
+        .select(`
+          id, student_id, email, password, phone,
+          students:student_id(
+            id, first_name, last_name, class_id, section_id, roll_no, school_id,
+            classes:class_id(class_name),
+            sections:section_id(section_name)
+          )
+        `)
+        .eq("email", e);
+      if (studentAccounts?.length) {
+        const a = studentAccounts[0] as {
+          id: number;
+          student_id: number;
+          email: string;
+          password: string;
+          phone: string | null;
+          students?: {
+            id: number;
+            first_name: string;
+            last_name: string;
+            class_id: number;
+            section_id: number;
+            roll_no: string;
+            school_id: number;
+            classes?: { class_name?: string } | null;
+            sections?: { section_name?: string } | null;
+          } | null;
+        };
+        if (!(await comparePassword(password, a.password))) {
+          return json({ message: "Invalid credentials" }, 401);
+        }
+        const s = a.students;
+        if (!s) return json({ message: "Student not found" }, 404);
+
+        const school = await getSchool(db, s.school_id);
+        const user = {
+          id: a.id,
+          student_id: s.id,
+          first_name: s.first_name,
+          last_name: s.last_name,
+          email: a.email,
+          phone: a.phone,
+          role: "student",
+          school_id: s.school_id,
+          class_id: s.class_id,
+          section_id: s.section_id,
+          roll_no: s.roll_no,
+          class_name: s.classes?.class_name || null,
+          section_name: s.sections?.section_name || null,
+        };
+        const token = await signJwt({
+          id: a.id,
+          email: a.email,
+          role: "student",
+          first_name: s.first_name,
+          last_name: s.last_name,
+          student_id: s.id,
+          school_id: s.school_id,
+          class_id: s.class_id,
+          section_id: s.section_id,
+        });
+        return json({ token, role: "student", user, school });
+      }
+
+      // 5. Org Admin
       try {
         const { data: orgAdmins } = await db
           .from("org_admins")
@@ -138,7 +205,7 @@ export async function handleAuth(
         // org_admins table may not exist yet — skip silently
       }
 
-      // 5. Parent
+      // 6. Parent
       const { data: parents } = await db
         .from("parents")
         .select("*")

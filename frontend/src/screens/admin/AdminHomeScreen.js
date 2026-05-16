@@ -3,6 +3,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import RoleDashboardScreen from '../../components/RoleDashboardScreen';
+import useAiTutorConfig from '../../features/aiTutor/hooks/useAiTutorConfig';
 
 // Each card: Ionicons icon + subtle tinted icon box + label
 const CARDS = [
@@ -26,6 +27,11 @@ export default function AdminHomeScreen({ navigation }) {
   const [stats,   setStats]   = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const { enabled: aiEnabled } = useAiTutorConfig();
+
+  const cards = aiEnabled
+    ? CARDS
+    : CARDS.filter((c) => !['TeacherAiMaterials', 'AdminAiPolicy', 'AdminAiAnalytics'].includes(c.key));
 
   const fetchStats = useCallback(async () => {
     try {
@@ -64,7 +70,7 @@ export default function AdminHomeScreen({ navigation }) {
       school={school}
       logout={logout}
       loading={loading}
-      cards={CARDS}
+      cards={cards}
       stats={[
         { label: 'Teachers', value: stats?.teachers, color: '#93C5FD' },
         { label: 'Students', value: stats?.students, color: '#6EE7B7' },

@@ -2,7 +2,7 @@
 import { useCallback, useState } from 'react';
 import { askQuestion, createSession, fetchHistory } from '../api/aiTutorApi';
 
-export default function useAiTutorChat() {
+export default function useAiTutorChat({ studentId } = {}) {
   const [sessionId, setSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [sending, setSending] = useState(false);
@@ -10,25 +10,25 @@ export default function useAiTutorChat() {
 
   const startSession = useCallback(async ({ subjectId, title } = {}) => {
     setError(null);
-    const { data } = await createSession({ subject_id: subjectId, title });
+    const { data } = await createSession({ subject_id: subjectId, title }, studentId);
     setSessionId(data?.session?.id);
     setMessages([]);
     return data?.session;
-  }, []);
+  }, [studentId]);
 
   const loadSession = useCallback(async (id) => {
     setError(null);
     setSessionId(id);
-    const { data } = await fetchHistory(id);
+    const { data } = await fetchHistory(id, studentId);
     setMessages(data?.messages || []);
-  }, []);
+  }, [studentId]);
 
   const ask = useCallback(async ({ question, subjectId }) => {
     setError(null);
     setSending(true);
     setMessages((prev) => [...prev, { role: 'user', content: question, _local: true }]);
     try {
-      const { data } = await askQuestion({ question, subject_id: subjectId, session_id: sessionId });
+      const { data } = await askQuestion({ question, subject_id: subjectId, session_id: sessionId }, studentId);
       if (!sessionId && data?.session_id) setSessionId(data.session_id);
       setMessages((prev) => [
         ...prev,
@@ -43,7 +43,7 @@ export default function useAiTutorChat() {
     } finally {
       setSending(false);
     }
-  }, [sessionId]);
+  }, [sessionId, studentId]);
 
   return { sessionId, messages, sending, error, startSession, loadSession, ask, setMessages };
 }

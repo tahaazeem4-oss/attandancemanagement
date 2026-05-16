@@ -1,12 +1,14 @@
 // supabase/functions/server/handlers/aiTutorMaterials.ts
 // Upload AI study material → record document → enqueue ingestion.
 import { getDb, json, verifyToken } from "../_shared.ts";
+import { getEffectiveAiAccess, getEffectiveAiAccessForUser } from "../lib/aiScope.ts";
 
-const ALLOWED_EXT = new Set(["pdf","docx","pptx","txt"]);
+const ALLOWED_EXT = new Set(["pdf","docx","pptx","ppt","txt"]);
 const ALLOWED_MIME = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.ms-powerpoint", // legacy PPT
   "text/plain",
 ]);
 const MAX_SIZE_BYTES = 25 * 1024 * 1024;
@@ -63,6 +65,13 @@ export async function handleAiTutorMaterials(req: Request, path: string, _url: U
 
   const db = getDb();
 
+  if (["org_admin", "admin", "teacher"].includes(role)) {
+    const access = await getEffectiveAiAccessForUser(user);
+    if (!access.enabled) {
+      return json({ message: "AI Tutor disabled", blocked_at: access.blocked_at }, 403);
+    }
+  }
+
   // POST /ai-tutor/materials/upload   (multipart/form-data)
   if (path === "/ai-tutor/materials/upload" && req.method === "POST") {
     const form = await req.formData();
@@ -88,6 +97,18 @@ export async function handleAiTutorMaterials(req: Request, path: string, _url: U
       });
     } catch (e) {
       return json({ message: (e as Error).message }, 400);
+    }
+
+    const targetAccess = await getEffectiveAiAccess({
+      role,
+      user_id: userId,
+      organization_id: scope.organization_id,
+      campus_id: scope.campus_id,
+      class_id: scope.class_id ?? undefined,
+      section_id: scope.section_id ?? undefined,
+    });
+    if (!targetAccess.enabled) {
+      return json({ message: "AI Tutor disabled", blocked_at: targetAccess.blocked_at }, 403);
     }
 
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -161,7 +182,24 @@ export async function handleAiTutorMaterials(req: Request, path: string, _url: U
   const delMatch = path.match(/^\/ai-tutor\/materials\/([a-f0-9-]{36})$/);
   if (delMatch && req.method === "DELETE") {
     const id = delMatch[1];
-    const { data: doc } = await db.from("ai_documents").select("storage_path, storage_bucket").eq("id", id).maybeSingle();
+    const { data: doc } = await db
+      .from("ai_documents")
+      .select("storage_path, storage_bucket, organization_id, campus_id, class_id, section_id")
+      .eq("id", id)
+      .maybeSingle();
+    if (doc) {
+      const targetAccess = await getEffectiveAiAccess({
+        role,
+        user_id: userId,
+        organization_id: doc.organization_id,
+        campus_id: doc.campus_id,
+        class_id: doc.class_id ?? undefined,
+        section_id: doc.section_id ?? undefined,
+      });
+      if (!targetAccess.enabled) {
+        return json({ message: "AI Tutor disabled", blocked_at: targetAccess.blocked_at }, 403);
+      }
+    }
     if (doc?.storage_path) {
       await db.storage.from(doc.storage_bucket || "ai-materials").remove([doc.storage_path]);
     }

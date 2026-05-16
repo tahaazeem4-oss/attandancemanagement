@@ -6,6 +6,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import { C } from '../../config/theme';
@@ -27,11 +28,12 @@ export default function StudentHomeScreen({ navigation, route }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [resolvedCampus, setResolvedCampus] = useState(null);
-  const { enabled: aiEnabled } = useAiTutorConfig();
 
   // Support parent viewing child's portal
   const childData = route?.params?.child;
   const isParentViewing = !!childData;
+  const childStudentId = childData?.student_id ?? childData?.id ?? null;
+  const { enabled: aiEnabled, refresh: refreshAiConfig } = useAiTutorConfig({ studentId: childStudentId });
   const displayUser = childData || user;
 
   const fadeAnims  = useRef(ACTIONS.map(() => new Animated.Value(0))).current;
@@ -90,6 +92,12 @@ export default function StudentHomeScreen({ navigation, route }) {
 
     return () => { mounted = false; };
   }, [childData?.school_id, displayUser?.school_id, user?.school_id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshAiConfig();
+    }, [refreshAiConfig])
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

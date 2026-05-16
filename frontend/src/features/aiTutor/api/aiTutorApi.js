@@ -1,14 +1,28 @@
 // frontend/src/features/aiTutor/api/aiTutorApi.js
 import api from '../../../services/api';
 
+const withStudentParams = (studentId) => (
+  studentId != null ? { params: { student_id: studentId } } : undefined
+);
+
 // ── Config & quotas ───────────────────────────────────────────
-export const fetchEffectiveConfig = () => api.get('/ai-tutor/config/effective');
+export const fetchEffectiveConfig = (studentId) =>
+  api.get('/ai-tutor/config/effective', withStudentParams(studentId));
 
 // ── Sessions & chat ──────────────────────────────────────────
-export const createSession = (body) => api.post('/ai-tutor/chat/session', body);
-export const listSessions  = () => api.get('/ai-tutor/chat/sessions');
-export const fetchHistory  = (sessionId) => api.get('/ai-tutor/chat/history', { params: { session_id: sessionId } });
-export const askQuestion   = (body) => api.post('/ai-tutor/chat/query', body);
+export const createSession = (body, studentId) =>
+  api.post('/ai-tutor/chat/session', body, withStudentParams(studentId));
+export const listSessions  = (studentId) =>
+  api.get('/ai-tutor/chat/sessions', withStudentParams(studentId));
+export const fetchHistory  = (sessionId, studentId) =>
+  api.get('/ai-tutor/chat/history', {
+    params: {
+      session_id: sessionId,
+      ...(studentId != null ? { student_id: studentId } : {}),
+    },
+  });
+export const askQuestion   = (body, studentId) =>
+  api.post('/ai-tutor/chat/query', body, withStudentParams(studentId));
 
 // ── Materials (teacher/admin/orgadmin/superadmin) ────────────
 export const listMaterials = (params = {}) => api.get('/ai-tutor/materials', { params });

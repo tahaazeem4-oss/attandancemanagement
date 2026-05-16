@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import useAiTutorConfig from '../hooks/useAiTutorConfig';
 import useAiTutorChat from '../hooks/useAiTutorChat';
 import AiQuotaPill from '../components/AiQuotaPill';
@@ -11,14 +12,21 @@ import AiChatMessageList from '../components/AiChatMessageList';
 export default function StudentAiChatScreen({ route }) {
   const subjectId = route?.params?.subjectId;
   const subjectName = route?.params?.subjectName;
-  const { enabled, blockedAt, quota, loading, refresh } = useAiTutorConfig();
-  const { messages, sending, ask } = useAiTutorChat();
+  const childStudentId = route?.params?.child?.student_id ?? route?.params?.child?.id ?? null;
+  const { enabled, blockedAt, quota, loading, refresh, error: configError } = useAiTutorConfig({ studentId: childStudentId });
+  const { messages, sending, ask } = useAiTutorChat({ studentId: childStudentId });
   const [input, setInput] = useState('');
 
   useEffect(() => {
     const id = setInterval(refresh, 30000);
     return () => clearInterval(id);
   }, [refresh]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      refresh();
+    }, [refresh])
+  );
 
   if (loading) {
     return (
@@ -30,6 +38,7 @@ export default function StudentAiChatScreen({ route }) {
       <SafeAreaView style={styles.center}>
         <Text style={styles.disabledTitle}>AI Tutor is unavailable</Text>
         <Text style={styles.disabledBody}>This feature is currently disabled{blockedAt ? ` at the ${blockedAt} level` : ''}.</Text>
+        {!!configError && <Text style={styles.errorText}>{configError}</Text>}
       </SafeAreaView>
     );
   }
@@ -107,6 +116,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 16, fontWeight: '700' },
   disabledTitle: { fontSize: 18, fontWeight: '700', marginBottom: 6 },
   disabledBody: { color: '#6B7280', textAlign: 'center' },
+  errorText: { color: '#B91C1C', marginTop: 8, textAlign: 'center' },
   inputRow: { flexDirection: 'row', padding: 10, borderTopWidth: 1, borderColor: '#E5E7EB', alignItems: 'flex-end' },
   input: { flex: 1, minHeight: 40, maxHeight: 120, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#F9FAFB' },
   sendBtn: { marginLeft: 8, backgroundColor: '#2563EB', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10 },

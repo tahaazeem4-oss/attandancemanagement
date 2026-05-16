@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import { C } from '../config/theme';
+import useAiTutorConfig from '../features/aiTutor/hooks/useAiTutorConfig';
 
 const ROLE_CFG = {
   class_teacher:   { label: 'Class Teacher',   bg: '#EFF6FF', color: '#1D4ED8' },
@@ -33,6 +34,7 @@ export default function HomeScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [assignments,      setAssignments]      = useState(null);
   const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
+  const { enabled: aiEnabled } = useAiTutorConfig();
 
   const teacherRole = teacher?.teacher_role || (
     assignments === null
@@ -288,6 +290,7 @@ export default function HomeScreen({ navigation }) {
             locked: false, badge: 0, onPress: () => navigation.navigate('TeacherAiMaterials'),
           },
         ]
+          .filter(({ label }) => !(label === 'AI Materials' && !aiEnabled))
           .filter(({ locked }) => !locked)
           .map(({ i, icon, label, tint, bg, locked, badge, onPress }) => (
           <Animated.View key={i} style={[styles.cardWrap, { opacity: aO[i], transform: [{ translateY: aY[i] }, { scale: sc[i] }] }]}>

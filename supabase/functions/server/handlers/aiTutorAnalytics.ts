@@ -1,6 +1,7 @@
 // supabase/functions/server/handlers/aiTutorAnalytics.ts
 // Aggregate usage analytics scoped by role.
 import { getDb, json, verifyToken } from "../_shared.ts";
+import { getEffectiveAiAccessForUser } from "../lib/aiScope.ts";
 
 export async function handleAiTutorAnalytics(req: Request, path: string, _url: URL): Promise<Response> {
   const user = await verifyToken(req).catch(() => null);
@@ -8,6 +9,13 @@ export async function handleAiTutorAnalytics(req: Request, path: string, _url: U
   const role = String(user.role || "");
   const userId = Number(user.id || 0);
   if (!["super_admin","org_admin","admin","teacher"].includes(role)) return json({ message: "Forbidden" }, 403);
+
+  if (["org_admin", "admin", "teacher"].includes(role)) {
+    const access = await getEffectiveAiAccessForUser(user);
+    if (!access.enabled) {
+      return json({ message: "AI Tutor disabled", blocked_at: access.blocked_at }, 403);
+    }
+  }
 
   const db = getDb();
   const url = new URL(req.url);

@@ -1,7 +1,7 @@
 // supabase/functions/server/handlers/aiTutorChat.ts
 // Student-facing chat endpoints: config, sessions, query, history.
 import { getDb, json, verifyToken } from "../_shared.ts";
-import { resolveStudentScope, getEffectiveAiAccess } from "../lib/aiScope.ts";
+import { resolveStudentScope, getEffectiveAiAccess, getEffectiveAiAccessForUser } from "../lib/aiScope.ts";
 import { getEffectiveQuota, loadQuotaState, assertCanQuery, incrementUsage } from "../lib/aiQuota.ts";
 import { enforceRateLimit } from "../lib/aiRateLimit.ts";
 import { buildPrompt } from "../lib/aiPrompt.ts";
@@ -9,34 +9,84 @@ import { embedText, chatComplete } from "../lib/aiOpenAI.ts";
 
 const MAX_QUESTION_CHARS = 2000;
 
-async function resolveStudentFromUser(user: Record<string, unknown>): Promise<number | null> {
-  const role = String(user.role || "");
-  if (role === "student") return Number(user.id);
-  // Parent acting on behalf of student: expect student_id in token (existing parent flow).
-  if (role === "parent" && user.student_id) return Number(user.student_id);
-  return null;
+function toPositiveInt(value: unknown): number | null {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
 }
 
-export async function handleAiTutorChat(req: Request, path: string, _url: URL): Promise<Response> {
+async function resolveStudentFromUser(
+  db: ReturnType<typeof getDb>,
+  user: Record<string, unknown>,
+  url: URL,
+): Promise<{ studentId: number | null; unauthorizedParentAccess: boolean }> {
+  const role = String(user.role || "");
+  if (role === "student") {
+    const tokenStudentId = toPositiveInt(user.student_id);
+    if (tokenStudentId) return { studentId: tokenStudentId, unauthorizedParentAccess: false };
+    // Backward compatibility for old student tokens missing student_id.
+    return { studentId: toPositiveInt(user.id), unauthorizedParentAccess: false };
+  }
+
+  if (role === "parent") {
+    const parentId = toPositiveInt(user.id);
+    const requestedStudentId = toPositiveInt(url.searchParams.get("student_id"));
+    if (!parentId || !requestedStudentId) {
+      return { studentId: null, unauthorizedParentAccess: false };
+    }
+
+    const { data: link } = await db
+      .from("parent_student")
+      .select("id")
+      .eq("parent_id", parentId)
+      .eq("student_id", requestedStudentId)
+      .maybeSingle();
+
+    if (!link) return { studentId: null, unauthorizedParentAccess: true };
+    return { studentId: requestedStudentId, unauthorizedParentAccess: false };
+  }
+
+  return { studentId: null, unauthorizedParentAccess: false };
+}
+
+export async function handleAiTutorChat(req: Request, path: string, url: URL): Promise<Response> {
   const user = await verifyToken(req).catch(() => null);
   if (!user) return json({ message: "Unauthorized" }, 401);
-
-  const studentId = await resolveStudentFromUser(user);
-  if (!studentId) return json({ message: "Student context required" }, 403);
-
-  const scope = await resolveStudentScope(studentId);
-  if (!scope) return json({ message: "Student not found" }, 404);
 
   const db = getDb();
 
   // GET /ai-tutor/config/effective
+  // Students/parents receive quota payload; staff/admin roles receive effective enabled state.
   if (path === "/ai-tutor/config/effective" && req.method === "GET") {
-    const access = await getEffectiveAiAccess(scope);
-    if (!access.enabled) return json({ enabled: false, blocked_at: access.blocked_at });
-    const limits = await getEffectiveQuota(scope);
-    const state  = await loadQuotaState(scope, limits);
-    return json({ enabled: true, scope, quota: state });
+    const role = String(user.role || "");
+
+    if (["super_admin", "org_admin", "admin", "teacher"].includes(role)) {
+      const access = await getEffectiveAiAccessForUser(user);
+      return json({ enabled: access.enabled, blocked_at: access.blocked_at, scope: access.scope || null });
+    }
+
+    const resolvedForConfig = await resolveStudentFromUser(db, user, url);
+    if (resolvedForConfig.unauthorizedParentAccess) return json({ message: "Forbidden" }, 403);
+    const studentIdForConfig = resolvedForConfig.studentId;
+    if (!studentIdForConfig) return json({ message: "Student context required" }, 403);
+
+    const scopeForConfig = await resolveStudentScope(studentIdForConfig);
+    if (!scopeForConfig) return json({ message: "Student not found" }, 404);
+
+    const access = await getEffectiveAiAccess(scopeForConfig);
+    if (!access.enabled) return json({ enabled: false, blocked_at: access.blocked_at, scope: scopeForConfig });
+    const limits = await getEffectiveQuota(scopeForConfig);
+    const state  = await loadQuotaState(scopeForConfig, limits);
+    return json({ enabled: true, scope: scopeForConfig, quota: state });
   }
+
+  const resolved = await resolveStudentFromUser(db, user, url);
+  if (resolved.unauthorizedParentAccess) return json({ message: "Forbidden" }, 403);
+  const studentId = resolved.studentId;
+  if (!studentId) return json({ message: "Student context required" }, 403);
+
+  const scope = await resolveStudentScope(studentId);
+  if (!scope) return json({ message: "Student not found" }, 404);
 
   // POST /ai-tutor/chat/session
   if (path === "/ai-tutor/chat/session" && req.method === "POST") {

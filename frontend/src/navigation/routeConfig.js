@@ -167,6 +167,8 @@ export function buildParentChildScreens(activeChild) {
       component: StudentLecturesScreen,
       initialParams: { fixedType: 'homework', title: 'Homework', child: activeChild },
     },
+    { name: 'StudentAiTutorHome', component: StudentAiTutorHomeScreen, options: { title: 'AI Tutor' }, initialParams: { child: activeChild } },
+    { name: 'StudentAiChat', component: StudentAiChatScreen, options: { title: 'AI Tutor' }, initialParams: { child: activeChild } },
     { name: 'StudentLectureDetail', component: StudentLectureDetailScreen },
     { name: 'StudentNotifications', component: StudentNotificationsScreen, initialParams: { child: activeChild } },
   ];
