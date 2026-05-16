@@ -58,6 +58,7 @@ import {
   StudentAiChatScreen,
   TeacherAiMaterialsScreen,
   AdminAiPolicyScreen,
+  AdminAiPolicyAdvancedScreen,
   AdminAiAnalyticsScreen,
 } from '../features/aiTutor';
 
@@ -103,6 +104,7 @@ export const adminHomeScreens = [
   { name: 'StaffNewChat', component: StaffNewChatScreen, options: { headerShown: false } },
   { name: 'TeacherAiMaterials', component: TeacherAiMaterialsScreen, options: { title: 'AI Study Materials' } },
   { name: 'AdminAiPolicy', component: AdminAiPolicyScreen, options: { title: 'AI Tutor Policies' } },
+  { name: 'AdminAiPolicyAdvanced', component: AdminAiPolicyAdvancedScreen, options: { title: 'AI Tutor Policies (Advanced)' } },
   { name: 'AdminAiAnalytics', component: AdminAiAnalyticsScreen, options: { title: 'AI Tutor Analytics' } },
 ];
 
@@ -119,6 +121,7 @@ export const orgAdminHomeScreens = [
   { name: 'OrgAdminSubjects', component: OrgAdminSubjectsScreen },
   { name: 'StaffNotifications', component: StaffNotificationsScreen },
   { name: 'AdminAiPolicy', component: AdminAiPolicyScreen, options: { title: 'AI Tutor Policies' } },
+  { name: 'AdminAiPolicyAdvanced', component: AdminAiPolicyAdvancedScreen, options: { title: 'AI Tutor Policies (Advanced)' } },
   { name: 'AdminAiAnalytics', component: AdminAiAnalyticsScreen, options: { title: 'AI Tutor Analytics' } },
 ];
 
@@ -133,6 +136,7 @@ export const superAdminHomeScreens = [
   { name: 'SuperAdminParents', component: SuperAdminParentsScreen },
   { name: 'StaffNotifications', component: StaffNotificationsScreen },
   { name: 'AdminAiPolicy', component: AdminAiPolicyScreen, options: { title: 'AI Tutor Policies' } },
+  { name: 'AdminAiPolicyAdvanced', component: AdminAiPolicyAdvancedScreen, options: { title: 'AI Tutor Policies (Advanced)' } },
   { name: 'AdminAiAnalytics', component: AdminAiAnalyticsScreen, options: { title: 'AI Tutor Analytics' } },
 ];
 

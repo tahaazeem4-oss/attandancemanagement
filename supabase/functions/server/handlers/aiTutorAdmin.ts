@@ -353,5 +353,505 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
     }
   }
 
+  // GET /ai-tutor/admin/hierarchy?node_type=&node_id=
+  // Returns the inheritance chain for the current node plus its children with their own overrides.
+  // Walk: root -> organization -> campus -> class -> section -> student.
+  if (path === "/ai-tutor/admin/hierarchy" && req.method === "GET") {
+    if (!["super_admin", "org_admin", "admin"].includes(role)) {
+      return json({ message: "Forbidden" }, 403);
+    }
+    const url = new URL(req.url);
+    const nodeType = String(url.searchParams.get("node_type") || "root");
+    const nodeIdRaw = url.searchParams.get("node_id");
+    const nodeId = nodeIdRaw ? Number(nodeIdRaw) : null;
+    const orgIdFromToken = Number(user.org_id || 0);
+    const schoolIdFromToken = Number(user.school_id || 0);
+
+    try {
+      type Row = { id: number; [k: string]: unknown };
+      const [flagsRes, policiesRes, orgsRes, schoolsRes, classesRes, sectionsRes, studentsRes] = await Promise.all([
+        db.from("ai_feature_flags").select("*"),
+        db.from("ai_quota_policies").select("*"),
+        db.from("organizations").select("id, name"),
+        db.from("schools").select("id, name, org_id"),
+        db.from("classes").select("id, class_name, school_id"),
+        db.from("sections").select("id, section_name, class_id"),
+        db.from("students").select("id, first_name, last_name, roll_no, section_id, class_id, school_id"),
+      ]);
+
+      const orgs = new Map<number, { id: number; name: string }>(((orgsRes.data || []) as Row[]).map((r) => [Number(r.id), { id: Number(r.id), name: String(r.name) }]));
+      const schools = new Map<number, { id: number; name: string; org_id: number | null }>(((schoolsRes.data || []) as Row[]).map((r) => [Number(r.id), { id: Number(r.id), name: String(r.name), org_id: r.org_id as number | null }]));
+      const classes = new Map<number, { id: number; name: string; school_id: number }>(((classesRes.data || []) as Row[]).map((r) => [Number(r.id), { id: Number(r.id), name: String(r.class_name), school_id: Number(r.school_id) }]));
+      const sections = new Map<number, { id: number; name: string; class_id: number }>(((sectionsRes.data || []) as Row[]).map((r) => [Number(r.id), { id: Number(r.id), name: String(r.section_name), class_id: Number(r.class_id) }]));
+      const students = new Map<number, { id: number; name: string; section_id: number; class_id: number; school_id: number }>(((studentsRes.data || []) as Row[]).map((r) => [Number(r.id), {
+        id: Number(r.id),
+        name: `${r.first_name} ${r.last_name}${r.roll_no ? ` (#${r.roll_no})` : ""}`,
+        section_id: Number(r.section_id),
+        class_id: Number(r.class_id),
+        school_id: Number(r.school_id),
+      }]));
+
+      const flagKey = (t: string, sid: number | null) => `${t}#${sid ?? "null"}`;
+      const flagsBy = new Map<string, Row>();
+      for (const f of (flagsRes.data || []) as Row[]) flagsBy.set(flagKey(String(f.scope_type), (f.scope_id ?? null) as number | null), f);
+      const policiesBy = new Map<string, Row>();
+      for (const p of (policiesRes.data || []) as Row[]) policiesBy.set(flagKey(String(p.scope_type), (p.scope_id ?? null) as number | null), p);
+
+      const ownFlag = (t: string, sid: number | null) => {
+        const f = flagsBy.get(flagKey(t, sid));
+        return f ? { is_enabled: Boolean(f.is_enabled) } : null;
+      };
+      const ownPolicy = (t: string, sid: number | null) => {
+        const p = policiesBy.get(flagKey(t, sid));
+        if (!p) return null;
+        return {
+          daily_requests: p.daily_requests ?? null,
+          weekly_requests: p.weekly_requests ?? null,
+          monthly_requests: p.monthly_requests ?? null,
+          daily_tokens: p.daily_tokens ?? null,
+          weekly_tokens: p.weekly_tokens ?? null,
+          monthly_tokens: p.monthly_tokens ?? null,
+          max_input_tokens: p.max_input_tokens ?? null,
+          max_output_tokens: p.max_output_tokens ?? null,
+        };
+      };
+
+      // Build ancestor chain for a node, top-down (global first → current node last).
+      type ChainEntry = {
+        type: string; id: number | null; name: string;
+        own_flag: { is_enabled: boolean } | null;
+        own_policy: Record<string, number | null> | null;
+      };
+      const chain: ChainEntry[] = [{
+        type: "global", id: null, name: "Everyone (global default)",
+        own_flag: ownFlag("global", null), own_policy: ownPolicy("global", null),
+      }];
+
+      if (nodeType === "organization" && nodeId) {
+        const o = orgs.get(nodeId);
+        if (o) chain.push({ type: "organization", id: o.id, name: o.name, own_flag: ownFlag("organization", o.id), own_policy: ownPolicy("organization", o.id) });
+      } else if (nodeType === "campus" && nodeId) {
+        const s = schools.get(nodeId);
+        if (s) {
+          if (s.org_id) {
+            const o = orgs.get(s.org_id);
+            if (o) chain.push({ type: "organization", id: o.id, name: o.name, own_flag: ownFlag("organization", o.id), own_policy: ownPolicy("organization", o.id) });
+          }
+          chain.push({ type: "campus", id: s.id, name: s.name, own_flag: ownFlag("campus", s.id), own_policy: ownPolicy("campus", s.id) });
+        }
+      } else if (nodeType === "class" && nodeId) {
+        const c = classes.get(nodeId);
+        if (c) {
+          const s = schools.get(c.school_id);
+          if (s) {
+            if (s.org_id) {
+              const o = orgs.get(s.org_id);
+              if (o) chain.push({ type: "organization", id: o.id, name: o.name, own_flag: ownFlag("organization", o.id), own_policy: ownPolicy("organization", o.id) });
+            }
+            chain.push({ type: "campus", id: s.id, name: s.name, own_flag: ownFlag("campus", s.id), own_policy: ownPolicy("campus", s.id) });
+          }
+          chain.push({ type: "class", id: c.id, name: c.name, own_flag: ownFlag("class", c.id), own_policy: ownPolicy("class", c.id) });
+        }
+      } else if (nodeType === "section" && nodeId) {
+        const sec = sections.get(nodeId);
+        if (sec) {
+          const c = classes.get(sec.class_id);
+          if (c) {
+            const s = schools.get(c.school_id);
+            if (s) {
+              if (s.org_id) {
+                const o = orgs.get(s.org_id);
+                if (o) chain.push({ type: "organization", id: o.id, name: o.name, own_flag: ownFlag("organization", o.id), own_policy: ownPolicy("organization", o.id) });
+              }
+              chain.push({ type: "campus", id: s.id, name: s.name, own_flag: ownFlag("campus", s.id), own_policy: ownPolicy("campus", s.id) });
+            }
+            chain.push({ type: "class", id: c.id, name: c.name, own_flag: ownFlag("class", c.id), own_policy: ownPolicy("class", c.id) });
+          }
+          chain.push({ type: "section", id: sec.id, name: sec.name, own_flag: ownFlag("section", sec.id), own_policy: ownPolicy("section", sec.id) });
+        }
+      } else if (nodeType === "student" && nodeId) {
+        const st = students.get(nodeId);
+        if (st) {
+          const sec = sections.get(st.section_id);
+          const c = classes.get(st.class_id);
+          const s = schools.get(st.school_id);
+          if (s) {
+            if (s.org_id) {
+              const o = orgs.get(s.org_id);
+              if (o) chain.push({ type: "organization", id: o.id, name: o.name, own_flag: ownFlag("organization", o.id), own_policy: ownPolicy("organization", o.id) });
+            }
+            chain.push({ type: "campus", id: s.id, name: s.name, own_flag: ownFlag("campus", s.id), own_policy: ownPolicy("campus", s.id) });
+          }
+          if (c) chain.push({ type: "class", id: c.id, name: c.name, own_flag: ownFlag("class", c.id), own_policy: ownPolicy("class", c.id) });
+          if (sec) chain.push({ type: "section", id: sec.id, name: sec.name, own_flag: ownFlag("section", sec.id), own_policy: ownPolicy("section", sec.id) });
+          chain.push({ type: "student", id: st.id, name: st.name, own_flag: ownFlag("student", st.id), own_policy: ownPolicy("student", st.id) });
+        }
+      }
+
+      // Determine the children of the current node, scoped to the caller's role.
+      type Child = {
+        type: string; id: number; name: string;
+        own_flag: { is_enabled: boolean } | null;
+        own_policy: Record<string, number | null> | null;
+        has_children: boolean;
+      };
+      const buildChildren = (): Child[] => {
+        if (nodeType === "root") {
+          if (role === "super_admin") {
+            return Array.from(orgs.values()).map((o) => ({
+              type: "organization", id: o.id, name: o.name,
+              own_flag: ownFlag("organization", o.id), own_policy: ownPolicy("organization", o.id), has_children: true,
+            })).sort((a, b) => a.name.localeCompare(b.name));
+          }
+          if (role === "org_admin") {
+            const o = orgs.get(orgIdFromToken);
+            if (!o) return [];
+            return [{ type: "organization", id: o.id, name: o.name, own_flag: ownFlag("organization", o.id), own_policy: ownPolicy("organization", o.id), has_children: true }];
+          }
+          if (role === "admin") {
+            const s = schools.get(schoolIdFromToken);
+            if (!s) return [];
+            return [{ type: "campus", id: s.id, name: s.name, own_flag: ownFlag("campus", s.id), own_policy: ownPolicy("campus", s.id), has_children: true }];
+          }
+          return [];
+        }
+        if (nodeType === "organization" && nodeId) {
+          return Array.from(schools.values())
+            .filter((s) => s.org_id === nodeId)
+            .map((s) => ({
+              type: "campus", id: s.id, name: s.name,
+              own_flag: ownFlag("campus", s.id), own_policy: ownPolicy("campus", s.id), has_children: true,
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+        }
+        if (nodeType === "campus" && nodeId) {
+          return Array.from(classes.values())
+            .filter((c) => c.school_id === nodeId)
+            .map((c) => ({
+              type: "class", id: c.id, name: c.name,
+              own_flag: ownFlag("class", c.id), own_policy: ownPolicy("class", c.id), has_children: true,
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+        }
+        if (nodeType === "class" && nodeId) {
+          return Array.from(sections.values())
+            .filter((s) => s.class_id === nodeId)
+            .map((s) => ({
+              type: "section", id: s.id, name: s.name,
+              own_flag: ownFlag("section", s.id), own_policy: ownPolicy("section", s.id), has_children: true,
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+        }
+        if (nodeType === "section" && nodeId) {
+          return Array.from(students.values())
+            .filter((st) => st.section_id === nodeId)
+            .map((st) => ({
+              type: "student", id: st.id, name: st.name,
+              own_flag: ownFlag("student", st.id), own_policy: ownPolicy("student", st.id), has_children: false,
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+        }
+        return [];
+      };
+
+      // Authorization checks for accessing a specific node.
+      let authorized = true;
+      if (nodeType === "organization" && nodeId) {
+        if (role === "org_admin" && nodeId !== orgIdFromToken) authorized = false;
+        if (role === "admin") authorized = false;
+      } else if (nodeType === "campus" && nodeId) {
+        const s = schools.get(nodeId);
+        if (role === "org_admin" && (!s || s.org_id !== orgIdFromToken)) authorized = false;
+        if (role === "admin" && nodeId !== schoolIdFromToken) authorized = false;
+      } else if ((nodeType === "class" || nodeType === "section" || nodeType === "student") && nodeId) {
+        let campusId: number | null = null;
+        if (nodeType === "class") campusId = classes.get(nodeId)?.school_id ?? null;
+        if (nodeType === "section") {
+          const sec = sections.get(nodeId);
+          if (sec) campusId = classes.get(sec.class_id)?.school_id ?? null;
+        }
+        if (nodeType === "student") campusId = students.get(nodeId)?.school_id ?? null;
+        if (campusId === null) authorized = false;
+        else if (role === "admin" && campusId !== schoolIdFromToken) authorized = false;
+        else if (role === "org_admin") {
+          const s = campusId ? schools.get(campusId) : null;
+          if (!s || s.org_id !== orgIdFromToken) authorized = false;
+        }
+      }
+      if (!authorized) return json({ message: "Forbidden" }, 403);
+
+      // ── Pool-distribution model ────────────────────────────────────
+      // Distributable fields (token / request pools) are split between
+      // children pro-rata by student_count, after subtracting children's
+      // manually-allocated shares. Non-distributable fields (per-request
+      // caps) cascade as the strictest value down the chain.
+      const DISTRIBUTABLE = ["daily_requests","weekly_requests","monthly_requests","daily_tokens","weekly_tokens","monthly_tokens"];
+      const NON_DISTRIBUTABLE = ["max_input_tokens","max_output_tokens"];
+      const ALL_FIELDS = [...DISTRIBUTABLE, ...NON_DISTRIBUTABLE];
+
+      // Student-count for any entity in the tree.
+      const studentCountFor = (type: string, id: number | null): number => {
+        if (type === "student") return 1;
+        if (type === "section" && id !== null) {
+          let n = 0;
+          for (const st of students.values()) if (st.section_id === id) n++;
+          return n;
+        }
+        if (type === "class" && id !== null) {
+          let n = 0;
+          for (const st of students.values()) if (st.class_id === id) n++;
+          return n;
+        }
+        if (type === "campus" && id !== null) {
+          let n = 0;
+          for (const st of students.values()) if (st.school_id === id) n++;
+          return n;
+        }
+        if (type === "organization" && id !== null) {
+          const orgSchoolIds = new Set<number>();
+          for (const s of schools.values()) if (s.org_id === id) orgSchoolIds.add(s.id);
+          let n = 0;
+          for (const st of students.values()) if (orgSchoolIds.has(st.school_id)) n++;
+          return n;
+        }
+        // global / root → all students
+        return students.size;
+      };
+
+      // Siblings (full child set) of a given entity under its parent in the chain.
+      type SibEntity = { type: string; id: number };
+      const siblingsOfChainNode = (parentType: string, parentId: number | null): SibEntity[] => {
+        if (parentType === "global") {
+          // Children of global = all organizations.
+          return Array.from(orgs.values()).map((o) => ({ type: "organization", id: o.id }));
+        }
+        if (parentType === "organization" && parentId !== null) {
+          return Array.from(schools.values()).filter((s) => s.org_id === parentId).map((s) => ({ type: "campus", id: s.id }));
+        }
+        if (parentType === "campus" && parentId !== null) {
+          return Array.from(classes.values()).filter((c) => c.school_id === parentId).map((c) => ({ type: "class", id: c.id }));
+        }
+        if (parentType === "class" && parentId !== null) {
+          return Array.from(sections.values()).filter((s) => s.class_id === parentId).map((s) => ({ type: "section", id: s.id }));
+        }
+        if (parentType === "section" && parentId !== null) {
+          return Array.from(students.values()).filter((st) => st.section_id === parentId).map((st) => ({ type: "student", id: st.id }));
+        }
+        return [];
+      };
+
+      // Effective policy: per-field { value, source: 'manual'|'auto'|'inherited'|'none',
+      //                             from_type, from_name,
+      //                             share_basis?: { my_students, non_manual_students, parent_pool, manual_sum, parent_pool_source } }
+      type FieldEff = {
+        value: number | null;
+        source: "manual" | "auto" | "inherited" | "none";
+        from_type: string;
+        from_name: string;
+        share_basis?: {
+          my_students: number;
+          non_manual_students: number;
+          parent_pool: number | null;
+          manual_sum: number;
+          remaining: number | null;
+        };
+      };
+      type FieldMap = Record<string, FieldEff>;
+
+      // Walk top-down through chain to derive each node's effective pool.
+      const computeEffectiveForChain = (chainEntries: ChainEntry[]): FieldMap => {
+        // Initialize with global node's policy.
+        let current: FieldMap = {};
+        const root = chainEntries[0];
+        for (const F of ALL_FIELDS) {
+          const ownVal = root.own_policy?.[F];
+          if (ownVal !== null && ownVal !== undefined) {
+            current[F] = { value: Number(ownVal), source: "manual", from_type: "global", from_name: root.name };
+          } else {
+            current[F] = { value: null, source: "none", from_type: "none", from_name: "no limit" };
+          }
+        }
+
+        for (let i = 1; i < chainEntries.length; i++) {
+          const node = chainEntries[i];
+          const parent = chainEntries[i - 1];
+          const next: FieldMap = {};
+
+          for (const F of ALL_FIELDS) {
+            const ownVal = node.own_policy?.[F];
+            if (ownVal !== null && ownVal !== undefined) {
+              next[F] = { value: Number(ownVal), source: "manual", from_type: node.type, from_name: node.name };
+              continue;
+            }
+            // No own value: cascade or auto-distribute.
+            if (NON_DISTRIBUTABLE.includes(F)) {
+              // Per-request caps cascade as-is.
+              next[F] = { ...current[F] };
+              if (next[F].source === "manual") next[F].source = "inherited";
+              continue;
+            }
+            // Distributable: divide parent pool by sibling student-counts.
+            const parentPool = current[F].value;
+            if (parentPool === null) {
+              next[F] = { value: null, source: "none", from_type: "none", from_name: "no limit" };
+              continue;
+            }
+            const sibs = siblingsOfChainNode(parent.type, parent.id);
+            let manualSum = 0;
+            let nonManualStudents = 0;
+            const myStudents = studentCountFor(node.type, node.id);
+            let nodeIsManual = false; // already handled above; here it's auto
+            for (const sib of sibs) {
+              const sibPolicy = policiesBy.get(flagKey(sib.type, sib.id));
+              const sibManual = sibPolicy ? (sibPolicy[F] as number | null | undefined) : null;
+              if (sibManual !== null && sibManual !== undefined) {
+                manualSum += Number(sibManual);
+              } else {
+                nonManualStudents += studentCountFor(sib.type, sib.id);
+              }
+            }
+            const remaining = Math.max(0, parentPool - manualSum);
+            const share = nonManualStudents > 0
+              ? Math.floor(remaining * myStudents / nonManualStudents)
+              : 0;
+            next[F] = {
+              value: share,
+              source: "auto",
+              from_type: parent.type,
+              from_name: parent.name,
+              share_basis: {
+                my_students: myStudents,
+                non_manual_students: nonManualStudents,
+                parent_pool: parentPool,
+                manual_sum: manualSum,
+                remaining,
+              },
+            };
+          }
+          current = next;
+        }
+        return current;
+      };
+
+      const effPolicy: FieldMap = computeEffectiveForChain(chain);
+
+      // Effective flag: walk chain, first non-null wins downward.
+      let effFlag: { is_enabled: boolean } | null = null;
+      let effFlagFrom = { type: "global", name: "Everyone (global default)" };
+      for (const entry of chain) {
+        if (entry.own_flag) {
+          effFlag = entry.own_flag;
+          effFlagFrom = { type: entry.type, name: entry.name };
+        }
+      }
+
+      const currentNode = chain[chain.length - 1];
+      const isRoot = nodeType === "root";
+
+      // For each child, compute its effective pool too (one more level down).
+      // Pre-compute sums over the current node's children for distributable fields.
+      const rawChildren = buildChildren();
+      const childStudentCounts: Record<string, number> = {};
+      for (const c of rawChildren) {
+        childStudentCounts[`${c.type}#${c.id}`] = studentCountFor(c.type, c.id);
+      }
+      // Manual sum and non-manual student total at the current-node level.
+      const manualByField: Record<string, number> = {};
+      const nonManualStudentsByField: Record<string, number> = {};
+      for (const F of DISTRIBUTABLE) {
+        manualByField[F] = 0;
+        nonManualStudentsByField[F] = 0;
+        for (const c of rawChildren) {
+          const ownVal = c.own_policy?.[F];
+          if (ownVal !== null && ownVal !== undefined) manualByField[F] += Number(ownVal);
+          else nonManualStudentsByField[F] += childStudentCounts[`${c.type}#${c.id}`];
+        }
+      }
+
+      const enrichedChildren = rawChildren.map((c) => {
+        const my = childStudentCounts[`${c.type}#${c.id}`];
+        const allocation: FieldMap = {};
+        for (const F of ALL_FIELDS) {
+          const ownVal = c.own_policy?.[F];
+          if (ownVal !== null && ownVal !== undefined) {
+            allocation[F] = { value: Number(ownVal), source: "manual", from_type: c.type, from_name: c.name };
+            continue;
+          }
+          if (NON_DISTRIBUTABLE.includes(F)) {
+            allocation[F] = { ...effPolicy[F] };
+            if (allocation[F].source === "manual") allocation[F].source = "inherited";
+            continue;
+          }
+          const parentPool = effPolicy[F].value;
+          if (parentPool === null) {
+            allocation[F] = { value: null, source: "none", from_type: "none", from_name: "no limit" };
+            continue;
+          }
+          const remaining = Math.max(0, parentPool - manualByField[F]);
+          const nonMan = nonManualStudentsByField[F];
+          const share = nonMan > 0 ? Math.floor(remaining * my / nonMan) : 0;
+          allocation[F] = {
+            value: share,
+            source: "auto",
+            from_type: currentNode.type,
+            from_name: currentNode.name,
+            share_basis: {
+              my_students: my,
+              non_manual_students: nonMan,
+              parent_pool: parentPool,
+              manual_sum: manualByField[F],
+              remaining,
+            },
+          };
+        }
+        return { ...c, student_count: my, allocation };
+      });
+
+      // Distribution summary at current node (per distributable field).
+      const distribution: Record<string, {
+        parent_pool: number | null;
+        manual_sum: number;
+        remaining: number | null;
+        non_manual_students: number;
+        per_student: number | null;
+      }> = {};
+      for (const F of DISTRIBUTABLE) {
+        const pp = effPolicy[F].value;
+        const remaining = pp === null ? null : Math.max(0, pp - manualByField[F]);
+        const perStudent = (remaining !== null && nonManualStudentsByField[F] > 0)
+          ? Math.floor(remaining / nonManualStudentsByField[F])
+          : null;
+        distribution[F] = {
+          parent_pool: pp,
+          manual_sum: manualByField[F],
+          remaining,
+          non_manual_students: nonManualStudentsByField[F],
+          per_student: perStudent,
+        };
+      }
+
+      return json({
+        is_root: isRoot,
+        node: isRoot ? null : {
+          type: currentNode.type,
+          id: currentNode.id,
+          name: currentNode.name,
+          student_count: studentCountFor(currentNode.type, currentNode.id),
+          own_flag: currentNode.own_flag,
+          own_policy: currentNode.own_policy,
+          effective_flag: effFlag ? { ...effFlag, from_type: effFlagFrom.type, from_name: effFlagFrom.name } : null,
+          effective_policy: effPolicy,
+        },
+        breadcrumbs: chain.map((c) => ({ type: c.type, id: c.id, name: c.name })),
+        children: enrichedChildren,
+        distribution,
+        meta: { distributable_fields: DISTRIBUTABLE, non_distributable_fields: NON_DISTRIBUTABLE },
+      });
+    } catch (err) {
+      console.error("[ai-tutor hierarchy]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
   return json({ message: "Not found" }, 404);
 }

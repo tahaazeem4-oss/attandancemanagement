@@ -28,6 +28,8 @@ export const fetchScopeOptions  = (type, parentId) =>
 export const fetchPolicySummary = () => api.get('/ai-tutor/admin/policy-summary');
 export const deleteScopeConfig  = (scopeType, scopeId, target = 'both') =>
   api.delete('/ai-tutor/admin/scope', { params: { scope_type: scopeType, scope_id: scopeId, target } });
+export const fetchHierarchy     = (nodeType = 'root', nodeId) =>
+  api.get('/ai-tutor/admin/hierarchy', { params: { node_type: nodeType, ...(nodeId ? { node_id: nodeId } : {}) } });
 
 // ── Analytics ────────────────────────────────────────────────
 export const fetchUsageAnalytics = (days = 30) => api.get('/ai-tutor/analytics/usage', { params: { days } });
