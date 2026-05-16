@@ -475,13 +475,15 @@ export default function AdminAiHierarchyScreen() {
           ))}
         </View>
 
-        {/* Footer link to advanced flat editor */}
-        <TouchableOpacity
-          style={styles.advancedLink}
-          onPress={() => navigation.navigate('AdminAiPolicyAdvanced')}
-        >
-          <Text style={styles.advancedLinkText}>Open advanced flat editor →</Text>
-        </TouchableOpacity>
+        {/* Footer link to system-defaults editor — super_admin only */}
+        {user?.role === 'super_admin' && (
+          <TouchableOpacity
+            style={styles.advancedLink}
+            onPress={() => navigation.navigate('AdminAiPolicyAdvanced')}
+          >
+            <Text style={styles.advancedLinkText}>Edit system-wide defaults →</Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
 
       {/* Quota editor modal-ish overlay */}

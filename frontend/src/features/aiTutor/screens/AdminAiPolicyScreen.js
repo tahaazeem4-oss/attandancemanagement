@@ -1,822 +1,267 @@
 // frontend/src/features/aiTutor/screens/AdminAiPolicyScreen.js
-// Manage AI Tutor feature flag + quota policy at any scope using human-readable pickers.
-import React, { useEffect, useMemo, useState } from 'react';
+// System-wide defaults editor. This is the ONLY thing the legacy "advanced"
+// route does now: set the global feature flag + global quota policy that
+// every other scope inherits from. Per-org / per-campus / per-class /
+// per-section / per-student work happens on AdminAiPolicy (hierarchy nav).
+import React, { useEffect, useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, Switch, ScrollView, StyleSheet, Alert,
-  Modal, FlatList, ActivityIndicator,
+  View, Text, TextInput, TouchableOpacity, Switch, ScrollView, StyleSheet,
+  Alert, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-  setFeatureFlag, setQuotaPolicy,
-  fetchAiTutorHealth, fetchScopeOptions, fetchPolicySummary,
-  deleteScopeConfig, setFeatureFlagsBulk,
+  setFeatureFlag, setQuotaPolicy, deleteScopeConfig,
+  fetchAiTutorHealth, fetchPolicySummary,
 } from '../api/aiTutorApi';
-import api from '../../../services/api';
 import { useAuth } from '../../../context/AuthContext';
 
-const SCOPE_META = {
-  global:       { label: 'Everyone (global default)', help: 'Applies to every user in the system unless a narrower rule overrides it.' },
-  organization: { label: 'Whole organization',         help: 'Pick the organization. Applies to all its campuses, classes and students.' },
-  campus:       { label: 'One campus (school)',        help: 'Pick a campus. Applies to everyone in that campus.' },
-  class:        { label: 'One class',                  help: 'Pick the campus, then the class. Applies to all sections/students in it.' },
-  section:      { label: 'One section',                help: 'Pick the campus, class, then section.' },
-  student:      { label: 'A single student',           help: 'Pick campus → class → section → student.' },
-};
+const FIELDS = [
+  { key: 'daily_requests',    label: 'Requests / day' },
+  { key: 'weekly_requests',   label: 'Requests / week' },
+  { key: 'monthly_requests',  label: 'Requests / month' },
+  { key: 'daily_tokens',      label: 'Tokens / day' },
+  { key: 'weekly_tokens',     label: 'Tokens / week' },
+  { key: 'monthly_tokens',    label: 'Tokens / month' },
+  { key: 'max_input_tokens',  label: 'Max input tokens / request' },
+  { key: 'max_output_tokens', label: 'Max output tokens / request' },
+];
 
-const SCOPE_ORDER = ['global', 'organization', 'campus', 'class', 'section', 'student'];
-
-export default function AdminAiPolicyScreen() {
+export default function AdminAiPolicyScreen({ navigation }) {
   const { user } = useAuth();
-  const role = user?.role;
-  const canBulk = role === 'super_admin' || role === 'org_admin';
+  const isSuper = user?.role === 'super_admin';
 
-  // Scope state ──────────────────────────────────────────────
-  const [scopeType, setScopeType] = useState('campus');
-  const [picked, setPicked] = useState({
-    organization: null,  // { id, name }
-    campus: null,
-    class: null,
-    section: null,
-    student: null,
-  });
-
-  // Flag / quota inputs ──────────────────────────────────────
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [enabled, setEnabled] = useState(true);
-  const [dailyRequests, setDailyRequests] = useState('');
-  const [weeklyRequests, setWeeklyRequests] = useState('');
-  const [monthlyRequests, setMonthlyRequests] = useState('');
-  const [dailyTokens, setDailyTokens] = useState('');
-  const [weeklyTokens, setWeeklyTokens] = useState('');
-  const [monthlyTokens, setMonthlyTokens] = useState('');
-  const [maxInput, setMaxInput] = useState('');
-  const [maxOutput, setMaxOutput] = useState('');
-
-  // Lists ────────────────────────────────────────────────────
-  const [summary, setSummary] = useState([]);
-  const [summaryFilter, setSummaryFilter] = useState('');
+  const [values, setValues] = useState({});
   const [health, setHealth] = useState(null);
-  const [bulkRunning, setBulkRunning] = useState(false);
 
-  const refresh = async () => {
+  const load = async () => {
+    setLoading(true);
     try {
-      const s = await fetchPolicySummary();
-      setSummary(s.data?.rows || []);
-    } catch (_) { /* ignore */ }
-    try {
-      const h = await fetchAiTutorHealth();
+      const [s, h] = await Promise.all([
+        fetchPolicySummary(),
+        fetchAiTutorHealth().catch(() => ({ data: null })),
+      ]);
+      const rows = s.data?.rows || [];
+      const globalRow = rows.find((r) => r.scope_type === 'global');
+      if (globalRow) {
+        setEnabled(globalRow.is_enabled !== false);
+        const next = {};
+        FIELDS.forEach((f) => {
+          const v = globalRow[f.key];
+          next[f.key] = v === null || v === undefined ? '' : String(v);
+        });
+        setValues(next);
+      }
       setHealth(h.data || null);
-    } catch (_) { setHealth(null); }
+    } catch (e) {
+      // ignore — leave defaults
+    } finally {
+      setLoading(false);
+    }
   };
-  useEffect(() => { refresh(); }, []);
 
-  const numOrNull = (s) => s === '' ? null : Number(s);
+  useEffect(() => { load(); }, []);
 
-  // Resolve the chosen scope_id from the cascading picks ─────
-  const currentScopeId = useMemo(() => {
-    if (scopeType === 'global')       return null;
-    if (scopeType === 'organization') return picked.organization?.id || null;
-    if (scopeType === 'campus')       return picked.campus?.id || null;
-    if (scopeType === 'class')        return picked.class?.id || null;
-    if (scopeType === 'section')      return picked.section?.id || null;
-    if (scopeType === 'student')      return picked.student?.id || null;
-    return null;
-  }, [scopeType, picked]);
+  const onChange = (k, v) => setValues((p) => ({ ...p, [k]: v.replace(/[^0-9]/g, '') }));
 
-  const currentScopeLabel = useMemo(() => {
-    if (scopeType === 'global') return 'Everyone (global default)';
-    const order = ['organization', 'campus', 'class', 'section', 'student'];
-    const idx = order.indexOf(scopeType);
-    if (idx < 0) return '';
-    const parts = order.slice(0, idx + 1).map((k) => picked[k]?.name).filter(Boolean);
-    return parts.length ? parts.join(' › ') : '';
-  }, [scopeType, picked]);
-
-  const scopeReady = scopeType === 'global' || !!currentScopeId;
-
-  const saveFlag = async () => {
-    if (!scopeReady) { Alert.alert('Pick a scope', 'Please select the target first.'); return; }
+  const save = async () => {
+    if (!isSuper) return;
+    setSaving(true);
     try {
-      await setFeatureFlag({
-        scope_type: scopeType,
-        scope_id: scopeType === 'global' ? null : currentScopeId,
-        is_enabled: enabled,
+      // 1. Feature flag (global is always set — never inherits).
+      await setFeatureFlag({ scope_type: 'global', scope_id: null, is_enabled: enabled });
+
+      // 2. Quota: if any field has a value, upsert; otherwise clear policy entirely.
+      const body = { scope_type: 'global', scope_id: null };
+      let any = false;
+      FIELDS.forEach((f) => {
+        const raw = values[f.key];
+        if (raw && raw.trim() !== '') {
+          const n = Number(raw);
+          if (!Number.isNaN(n)) { body[f.key] = n; any = true; }
+        }
       });
-      Alert.alert('Saved', `AI Tutor turned ${enabled ? 'ON' : 'OFF'} for ${currentScopeLabel}.`);
-      refresh();
-    } catch (e) { Alert.alert('Error', e?.response?.data?.message || 'Save failed'); }
-  };
+      if (any) {
+        await setQuotaPolicy(body);
+      } else {
+        await deleteScopeConfig('global', null, 'policy');
+      }
 
-  const savePolicy = async () => {
-    if (!scopeReady) { Alert.alert('Pick a scope', 'Please select the target first.'); return; }
-    try {
-      await setQuotaPolicy({
-        scope_type: scopeType,
-        scope_id: scopeType === 'global' ? null : currentScopeId,
-        daily_requests: numOrNull(dailyRequests),
-        weekly_requests: numOrNull(weeklyRequests),
-        monthly_requests: numOrNull(monthlyRequests),
-        daily_tokens: numOrNull(dailyTokens),
-        weekly_tokens: numOrNull(weeklyTokens),
-        monthly_tokens: numOrNull(monthlyTokens),
-        max_input_tokens: numOrNull(maxInput),
-        max_output_tokens: numOrNull(maxOutput),
-      });
-      Alert.alert('Saved', `Token & request limits updated for ${currentScopeLabel}.`);
-      refresh();
-    } catch (e) { Alert.alert('Error', e?.response?.data?.message || 'Save failed'); }
-  };
-
-  const fetchCampusIds = async () => {
-    if (role === 'super_admin') {
-      const { data } = await api.get('/schools');
-      return (Array.isArray(data) ? data : []).map((s) => Number(s.id)).filter(Boolean);
+      Alert.alert('Saved', 'System-wide AI Tutor defaults updated.');
+      await load();
+    } catch (e) {
+      Alert.alert("Couldn't save", e?.response?.data?.message || e?.message || 'Please try again.');
+    } finally {
+      setSaving(false);
     }
-    if (role === 'org_admin') {
-      const { data } = await api.get('/org-admin/campuses');
-      const list = Array.isArray(data) ? data : (data?.campuses || []);
-      return list.map((s) => Number(s.id)).filter(Boolean);
-    }
-    return [];
   };
 
-  const applyPolicyToAllCampuses = async () => {
-    if (!canBulk) return;
-    Alert.alert('Apply to all campuses?', 'This will overwrite the current quota policy on every campus you manage.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Apply', style: 'destructive', onPress: async () => {
-        setBulkRunning(true);
-        try {
-          const ids = await fetchCampusIds();
-          if (!ids.length) { Alert.alert('Nothing to do', 'No campuses found.'); return; }
-          let ok = 0, fail = 0;
-          const body = {
-            daily_requests: numOrNull(dailyRequests),
-            weekly_requests: numOrNull(weeklyRequests),
-            monthly_requests: numOrNull(monthlyRequests),
-            daily_tokens: numOrNull(dailyTokens),
-            weekly_tokens: numOrNull(weeklyTokens),
-            monthly_tokens: numOrNull(monthlyTokens),
-            max_input_tokens: numOrNull(maxInput),
-            max_output_tokens: numOrNull(maxOutput),
-          };
-          for (const id of ids) {
-            try { await setQuotaPolicy({ scope_type: 'campus', scope_id: id, ...body }); ok += 1; }
-            catch (_) { fail += 1; }
-          }
-          Alert.alert('Done', `Applied to ${ok} of ${ids.length} campus(es)${fail ? ` · ${fail} failed` : ''}.`);
-          refresh();
-        } finally { setBulkRunning(false); }
-      } },
-    ]);
-  };
-
-  const applyFlagToAllCampuses = async () => {
-    if (!canBulk) return;
-    Alert.alert(`Turn AI Tutor ${enabled ? 'ON' : 'OFF'} for all campuses?`, 'This overwrites the current feature flag for every campus you manage.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: enabled ? 'Enable all' : 'Disable all', style: 'destructive', onPress: async () => {
-        setBulkRunning(true);
-        try {
-          const ids = await fetchCampusIds();
-          if (!ids.length) { Alert.alert('Nothing to do', 'No campuses found.'); return; }
-          let ok = 0, fail = 0;
-          for (const id of ids) {
-            try { await setFeatureFlag({ scope_type: 'campus', scope_id: id, is_enabled: enabled }); ok += 1; }
-            catch (_) { fail += 1; }
-          }
-          Alert.alert('Done', `Applied to ${ok} of ${ids.length} campus(es)${fail ? ` · ${fail} failed` : ''}.`);
-          refresh();
-        } finally { setBulkRunning(false); }
-      } },
-    ]);
-  };
-
-  // Which pickers to show for the chosen scope ──────────────
-  const pickersForScope = () => {
-    if (scopeType === 'global')       return [];
-    if (scopeType === 'organization') return ['organization'];
-    if (scopeType === 'campus')       return role === 'super_admin' ? ['organization', 'campus'] : ['campus'];
-    if (scopeType === 'class')        return role === 'super_admin' ? ['organization', 'campus', 'class'] : ['campus', 'class'];
-    if (scopeType === 'section')      return role === 'super_admin' ? ['organization', 'campus', 'class', 'section'] : ['campus', 'class', 'section'];
-    if (scopeType === 'student')      return role === 'super_admin' ? ['organization', 'campus', 'class', 'section', 'student'] : ['campus', 'class', 'section', 'student'];
-    return [];
-  };
-
-  const onPickerOpen = (kind) => {
-    setPickerKind(kind);
-    setPickerVisible(true);
-  };
-
-  const onPicked = (kind, item) => {
-    setPicked((prev) => {
-      const next = { ...prev, [kind]: item };
-      // reset deeper picks when an upstream pick changes
-      const chain = ['organization', 'campus', 'class', 'section', 'student'];
-      const idx = chain.indexOf(kind);
-      for (let i = idx + 1; i < chain.length; i += 1) next[chain[i]] = null;
-      return next;
-    });
-    setPickerVisible(false);
-  };
-
-  const [pickerKind, setPickerKind] = useState(null);
-  const [pickerVisible, setPickerVisible] = useState(false);
-
-  // ── Bulk multi-select state ────────────────────────────
-  const [bulkScopeType, setBulkScopeType] = useState('campus');
-  const [bulkParents, setBulkParents] = useState({ organization: null, campus: null, class: null, section: null });
-  const [bulkSelected, setBulkSelected] = useState([]); // [{id,name}]
-  const [bulkEnabled, setBulkEnabled] = useState(true);
-  const [bulkPickerVisible, setBulkPickerVisible] = useState(false);
-  const [bulkParentPickerKind, setBulkParentPickerKind] = useState(null);
-  const [bulkParentPickerVisible, setBulkParentPickerVisible] = useState(false);
-
-  const bulkParentChainForType = (st) => {
-    // What needs to be picked before we can list `st` entities.
-    if (st === 'organization') return [];
-    if (st === 'campus')       return role === 'super_admin' ? ['organization'] : [];
-    if (st === 'class')        return role === 'super_admin' ? ['organization', 'campus'] : ['campus'];
-    if (st === 'section')      return role === 'super_admin' ? ['organization', 'campus', 'class'] : ['campus', 'class'];
-    if (st === 'student')      return role === 'super_admin' ? ['organization', 'campus', 'class', 'section'] : ['campus', 'class', 'section'];
-    return [];
-  };
-  const bulkParentIdForKind = (kind) => {
-    if (kind === 'campus') return bulkParents.organization?.id || null;
-    if (kind === 'class')  return bulkParents.campus?.id || null;
-    if (kind === 'section') return bulkParents.class?.id || null;
-    if (kind === 'student') return bulkParents.section?.id || null;
-    return null;
-  };
-  const bulkListParentId = () => bulkParentIdForKind(bulkScopeType);
-  const bulkParentsReady = bulkParentChainForType(bulkScopeType).every((k) => bulkParents[k]);
-
-  const onBulkParentPick = (kind, item) => {
-    setBulkParents((prev) => {
-      const next = { ...prev, [kind]: item };
-      const chain = ['organization', 'campus', 'class', 'section'];
-      const idx = chain.indexOf(kind);
-      for (let i = idx + 1; i < chain.length; i += 1) next[chain[i]] = null;
-      return next;
-    });
-    setBulkSelected([]);
-    setBulkParentPickerVisible(false);
-  };
-
-  const applyBulkFlag = async () => {
-    if (!bulkSelected.length) { Alert.alert('Pick targets', 'Select one or more entries first.'); return; }
-    Alert.alert(
-      `Turn AI Tutor ${bulkEnabled ? 'ON' : 'OFF'}?`,
-      `This will be applied to ${bulkSelected.length} ${bulkScopeType}(s).`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: bulkEnabled ? 'Enable all' : 'Disable all', style: 'destructive', onPress: async () => {
-          setBulkRunning(true);
-          try {
-            const r = await setFeatureFlagsBulk({
-              scope_type: bulkScopeType,
-              scope_ids: bulkSelected.map((x) => x.id),
-              is_enabled: bulkEnabled,
-            });
-            Alert.alert('Done', `Updated ${r.data?.count ?? bulkSelected.length} ${bulkScopeType}(s).`);
-            setBulkSelected([]);
-            refresh();
-          } catch (e) {
-            Alert.alert('Error', e?.response?.data?.message || 'Bulk update failed');
-          } finally { setBulkRunning(false); }
-        } },
-      ]
+  if (!isSuper) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}><Text style={styles.back}>← Back</Text></TouchableOpacity>
+          <Text style={styles.title}>System defaults</Text>
+          <View style={{ width: 50 }} />
+        </View>
+        <View style={styles.gateCard}>
+          <Text style={styles.gateTitle}>Super admin only</Text>
+          <Text style={styles.gateText}>
+            System-wide defaults can only be edited by a super admin. Use the
+            hierarchy navigator to manage AI Tutor for your organization,
+            campuses, classes, sections, or individual students.
+          </Text>
+          <TouchableOpacity
+            style={styles.primaryBtn}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.primaryBtnText}>Back to navigator</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
     );
-  };
-
-  // Filtered summary list ──────────────────────────────────
-  const filteredSummary = useMemo(() => {
-    const q = summaryFilter.trim().toLowerCase();
-    if (!q) return summary;
-    return summary.filter((r) => String(r.scope_name || '').toLowerCase().includes(q));
-  }, [summaryFilter, summary]);
-
-  const fmt = (v) => (v === null || v === undefined) ? '∞' : Number(v).toLocaleString();
-
-  // Load a row into the editor for updating ─────────────────
-  const editRow = async (row) => {
-    const st = String(row.scope_type);
-    setScopeType(st);
-    setEnabled(row.is_enabled === null ? true : Boolean(row.is_enabled));
-    setDailyRequests(row.daily_requests != null ? String(row.daily_requests) : '');
-    setWeeklyRequests(row.weekly_requests != null ? String(row.weekly_requests) : '');
-    setMonthlyRequests(row.monthly_requests != null ? String(row.monthly_requests) : '');
-    setDailyTokens(row.daily_tokens != null ? String(row.daily_tokens) : '');
-    setWeeklyTokens(row.weekly_tokens != null ? String(row.weekly_tokens) : '');
-    setMonthlyTokens(row.monthly_tokens != null ? String(row.monthly_tokens) : '');
-    setMaxInput(row.max_input_tokens != null ? String(row.max_input_tokens) : '');
-    setMaxOutput(row.max_output_tokens != null ? String(row.max_output_tokens) : '');
-    if (st === 'global') {
-      setPicked({ organization: null, campus: null, class: null, section: null, student: null });
-    } else {
-      // Pre-fill the picked entity so the scope label resolves correctly.
-      const stripped = String(row.scope_name || '').replace(/^[^:]+:\s*/, '').split(' · ')[0].split(' - ').pop();
-      setPicked((prev) => ({ ...prev, [st]: { id: row.scope_id, name: stripped || `#${row.scope_id}` } }));
-    }
-    Alert.alert('Loaded', 'Values copied into the editor above. Make changes and tap Save.');
-  };
-
-  // Delete a row (both flag + policy) ───────────────────────
-  const deleteRow = (row) => {
-    if (row.scope_type === 'global') {
-      Alert.alert('Not allowed', 'Global defaults cannot be deleted.');
-      return;
-    }
-    Alert.alert(
-      'Delete this rule?',
-      `Removing "${row.scope_name}" will let it inherit limits from the next higher level. This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: async () => {
-          try {
-            await deleteScopeConfig(row.scope_type, row.scope_id, 'both');
-            refresh();
-          } catch (e) {
-            Alert.alert('Error', e?.response?.data?.message || 'Delete failed');
-          }
-        } },
-      ]
-    );
-  };
+  }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
-      <ScrollView contentContainerStyle={{ padding: 14 }}>
-        <Text style={styles.h1}>AI Tutor — Policies & Token Limits</Text>
-        <Text style={styles.helpTop}>
-          Choose who you want to configure, then pick how many AI Tutor requests / tokens they can use.
-          Lower-level rules (e.g. a single student) override higher ones (e.g. the whole campus).
-        </Text>
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()}><Text style={styles.back}>← Back</Text></TouchableOpacity>
+        <Text style={styles.title}>System defaults</Text>
+        <View style={{ width: 50 }} />
+      </View>
 
-        {/* Health card */}
-        <View style={[styles.card, styles.healthCard]}>
-          <Text style={styles.label}>System health</Text>
-          {!health ? (
-            <Text style={styles.subtle}>Loading…</Text>
-          ) : (
-            <>
-              <Text style={[styles.line, !health.openai_key_set && styles.lineBad]}>
-                {health.openai_key_set ? '✓' : '✕'} OPENAI_API_KEY {health.openai_key_set ? 'configured' : 'NOT set — chat & ingestion will fail'}
-              </Text>
-              <Text style={styles.line}>
-                {health.cron_secret_set ? '✓' : '✕'} AI_TUTOR_CRON_SECRET {health.cron_secret_set ? 'configured' : 'not set (optional, used by cron)'}
-              </Text>
-              <Text style={styles.line}>Pending ingestion jobs: {health.pending_jobs}</Text>
-              <Text style={[styles.line, (health.failed_jobs_last_24h > 0) && styles.lineBad]}>
-                Failed jobs (last 24h): {health.failed_jobs_last_24h}
-              </Text>
-              <Text style={styles.line}>Documents ready for chat: {health.ready_documents}</Text>
-            </>
-          )}
-        </View>
-
-        {/* Scope selection */}
-        <View style={styles.card}>
-          <Text style={styles.label}>Who does this rule apply to?</Text>
-          <View style={styles.scopeRow}>
-            {SCOPE_ORDER.map((s) => {
-              // hide scopes a role can't manage
-              if (s === 'organization' && role !== 'super_admin') return null;
-              if (s === 'global' && role !== 'super_admin') return null;
-              return (
-                <TouchableOpacity key={s} onPress={() => setScopeType(s)} style={[styles.chip, scopeType === s && styles.chipOn]}>
-                  <Text style={[styles.chipText, scopeType === s && styles.chipTextOn]}>{SCOPE_META[s].label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-          <Text style={styles.helpInline}>{SCOPE_META[scopeType].help}</Text>
-
-          {/* Cascading pickers */}
-          {pickersForScope().map((kind) => (
-            <PickerRow
-              key={kind}
-              kind={kind}
-              picked={picked[kind]}
-              disabled={
-                (kind === 'campus' && role === 'super_admin' && !picked.organization) ||
-                (kind === 'class' && !picked.campus) ||
-                (kind === 'section' && !picked.class) ||
-                (kind === 'student' && !picked.section)
-              }
-              onPress={() => onPickerOpen(kind)}
-            />
-          ))}
-
-          {scopeReady && scopeType !== 'global' && (
-            <Text style={styles.scopePreview}>Target: <Text style={{ fontWeight: '700' }}>{currentScopeLabel}</Text></Text>
-          )}
-        </View>
-
-        {/* Feature flag */}
-        <View style={styles.card}>
-          <View style={styles.rowBetween}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.label}>Enable AI Tutor</Text>
-              <Text style={styles.helpInline}>
-                When ON, users in the selected scope can see and use the AI Tutor. When OFF, it is hidden and blocked for them.
-              </Text>
-            </View>
-            <Switch value={enabled} onValueChange={setEnabled} />
-          </View>
-          <TouchableOpacity style={[styles.btn, !scopeReady && styles.btnDisabled]} disabled={!scopeReady} onPress={saveFlag}>
-            <Text style={styles.btnText}>Save · turn {enabled ? 'ON' : 'OFF'} for {scopeType === 'global' ? 'everyone' : (currentScopeLabel || 'selected target')}</Text>
-          </TouchableOpacity>
-          {canBulk && (
-            <TouchableOpacity style={[styles.btnSecondary, bulkRunning && styles.btnDisabled]} disabled={bulkRunning} onPress={applyFlagToAllCampuses}>
-              <Text style={styles.btnSecondaryText}>{bulkRunning ? 'Working…' : `Shortcut: apply ${enabled ? 'ON' : 'OFF'} to every campus I manage`}</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Bulk on/off for many entries at once */}
-        <View style={styles.card}>
-          <Text style={styles.label}>Bulk turn AI Tutor on or off</Text>
-          <Text style={styles.helpInline}>
-            Pick a level (organizations, campuses, classes, sections or students), select multiple entries, then apply ON or OFF to all of them at once.
+      {loading ? (
+        <View style={styles.loadingWrap}><ActivityIndicator color="#2563eb" /></View>
+      ) : (
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+          <Text style={styles.lead}>
+            These are the system-wide AI Tutor defaults. Everyone inherits from here
+            unless an organization, campus, class, section, or student has its own
+            override. Use the hierarchy navigator for those.
           </Text>
-          <View style={styles.scopeRow}>
-            {['organization','campus','class','section','student'].map((s) => {
-              if (s === 'organization' && role !== 'super_admin') return null;
-              return (
-                <TouchableOpacity
-                  key={s}
-                  onPress={() => { setBulkScopeType(s); setBulkSelected([]); }}
-                  style={[styles.chip, bulkScopeType === s && styles.chipOn]}
-                >
-                  <Text style={[styles.chipText, bulkScopeType === s && styles.chipTextOn]}>{s}s</Text>
-                </TouchableOpacity>
-              );
-            })}
+
+          {/* Health pill */}
+          {health && (
+            <View style={styles.healthRow}>
+              <HealthPill ok={!!health.openai_key_set}    label="OpenAI key" />
+              <HealthPill ok={!!health.cron_secret_set}   label="Cron secret" />
+              <HealthPill info label={`${health.ready_documents ?? 0} ready docs`} />
+              {Number(health.failed_jobs_last_24h || 0) > 0 && (
+                <HealthPill warn label={`${health.failed_jobs_last_24h} failed jobs`} />
+              )}
+            </View>
+          )}
+
+          {/* Master switch */}
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardTitle}>AI Tutor — master switch</Text>
+              <Switch
+                value={enabled}
+                onValueChange={setEnabled}
+                trackColor={{ true: '#34d399', false: '#cbd5e1' }}
+                thumbColor="#fff"
+              />
+            </View>
+            <Text style={styles.cardSubtle}>
+              {enabled
+                ? 'AI Tutor is ON for everyone (unless a specific override turns it off).'
+                : 'AI Tutor is OFF for everyone (unless a specific override turns it on).'}
+            </Text>
           </View>
 
-          {/* Parent cascade required before listing children */}
-          {bulkParentChainForType(bulkScopeType).map((kind) => (
-            <PickerRow
-              key={`bulk-${kind}`}
-              kind={kind}
-              picked={bulkParents[kind]}
-              disabled={
-                (kind === 'campus' && role === 'super_admin' && !bulkParents.organization) ||
-                (kind === 'class' && !bulkParents.campus) ||
-                (kind === 'section' && !bulkParents.class)
-              }
-              onPress={() => { setBulkParentPickerKind(kind); setBulkParentPickerVisible(true); }}
-            />
-          ))}
+          {/* Quota fields */}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Default quotas</Text>
+            <Text style={styles.cardSubtle}>
+              These pools are split pro-rata across every AI-enabled student in the system
+              (unless an organization, campus, class, section, or student has its own override).
+              Leave a field blank for "no limit" at the global level.
+            </Text>
+            {FIELDS.map((f) => (
+              <View key={f.key} style={styles.field}>
+                <Text style={styles.fieldLabel}>{f.label}</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  placeholder="No limit"
+                  placeholderTextColor="#9ca3af"
+                  value={values[f.key] ?? ''}
+                  onChangeText={(v) => onChange(f.key, v)}
+                />
+              </View>
+            ))}
+          </View>
 
           <TouchableOpacity
-            style={[styles.btnSecondary, !bulkParentsReady && styles.btnDisabled]}
-            disabled={!bulkParentsReady}
-            onPress={() => setBulkPickerVisible(true)}
+            style={[styles.primaryBtn, saving && { opacity: 0.6 }]}
+            disabled={saving}
+            onPress={save}
           >
-            <Text style={styles.btnSecondaryText}>
-              {bulkSelected.length
-                ? `Selected ${bulkSelected.length} ${bulkScopeType}(s) — tap to edit`
-                : `Choose ${bulkScopeType}s…`}
-            </Text>
+            {saving
+              ? <ActivityIndicator color="#fff" />
+              : <Text style={styles.primaryBtnText}>Save system defaults</Text>}
           </TouchableOpacity>
 
-          {bulkSelected.length > 0 && (
-            <View style={styles.bulkChipsRow}>
-              {bulkSelected.slice(0, 8).map((it) => (
-                <View key={it.id} style={styles.bulkChip}>
-                  <Text style={styles.bulkChipText} numberOfLines={1}>{it.name}</Text>
-                </View>
-              ))}
-              {bulkSelected.length > 8 && (
-                <View style={styles.bulkChip}><Text style={styles.bulkChipText}>+{bulkSelected.length - 8} more</Text></View>
-              )}
-            </View>
-          )}
-
-          <View style={styles.rowBetween}>
-            <Text style={styles.label}>Apply: {bulkEnabled ? 'ON' : 'OFF'}</Text>
-            <Switch value={bulkEnabled} onValueChange={setBulkEnabled} />
-          </View>
-          <TouchableOpacity
-            style={[styles.btn, (!bulkSelected.length || bulkRunning) && styles.btnDisabled]}
-            disabled={!bulkSelected.length || bulkRunning}
-            onPress={applyBulkFlag}
-          >
-            <Text style={styles.btnText}>
-              {bulkRunning ? 'Working…' : `Apply ${bulkEnabled ? 'ON' : 'OFF'} to ${bulkSelected.length || 0} ${bulkScopeType}(s)`}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Quota policy */}
-        <View style={styles.card}>
-          <Text style={styles.label}>Usage limits</Text>
-          <Text style={styles.helpInline}>
-            Leave a field blank to inherit from a higher level (e.g. organization or global). Tokens ≈ words of input + output processed by AI.
+          <Text style={styles.footer}>
+            For per-organization, per-campus, per-class, per-section, or per-student
+            overrides, go back and use the AI Tutor navigator.
           </Text>
-          <Row2>
-            <Field label="Requests / day"   value={dailyRequests}   onChange={setDailyRequests} />
-            <Field label="Requests / week"  value={weeklyRequests}  onChange={setWeeklyRequests} />
-          </Row2>
-          <Row2>
-            <Field label="Requests / month" value={monthlyRequests} onChange={setMonthlyRequests} />
-            <Field label="Tokens / day"     value={dailyTokens}     onChange={setDailyTokens} />
-          </Row2>
-          <Row2>
-            <Field label="Tokens / week"    value={weeklyTokens}    onChange={setWeeklyTokens} />
-            <Field label="Tokens / month"   value={monthlyTokens}   onChange={setMonthlyTokens} />
-          </Row2>
-          <Row2>
-            <Field label="Max input tokens (per question)"  value={maxInput}  onChange={setMaxInput} />
-            <Field label="Max output tokens (per answer)"   value={maxOutput} onChange={setMaxOutput} />
-          </Row2>
-          <TouchableOpacity style={[styles.btn, !scopeReady && styles.btnDisabled]} disabled={!scopeReady} onPress={savePolicy}>
-            <Text style={styles.btnText}>Save token limits for {scopeType === 'global' ? 'everyone' : (currentScopeLabel || 'selected target')}</Text>
-          </TouchableOpacity>
-          {canBulk && (
-            <TouchableOpacity style={[styles.btnSecondary, bulkRunning && styles.btnDisabled]} disabled={bulkRunning} onPress={applyPolicyToAllCampuses}>
-              <Text style={styles.btnSecondaryText}>{bulkRunning ? 'Working…' : 'Shortcut: apply these limits to every campus I manage'}</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Current allocations */}
-        <Text style={styles.h2}>Current allocations</Text>
-        <Text style={styles.helpInline}>
-          Everyone currently configured. Lower entries override higher ones.
-        </Text>
-        <TextInput
-          style={[styles.input, { marginTop: 8 }]}
-          placeholder="Filter by name…"
-          value={summaryFilter}
-          onChangeText={setSummaryFilter}
-        />
-        {filteredSummary.length === 0 ? (
-          <Text style={styles.subtle}>No rules configured yet.</Text>
-        ) : filteredSummary.map((r) => (
-          <View key={`${r.scope_type}#${r.scope_id ?? 'null'}`} style={styles.allocCard}>
-            <View style={styles.rowBetween}>
-              <Text style={styles.allocTitle}>{r.scope_name}</Text>
-              {r.is_enabled === null ? null : (
-                <View style={[styles.pill, r.is_enabled ? styles.pillOn : styles.pillOff]}>
-                  <Text style={[styles.pillText, r.is_enabled ? styles.pillTextOn : styles.pillTextOff]}>
-                    {r.is_enabled ? 'AI ON' : 'AI OFF'}
-                  </Text>
-                </View>
-              )}
-            </View>
-            <Text style={styles.allocLine}>Requests · D {fmt(r.daily_requests)} · W {fmt(r.weekly_requests)} · M {fmt(r.monthly_requests)}</Text>
-            <Text style={styles.allocLine}>Tokens · D {fmt(r.daily_tokens)} · W {fmt(r.weekly_tokens)} · M {fmt(r.monthly_tokens)}</Text>
-            {(r.max_input_tokens || r.max_output_tokens) ? (
-              <Text style={styles.allocLine}>Per call · in {fmt(r.max_input_tokens)} / out {fmt(r.max_output_tokens)}</Text>
-            ) : null}
-            <View style={styles.allocActions}>
-              <TouchableOpacity style={styles.editBtn} onPress={() => editRow(r)}>
-                <Text style={styles.editBtnText}>Edit</Text>
-              </TouchableOpacity>
-              {r.scope_type !== 'global' && (
-                <TouchableOpacity style={styles.deleteBtn} onPress={() => deleteRow(r)}>
-                  <Text style={styles.deleteBtnText}>Delete</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-        ))}
-      </ScrollView>
-
-      {/* Picker modal */}
-      <PickerModal
-        visible={pickerVisible}
-        onClose={() => setPickerVisible(false)}
-        kind={pickerKind}
-        parentId={
-          pickerKind === 'campus' ? picked.organization?.id :
-          pickerKind === 'class'  ? picked.campus?.id :
-          pickerKind === 'section' ? picked.class?.id :
-          pickerKind === 'student' ? picked.section?.id : null
-        }
-        onPick={(item) => onPicked(pickerKind, item)}
-      />
-
-      {/* Bulk parent cascade picker (single-select) */}
-      <PickerModal
-        visible={bulkParentPickerVisible}
-        onClose={() => setBulkParentPickerVisible(false)}
-        kind={bulkParentPickerKind}
-        parentId={bulkParentIdForKind(bulkParentPickerKind)}
-        onPick={(item) => onBulkParentPick(bulkParentPickerKind, item)}
-      />
-
-      {/* Bulk targets multi-select picker */}
-      <PickerModal
-        visible={bulkPickerVisible}
-        onClose={() => setBulkPickerVisible(false)}
-        kind={bulkScopeType}
-        parentId={bulkListParentId()}
-        multiSelect
-        initialSelection={bulkSelected}
-        onApply={(items) => { setBulkSelected(items); setBulkPickerVisible(false); }}
-      />
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
 
-function PickerRow({ kind, picked, onPress, disabled }) {
-  const labels = {
-    organization: 'Organization',
-    campus: 'Campus (school)',
-    class: 'Class',
-    section: 'Section',
-    student: 'Student',
-  };
+function HealthPill({ ok, warn, info, label }) {
+  const bg = warn ? '#fef3c7' : info ? '#dbeafe' : ok ? '#dcfce7' : '#fee2e2';
+  const fg = warn ? '#92400e' : info ? '#1e3a8a' : ok ? '#166534' : '#991b1b';
   return (
-    <TouchableOpacity onPress={onPress} disabled={disabled} style={[styles.pickerRow, disabled && styles.btnDisabled]}>
-      <Text style={styles.pickerLabel}>{labels[kind]}</Text>
-      <Text style={styles.pickerValue}>{picked?.name || 'Tap to choose…'}</Text>
-    </TouchableOpacity>
-  );
-}
-
-function Field({ label, value, onChange }) {
-  return (
-    <View style={{ flex: 1 }}>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput style={styles.input} placeholder="∞" value={value} onChangeText={onChange} keyboardType="numeric" />
+    <View style={[styles.pill, { backgroundColor: bg }]}>
+      <Text style={[styles.pillText, { color: fg }]}>{label}</Text>
     </View>
   );
 }
 
-function Row2({ children }) {
-  return <View style={{ flexDirection: 'row', gap: 8 }}>{children}</View>;
-}
-
-function PickerModal({ visible, onClose, kind, parentId, onPick, multiSelect, initialSelection, onApply }) {
-  const [loading, setLoading] = useState(false);
-  const [options, setOptions] = useState([]);
-  const [search, setSearch] = useState('');
-  const [errMsg, setErrMsg] = useState('');
-  const [selectedMap, setSelectedMap] = useState({}); // id -> item
-
-  useEffect(() => {
-    if (!visible || !kind) return;
-    setLoading(true);
-    setErrMsg('');
-    setOptions([]);
-    if (multiSelect) {
-      const init = {};
-      (initialSelection || []).forEach((it) => { init[it.id] = it; });
-      setSelectedMap(init);
-    }
-    fetchScopeOptions(kind, parentId)
-      .then((r) => {
-        setOptions(r.data?.options || []);
-        if (r.data?.message) setErrMsg(r.data.message);
-      })
-      .catch((e) => setErrMsg(e?.response?.data?.message || 'Failed to load list'))
-      .finally(() => setLoading(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, kind, parentId]);
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return options;
-    return options.filter((o) => String(o.name).toLowerCase().includes(q));
-  }, [search, options]);
-
-  const titles = {
-    organization: multiSelect ? 'Pick organizations' : 'Pick an organization',
-    campus: multiSelect ? 'Pick campuses' : 'Pick a campus',
-    class: multiSelect ? 'Pick classes' : 'Pick a class',
-    section: multiSelect ? 'Pick sections' : 'Pick a section',
-    student: multiSelect ? 'Pick students' : 'Pick a student',
-  };
-
-  const toggle = (item) => {
-    setSelectedMap((prev) => {
-      const next = { ...prev };
-      if (next[item.id]) delete next[item.id]; else next[item.id] = item;
-      return next;
-    });
-  };
-  const selectAll = () => {
-    const next = {};
-    filtered.forEach((it) => { next[it.id] = it; });
-    setSelectedMap(next);
-  };
-  const clearAll = () => setSelectedMap({});
-
-  return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.modalSheet}>
-          <View style={styles.rowBetween}>
-            <Text style={styles.h2}>{titles[kind] || 'Pick'}</Text>
-            <TouchableOpacity onPress={onClose}><Text style={styles.modalClose}>Close</Text></TouchableOpacity>
-          </View>
-          <TextInput style={styles.input} placeholder="Search…" value={search} onChangeText={setSearch} />
-          {multiSelect && (
-            <View style={styles.rowBetween}>
-              <Text style={styles.helpInline}>{Object.keys(selectedMap).length} selected</Text>
-              <View style={{ flexDirection: 'row', gap: 12 }}>
-                <TouchableOpacity onPress={selectAll}><Text style={styles.modalClose}>Select all</Text></TouchableOpacity>
-                <TouchableOpacity onPress={clearAll}><Text style={styles.modalClose}>Clear</Text></TouchableOpacity>
-              </View>
-            </View>
-          )}
-          {loading ? (
-            <ActivityIndicator style={{ marginTop: 20 }} />
-          ) : filtered.length === 0 ? (
-            <Text style={[styles.subtle, { marginTop: 16 }]}>{errMsg || 'No items found.'}</Text>
-          ) : (
-            <FlatList
-              data={filtered}
-              keyExtractor={(it) => String(it.id)}
-              renderItem={({ item }) => {
-                const checked = !!selectedMap[item.id];
-                return (
-                  <TouchableOpacity
-                    style={styles.modalItem}
-                    onPress={() => multiSelect ? toggle(item) : onPick(item)}
-                  >
-                    {multiSelect && (
-                      <View style={[styles.checkbox, checked && styles.checkboxOn]}>
-                        {checked ? <Text style={styles.checkmark}>✓</Text> : null}
-                      </View>
-                    )}
-                    <Text style={styles.modalItemText}>{item.name}</Text>
-                  </TouchableOpacity>
-                );
-              }}
-              style={{ maxHeight: 380 }}
-            />
-          )}
-          {multiSelect && (
-            <TouchableOpacity
-              style={[styles.btn, !Object.keys(selectedMap).length && styles.btnDisabled]}
-              disabled={!Object.keys(selectedMap).length}
-              onPress={() => onApply(Object.values(selectedMap))}
-            >
-              <Text style={styles.btnText}>Apply selection ({Object.keys(selectedMap).length})</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
 const styles = StyleSheet.create({
-  h1: { fontSize: 18, fontWeight: '700', marginBottom: 6 },
-  h2: { fontSize: 15, fontWeight: '700', marginTop: 18, marginBottom: 6 },
-  helpTop: { color: '#4B5563', marginBottom: 10, lineHeight: 18 },
-  helpInline: { color: '#6B7280', fontSize: 12, lineHeight: 16, marginTop: 2 },
-  card: { backgroundColor: '#F9FAFB', padding: 12, borderRadius: 12, marginBottom: 12, gap: 8 },
-  label: { fontWeight: '600', color: '#374151' },
-  scopeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  chip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16, backgroundColor: '#E5E7EB' },
-  chipOn: { backgroundColor: '#2563EB' },
-  chipText: { color: '#374151', fontWeight: '600', fontSize: 12 },
-  chipTextOn: { color: '#fff' },
-  input: { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: '#fff' },
-  fieldLabel: { fontSize: 11, color: '#6B7280', marginBottom: 4, marginTop: 2 },
-  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  btn: { backgroundColor: '#2563EB', padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 6 },
-  btnText: { color: '#fff', fontWeight: '700', textAlign: 'center' },
-  btnSecondary: { backgroundColor: '#E0E7FF', padding: 10, borderRadius: 10, alignItems: 'center', marginTop: 6 },
-  btnSecondaryText: { color: '#3730A3', fontWeight: '700' },
-  btnDisabled: { opacity: 0.5 },
-  healthCard: { backgroundColor: '#F1F5F9' },
-  lineBad: { color: '#B91C1C', fontWeight: '700' },
-  line: { color: '#374151', paddingVertical: 2 },
-  subtle: { color: '#6B7280', fontStyle: 'italic' },
-  pickerRow: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 10, padding: 10, marginTop: 6 },
-  pickerLabel: { fontSize: 11, color: '#6B7280', marginBottom: 2 },
-  pickerValue: { fontSize: 14, color: '#111827', fontWeight: '600' },
-  scopePreview: { marginTop: 6, color: '#374151' },
-  allocCard: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 10, padding: 10, marginTop: 8, gap: 4 },
-  allocTitle: { fontWeight: '700', color: '#111827', flex: 1, marginRight: 8 },
-  allocLine: { color: '#374151', fontSize: 12 },
-  allocActions: { flexDirection: 'row', gap: 8, marginTop: 8 },
-  editBtn: { backgroundColor: '#E0E7FF', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
-  editBtnText: { color: '#3730A3', fontWeight: '700', fontSize: 12 },
-  deleteBtn: { backgroundColor: '#FEE2E2', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
-  deleteBtnText: { color: '#991B1B', fontWeight: '700', fontSize: 12 },
-  pill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
-  pillOn: { backgroundColor: '#D1FAE5' },
-  pillOff: { backgroundColor: '#FEE2E2' },
-  pillText: { fontSize: 11, fontWeight: '700' },
-  pillTextOn: { color: '#065F46' },
-  pillTextOff: { color: '#991B1B' },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  modalSheet: { backgroundColor: '#fff', padding: 14, borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '75%' },
-  modalClose: { color: '#2563EB', fontWeight: '700' },
-  modalItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', flexDirection: 'row', alignItems: 'center', gap: 10 },
-  modalItemText: { fontSize: 14, color: '#111827', flex: 1 },
-  checkbox: { width: 20, height: 20, borderRadius: 4, borderWidth: 1.5, borderColor: '#9CA3AF', alignItems: 'center', justifyContent: 'center' },
-  checkboxOn: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
-  checkmark: { color: '#fff', fontWeight: '700', fontSize: 12, lineHeight: 14 },
-  bulkChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 },
-  bulkChip: { backgroundColor: '#EEF2FF', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, maxWidth: '48%' },
-  bulkChipText: { fontSize: 11, color: '#3730A3' },
+  safe: { flex: 1, backgroundColor: '#f8fafc' },
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 14, paddingVertical: 10, backgroundColor: '#fff',
+    borderBottomWidth: 1, borderBottomColor: '#e5e7eb',
+  },
+  back: { color: '#2563eb', fontWeight: '600' },
+  title: { fontSize: 16, fontWeight: '700', color: '#0f172a' },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  lead: { fontSize: 13, color: '#475569', marginBottom: 12, lineHeight: 18 },
+  healthRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
+  pill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, marginRight: 6, marginBottom: 6 },
+  pillText: { fontSize: 11, fontWeight: '600' },
+  card: {
+    backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 12,
+    borderWidth: 1, borderColor: '#e5e7eb',
+  },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  cardTitle: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
+  cardSubtle: { fontSize: 12, color: '#64748b', marginTop: 6, lineHeight: 17 },
+  field: { marginTop: 12 },
+  fieldLabel: { fontSize: 12, color: '#475569', marginBottom: 6, fontWeight: '600' },
+  input: {
+    borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#f8fafc',
+    borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: '#0f172a',
+  },
+  primaryBtn: {
+    backgroundColor: '#2563eb', borderRadius: 10, paddingVertical: 13,
+    alignItems: 'center', marginTop: 4,
+  },
+  primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  footer: { textAlign: 'center', color: '#94a3b8', fontSize: 12, marginTop: 16, lineHeight: 17 },
+  gateCard: {
+    margin: 16, padding: 20, backgroundColor: '#fff', borderRadius: 12,
+    borderWidth: 1, borderColor: '#e5e7eb',
+  },
+  gateTitle: { fontSize: 16, fontWeight: '700', color: '#0f172a', marginBottom: 8 },
+  gateText: { fontSize: 13, color: '#475569', lineHeight: 19, marginBottom: 14 },
 });
