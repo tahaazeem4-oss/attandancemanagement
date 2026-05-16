@@ -190,13 +190,23 @@ export default function AdminAiHierarchyScreen() {
     } catch (e) {
       const data = e?.response?.data;
       if (Array.isArray(data?.violations) && data.violations.length) {
-        const lines = data.violations.map((v) => `• ${v.message}`).join('\n');
+        const fieldLabel = (k) => POLICY_FIELDS.find((p) => p.key === k)?.label || k;
+        const fmt = (n) => (n === null || n === undefined ? '—' : Number(n).toLocaleString());
+        const lines = data.violations.map((v) => {
+          if (v.parent_pool === null) {
+            return `• ${fieldLabel(v.field)}: no limit set at any higher level. Set it on a parent first, then split it down here.`;
+          }
+          if (v.max_allowed === null) {
+            return `• ${fieldLabel(v.field)}: cannot exceed parent cap (${fmt(v.parent_pool)}).`;
+          }
+          return `• ${fieldLabel(v.field)}: only ${fmt(v.max_allowed)} available (parent has ${fmt(v.parent_pool)}, other siblings already use ${fmt(v.sibling_sum)}).`;
+        }).join('\n');
         Alert.alert(
-          'Cannot save — pool exceeded',
-          `${data.message || ''}\n\n${lines}`
+          'Not enough quota available',
+          `You're trying to allocate more than ${data?.parent?.name || 'the parent'} can give.\n\n${lines}\n\nReduce the values or free up quota by lowering a sibling's allocation.`
         );
       } else {
-        Alert.alert('Failed', data?.message || e?.message || 'Could not save');
+        Alert.alert("Couldn't save", data?.message || e?.message || 'Please try again.');
       }
     } finally {
       setSavingQuota(false);

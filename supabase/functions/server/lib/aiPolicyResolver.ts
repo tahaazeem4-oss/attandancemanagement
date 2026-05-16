@@ -1,7 +1,8 @@
 // Shared resolver: computes the parent-node's effective pool and the sum of
 // other sibling manual overrides for a candidate (scope_type, scope_id) at
-// which someone is trying to set a quota policy. Used by POST /quota-policy
-// to enforce "you can never allocate more than the parent has available".
+// which someone is trying to set a quota policy. All entity / flag / policy
+// data is fetched in a small fixed number of queries up-front so this stays
+// fast regardless of tree size.
 
 export const DISTRIBUTABLE = [
   "daily_requests","weekly_requests","monthly_requests",
@@ -20,211 +21,119 @@ type Row = Record<string, any>;
 
 export interface ParentPoolResult {
   parentNode: { type: ScopeType; id: number | null; name: string };
-  parentEffective: Record<PolicyField, number | null>; // distributable: parent's allocated pool. non-distributable: parent's cap.
-  siblingManualSum: Record<PolicyField, number>;       // sum over OTHER siblings (excluding target node).
-  perRequestCap: Record<PolicyField, number | null>;   // strictest cap ALONG chain (for non-distributable only).
+  parentEffective: Record<PolicyField, number | null>;
+  siblingManualSum: Record<PolicyField, number>;
+  perRequestCap: Record<PolicyField, number | null>;
 }
 
-// Build the ancestor chain (excluding the target) from global down to parent.
-async function buildAncestors(db: DB, scope_type: ScopeType, scope_id: number | null):
-  Promise<Array<{ type: ScopeType; id: number | null; name: string }>>
-{
-  const out: Array<{ type: ScopeType; id: number | null; name: string }> =
-    [{ type: "global", id: null, name: "Everyone (global default)" }];
-  if (scope_type === "global") return out;
+const polKey = (t: string, sid: number | null) => `${t}#${sid ?? "null"}`;
 
-  if (scope_type === "organization") return out;
+async function loadTree(db: DB) {
+  const [schoolsRes, orgsRes, classesRes, sectionsRes, studentsRes, flagsRes, policiesRes] = await Promise.all([
+    db.from("schools").select("id, name, org_id"),
+    db.from("organizations").select("id, name"),
+    db.from("classes").select("id, class_name, school_id"),
+    db.from("sections").select("id, section_name, class_id"),
+    db.from("students").select("id, section_id, class_id, school_id"),
+    db.from("ai_feature_flags").select("scope_type, scope_id, is_enabled"),
+    db.from("ai_quota_policies").select("*"),
+  ]);
 
-  // Need org/school/class/section to walk up.
-  if (scope_type === "campus") {
-    const { data: s } = await db.from("schools").select("id, name, org_id").eq("id", scope_id).maybeSingle();
-    if (s?.org_id) {
-      const { data: o } = await db.from("organizations").select("id, name").eq("id", s.org_id).maybeSingle();
-      if (o) out.push({ type: "organization", id: o.id, name: `Org: ${o.name}` });
-    }
-    return out;
-  }
-  if (scope_type === "class") {
-    const { data: c } = await db.from("classes").select("id, class_name, school_id").eq("id", scope_id).maybeSingle();
-    if (c?.school_id) {
-      const { data: s } = await db.from("schools").select("id, name, org_id").eq("id", c.school_id).maybeSingle();
-      if (s?.org_id) {
-        const { data: o } = await db.from("organizations").select("id, name").eq("id", s.org_id).maybeSingle();
-        if (o) out.push({ type: "organization", id: o.id, name: `Org: ${o.name}` });
-      }
-      if (s) out.push({ type: "campus", id: s.id, name: `Campus: ${s.name}` });
-    }
-    return out;
-  }
-  if (scope_type === "section") {
-    const { data: sec } = await db.from("sections").select("id, section_name, class_id").eq("id", scope_id).maybeSingle();
-    if (sec?.class_id) {
-      const ancestors = await buildAncestors(db, "class", sec.class_id);
-      ancestors.push({ type: "class", id: sec.class_id, name: `Class #${sec.class_id}` });
-      return ancestors;
-    }
-    return out;
-  }
-  if (scope_type === "student") {
-    const { data: st } = await db.from("students").select("id, first_name, last_name, section_id").eq("id", scope_id).maybeSingle();
-    if (st?.section_id) {
-      const ancestors = await buildAncestors(db, "section", st.section_id);
-      ancestors.push({ type: "section", id: st.section_id, name: `Section #${st.section_id}` });
-      return ancestors;
-    }
-    return out;
-  }
-  return out;
-}
-
-// Count AI-enabled students under an entity (flag-aware).
-async function countEnabledStudents(db: DB, type: ScopeType, id: number | null): Promise<number> {
-  if (type === "global") {
-    // Fetch all students + all flags, resolve effective per student.
-    const { data: students } = await db.from("students").select("id, section_id, class_id, school_id");
-    const { data: schools }  = await db.from("schools").select("id, org_id");
-    const schoolOrg = new Map<number, number | null>(((schools || []) as Row[]).map((r) => [Number(r.id), r.org_id as number | null]));
-    const { data: flags } = await db.from("ai_feature_flags").select("scope_type, scope_id, is_enabled");
-    const key = (t: string, sid: number | null) => `${t}#${sid ?? "null"}`;
-    const flagMap = new Map<string, boolean>();
-    for (const f of (flags || []) as Row[]) flagMap.set(key(String(f.scope_type), f.scope_id as number | null), Boolean(f.is_enabled));
-    const globalOn = flagMap.has(key("global", null)) ? flagMap.get(key("global", null))! : true;
-    let n = 0;
-    for (const s of (students || []) as Row[]) {
-      const orgId = schoolOrg.get(Number(s.school_id)) ?? null;
-      let on = globalOn;
-      const chain: Array<[string, number | null]> = [
-        ["organization", orgId], ["campus", Number(s.school_id)],
-        ["class", Number(s.class_id)], ["section", Number(s.section_id)], ["student", Number(s.id)],
-      ];
-      for (const [t, sid] of chain) {
-        const k = key(t, sid);
-        if (flagMap.has(k)) on = flagMap.get(k)!;
-      }
-      if (on) n++;
-    }
-    return n;
-  }
-  // For non-global entities, count under that entity.
-  if (type === "student") return id !== null ? 1 : 0;
-  let studentQuery = db.from("students").select("id, section_id, class_id, school_id");
-  if (type === "section") studentQuery = studentQuery.eq("section_id", id);
-  else if (type === "class") studentQuery = studentQuery.eq("class_id", id);
-  else if (type === "campus") studentQuery = studentQuery.eq("school_id", id);
-  else if (type === "organization") {
-    const { data: schools } = await db.from("schools").select("id").eq("org_id", id);
-    const sids = ((schools || []) as Row[]).map((r) => Number(r.id));
-    if (!sids.length) return 0;
-    studentQuery = studentQuery.in("school_id", sids);
-  }
-  const { data: students } = await studentQuery;
-  if (!students || !students.length) return 0;
-
-  // Resolve per-student effective flag walking chain.
-  const { data: flags } = await db.from("ai_feature_flags").select("scope_type, scope_id, is_enabled");
-  const key = (t: string, sid: number | null) => `${t}#${sid ?? "null"}`;
+  const orgs    = new Map<number, { id: number; name: string }>();
+  const schools = new Map<number, { id: number; name: string; org_id: number | null }>();
+  const classes = new Map<number, { id: number; class_name: string; school_id: number }>();
+  const sections = new Map<number, { id: number; section_name: string; class_id: number }>();
+  const students = new Map<number, { id: number; section_id: number; class_id: number; school_id: number }>();
   const flagMap = new Map<string, boolean>();
-  for (const f of (flags || []) as Row[]) flagMap.set(key(String(f.scope_type), f.scope_id as number | null), Boolean(f.is_enabled));
-  const globalOn = flagMap.has(key("global", null)) ? flagMap.get(key("global", null))! : true;
-  const { data: schools } = await db.from("schools").select("id, org_id");
-  const schoolOrg = new Map<number, number | null>(((schools || []) as Row[]).map((r) => [Number(r.id), r.org_id as number | null]));
-  let n = 0;
-  for (const s of (students as Row[])) {
-    const orgId = schoolOrg.get(Number(s.school_id)) ?? null;
+  const policyMap = new Map<string, Row>();
+
+  for (const r of (orgsRes.data || []) as Row[]) orgs.set(Number(r.id), { id: Number(r.id), name: String(r.name) });
+  for (const r of (schoolsRes.data || []) as Row[]) schools.set(Number(r.id), { id: Number(r.id), name: String(r.name), org_id: r.org_id as number | null });
+  for (const r of (classesRes.data || []) as Row[]) classes.set(Number(r.id), { id: Number(r.id), class_name: String(r.class_name), school_id: Number(r.school_id) });
+  for (const r of (sectionsRes.data || []) as Row[]) sections.set(Number(r.id), { id: Number(r.id), section_name: String(r.section_name), class_id: Number(r.class_id) });
+  for (const r of (studentsRes.data || []) as Row[]) students.set(Number(r.id), {
+    id: Number(r.id), section_id: Number(r.section_id), class_id: Number(r.class_id), school_id: Number(r.school_id),
+  });
+  for (const f of (flagsRes.data || []) as Row[]) flagMap.set(polKey(String(f.scope_type), f.scope_id as number | null), Boolean(f.is_enabled));
+  for (const p of (policiesRes.data || []) as Row[]) policyMap.set(polKey(String(p.scope_type), p.scope_id as number | null), p);
+
+  const globalOn = flagMap.has(polKey("global", null)) ? flagMap.get(polKey("global", null))! : true;
+
+  const studentEnabled = new Map<number, boolean>();
+  for (const st of students.values()) {
+    const orgId = schools.get(st.school_id)?.org_id ?? null;
     let on = globalOn;
-    const chain: Array<[string, number | null]> = [
-      ["organization", orgId], ["campus", Number(s.school_id)],
-      ["class", Number(s.class_id)], ["section", Number(s.section_id)], ["student", Number(s.id)],
+    const steps: Array<[string, number | null]> = [
+      ["organization", orgId], ["campus", st.school_id],
+      ["class", st.class_id], ["section", st.section_id], ["student", st.id],
     ];
-    for (const [t, sid] of chain) {
-      const k = key(t, sid);
+    for (const [t, sid] of steps) {
+      const k = polKey(t, sid);
       if (flagMap.has(k)) on = flagMap.get(k)!;
     }
-    if (on) n++;
+    studentEnabled.set(st.id, on);
   }
-  return n;
+
+  const countEnabled = (type: ScopeType, id: number | null): number => {
+    if (type === "global") { let n = 0; for (const v of studentEnabled.values()) if (v) n++; return n; }
+    if (type === "student") return id !== null && studentEnabled.get(id) ? 1 : 0;
+    if (type === "section" && id !== null) { let n = 0; for (const st of students.values()) if (st.section_id === id && studentEnabled.get(st.id)) n++; return n; }
+    if (type === "class"   && id !== null) { let n = 0; for (const st of students.values()) if (st.class_id   === id && studentEnabled.get(st.id)) n++; return n; }
+    if (type === "campus"  && id !== null) { let n = 0; for (const st of students.values()) if (st.school_id  === id && studentEnabled.get(st.id)) n++; return n; }
+    if (type === "organization" && id !== null) {
+      const sids = new Set<number>();
+      for (const s of schools.values()) if (s.org_id === id) sids.add(s.id);
+      let n = 0; for (const st of students.values()) if (sids.has(st.school_id) && studentEnabled.get(st.id)) n++; return n;
+    }
+    return 0;
+  };
+
+  const childEntities = (parentType: ScopeType, parentId: number | null): Array<{ type: ScopeType; id: number }> => {
+    if (parentType === "global") return Array.from(orgs.values()).map((o) => ({ type: "organization" as ScopeType, id: o.id }));
+    if (parentType === "organization" && parentId !== null) return Array.from(schools.values()).filter((s) => s.org_id === parentId).map((s) => ({ type: "campus" as ScopeType, id: s.id }));
+    if (parentType === "campus" && parentId !== null) return Array.from(classes.values()).filter((c) => c.school_id === parentId).map((c) => ({ type: "class" as ScopeType, id: c.id }));
+    if (parentType === "class" && parentId !== null) return Array.from(sections.values()).filter((s) => s.class_id === parentId).map((s) => ({ type: "section" as ScopeType, id: s.id }));
+    if (parentType === "section" && parentId !== null) return Array.from(students.values()).filter((st) => st.section_id === parentId).map((st) => ({ type: "student" as ScopeType, id: st.id }));
+    return [];
+  };
+
+  const buildAncestors = (scope_type: ScopeType, scope_id: number | null) => {
+    const chain: Array<{ type: ScopeType; id: number | null; name: string }> = [
+      { type: "global", id: null, name: "Everyone (global default)" },
+    ];
+    if (scope_type === "global" || scope_type === "organization") return chain;
+
+    let orgId: number | null = null;
+    let campusId: number | null = null;
+    let classId: number | null = null;
+    let sectionId: number | null = null;
+
+    if (scope_type === "campus")  { campusId = scope_id; }
+    if (scope_type === "class")   { const c = scope_id ? classes.get(scope_id) : null; campusId = c?.school_id ?? null; }
+    if (scope_type === "section") { const sec = scope_id ? sections.get(scope_id) : null; classId = sec?.class_id ?? null; const c = classId ? classes.get(classId) : null; campusId = c?.school_id ?? null; }
+    if (scope_type === "student") { const st = scope_id ? students.get(scope_id) : null; sectionId = st?.section_id ?? null; classId = st?.class_id ?? null; campusId = st?.school_id ?? null; }
+    if (campusId) orgId = schools.get(campusId)?.org_id ?? null;
+
+    if (orgId)     chain.push({ type: "organization", id: orgId,     name: `Org: ${orgs.get(orgId)?.name ?? `#${orgId}`}` });
+    if (campusId && scope_type !== "campus")                                chain.push({ type: "campus", id: campusId, name: `Campus: ${schools.get(campusId)?.name ?? `#${campusId}`}` });
+    if (classId  && scope_type !== "class"   && scope_type !== "campus")    chain.push({ type: "class", id: classId, name: `Class: ${classes.get(classId)?.class_name ?? `#${classId}`}` });
+    if (sectionId && scope_type === "student")                              chain.push({ type: "section", id: sectionId, name: `Section: ${sections.get(sectionId)?.section_name ?? `#${sectionId}`}` });
+    return chain;
+  };
+
+  return { orgs, schools, classes, sections, students, flagMap, policyMap, studentEnabled, countEnabled, childEntities, buildAncestors };
 }
 
-// Find sibling entities of (scope_type, scope_id) under the same parent.
-async function siblingsOf(db: DB, scope_type: ScopeType, scope_id: number | null):
-  Promise<Array<{ type: ScopeType; id: number }>>
-{
-  if (scope_type === "organization") {
-    const { data } = await db.from("organizations").select("id");
-    return ((data || []) as Row[]).map((r) => ({ type: "organization" as ScopeType, id: Number(r.id) }));
-  }
-  if (scope_type === "campus") {
-    const { data: s } = await db.from("schools").select("org_id").eq("id", scope_id).maybeSingle();
-    const orgId = s?.org_id;
-    if (!orgId) return [];
-    const { data } = await db.from("schools").select("id").eq("org_id", orgId);
-    return ((data || []) as Row[]).map((r) => ({ type: "campus" as ScopeType, id: Number(r.id) }));
-  }
-  if (scope_type === "class") {
-    const { data: c } = await db.from("classes").select("school_id").eq("id", scope_id).maybeSingle();
-    if (!c?.school_id) return [];
-    const { data } = await db.from("classes").select("id").eq("school_id", c.school_id);
-    return ((data || []) as Row[]).map((r) => ({ type: "class" as ScopeType, id: Number(r.id) }));
-  }
-  if (scope_type === "section") {
-    const { data: sec } = await db.from("sections").select("class_id").eq("id", scope_id).maybeSingle();
-    if (!sec?.class_id) return [];
-    const { data } = await db.from("sections").select("id").eq("class_id", sec.class_id);
-    return ((data || []) as Row[]).map((r) => ({ type: "section" as ScopeType, id: Number(r.id) }));
-  }
-  if (scope_type === "student") {
-    const { data: st } = await db.from("students").select("section_id").eq("id", scope_id).maybeSingle();
-    if (!st?.section_id) return [];
-    const { data } = await db.from("students").select("id").eq("section_id", st.section_id);
-    return ((data || []) as Row[]).map((r) => ({ type: "student" as ScopeType, id: Number(r.id) }));
-  }
-  return [];
-}
-
-// Map entity → its parent (type+id) so we can walk down through ancestors.
-async function childEntitiesUnder(db: DB, parentType: ScopeType, parentId: number | null):
-  Promise<Array<{ type: ScopeType; id: number }>>
-{
-  if (parentType === "global") {
-    const { data } = await db.from("organizations").select("id");
-    return ((data || []) as Row[]).map((r) => ({ type: "organization" as ScopeType, id: Number(r.id) }));
-  }
-  if (parentType === "organization") {
-    const { data } = await db.from("schools").select("id").eq("org_id", parentId);
-    return ((data || []) as Row[]).map((r) => ({ type: "campus" as ScopeType, id: Number(r.id) }));
-  }
-  if (parentType === "campus") {
-    const { data } = await db.from("classes").select("id").eq("school_id", parentId);
-    return ((data || []) as Row[]).map((r) => ({ type: "class" as ScopeType, id: Number(r.id) }));
-  }
-  if (parentType === "class") {
-    const { data } = await db.from("sections").select("id").eq("class_id", parentId);
-    return ((data || []) as Row[]).map((r) => ({ type: "section" as ScopeType, id: Number(r.id) }));
-  }
-  if (parentType === "section") {
-    const { data } = await db.from("students").select("id").eq("section_id", parentId);
-    return ((data || []) as Row[]).map((r) => ({ type: "student" as ScopeType, id: Number(r.id) }));
-  }
-  return [];
-}
-
-// MAIN: parent's effective pool and other-sibling manual sums.
 export async function resolveParentPoolFor(
   db: DB, scope_type: ScopeType, scope_id: number | null,
 ): Promise<ParentPoolResult | null> {
-  if (scope_type === "global") return null; // global has no parent.
-  const ancestors = await buildAncestors(db, scope_type, scope_id);
+  if (scope_type === "global") return null;
+
+  const T = await loadTree(db);
+  const ancestors = T.buildAncestors(scope_type, scope_id);
   if (!ancestors.length) return null;
   const parentNode = ancestors[ancestors.length - 1];
 
-  // Fetch all policies (small table).
-  const { data: policies } = await db.from("ai_quota_policies").select("*");
-  const polKey = (t: string, sid: number | null) => `${t}#${sid ?? "null"}`;
-  const policyMap = new Map<string, Row>();
-  for (const p of (policies || []) as Row[]) policyMap.set(polKey(String(p.scope_type), p.scope_id as number | null), p);
-
-  // Walk top-down through ancestors to compute each level's effective per field.
-  // current[field] = effective at this ancestor.
   const init = (): Record<PolicyField, number | null> => {
     const m = {} as Record<PolicyField, number | null>;
     for (const f of ALL_FIELDS) m[f] = null;
@@ -235,7 +144,7 @@ export async function resolveParentPoolFor(
 
   for (let i = 0; i < ancestors.length; i++) {
     const node = ancestors[i];
-    const ownPol = policyMap.get(polKey(node.type, node.id));
+    const ownPol = T.policyMap.get(polKey(node.type, node.id));
     const next = init();
     for (const F of ALL_FIELDS) {
       const ownVal = ownPol ? (ownPol[F] as number | null | undefined) : null;
@@ -244,29 +153,27 @@ export async function resolveParentPoolFor(
       } else if (i === 0) {
         next[F] = null;
       } else if ((NON_DISTRIBUTABLE as readonly string[]).includes(F)) {
-        next[F] = current[F]; // cascade.
+        next[F] = current[F];
       } else {
-        // Distributable: compute share from parent's pool minus manual siblings.
         const parentPool = current[F];
         if (parentPool === null) {
           next[F] = null;
         } else {
           const parent = ancestors[i - 1];
-          const siblings = await childEntitiesUnder(db, parent.type, parent.id);
+          const siblings = T.childEntities(parent.type, parent.id);
           let manualSum = 0;
           let nonManualStudents = 0;
-          const myStudents = await countEnabledStudents(db, node.type, node.id);
+          const myStudents = T.countEnabled(node.type, node.id);
           for (const sib of siblings) {
-            const sp = policyMap.get(polKey(sib.type, sib.id));
+            const sp = T.policyMap.get(polKey(sib.type, sib.id));
             const sv = sp ? (sp[F] as number | null | undefined) : null;
             if (sv !== null && sv !== undefined) manualSum += Number(sv);
-            else nonManualStudents += await countEnabledStudents(db, sib.type, sib.id);
+            else nonManualStudents += T.countEnabled(sib.type, sib.id);
           }
           const remaining = Math.max(0, parentPool - manualSum);
           next[F] = nonManualStudents > 0 ? Math.floor(remaining * myStudents / nonManualStudents) : 0;
         }
       }
-      // Track strictest cap along chain for non-distributable.
       if ((NON_DISTRIBUTABLE as readonly string[]).includes(F)) {
         const v = next[F];
         if (v !== null) perRequestCap[F] = perRequestCap[F] === null ? v : Math.min(perRequestCap[F] as number, v);
@@ -275,16 +182,14 @@ export async function resolveParentPoolFor(
     current = next;
   }
 
-  // current now holds parent's effective per field.
   const parentEffective = current;
 
-  // Sibling-manual sums (under parentNode, excluding the target scope).
-  const siblings = await childEntitiesUnder(db, parentNode.type, parentNode.id);
-  const siblingManualSum = init() as Record<PolicyField, number>;
+  const siblings = T.childEntities(parentNode.type, parentNode.id);
+  const siblingManualSum: Record<PolicyField, number> = {} as Record<PolicyField, number>;
   for (const F of ALL_FIELDS) siblingManualSum[F] = 0;
   for (const sib of siblings) {
     if (sib.type === scope_type && sib.id === scope_id) continue;
-    const sp = policyMap.get(polKey(sib.type, sib.id));
+    const sp = T.policyMap.get(polKey(sib.type, sib.id));
     if (!sp) continue;
     for (const F of DISTRIBUTABLE) {
       const sv = sp[F] as number | null | undefined;
