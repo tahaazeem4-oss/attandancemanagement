@@ -34,6 +34,10 @@ export const cascadeFeatureFlag = (body) => api.post('/ai-tutor/admin/cascade-fl
 
 // ── Analytics ────────────────────────────────────────────────
 export const fetchUsageAnalytics = (days = 30) => api.get('/ai-tutor/analytics/usage', { params: { days } });
+export const fetchScopeAnalytics = (nodeType = 'root', nodeId, days = 30) =>
+  api.get('/ai-tutor/analytics/scope', {
+    params: { node_type: nodeType, ...(nodeId ? { node_id: nodeId } : {}), days },
+  });
 
 // ── Jobs (super admin / cron) ────────────────────────────────
 export const processIngestion = () => api.post('/ai-tutor/jobs/process-ingestion', {});
