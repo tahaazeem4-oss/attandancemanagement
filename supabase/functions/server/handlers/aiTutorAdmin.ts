@@ -965,16 +965,30 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
       for (const c of rawChildren) {
         childStudentCounts[`${c.type}#${c.id}`] = studentCountFor(c.type, c.id);
       }
-      // Manual sum and non-manual student total at the current-node level.
+
+      // For pool-split math we MUST use ALL children of this scope (not the role-filtered
+      // subset). Otherwise org_admin / admin see inflated allocations because the denominator
+      // is only their visible children instead of every sibling sharing the pool.
+      const allChildSiblings: SibEntity[] = isRoot
+        ? siblingsOfChainNode("global", null)
+        : siblingsOfChainNode(currentNode.type, currentNode.id);
+      // Populate student counts for any sibling not already in the visible set.
+      for (const c of allChildSiblings) {
+        const k = `${c.type}#${c.id}`;
+        if (!(k in childStudentCounts)) childStudentCounts[k] = studentCountFor(c.type, c.id);
+      }
+
+      // Manual sum and non-manual student total at the current-node level (full sibling set).
       const manualByField: Record<string, number> = {};
       const nonManualStudentsByField: Record<string, number> = {};
       for (const F of DISTRIBUTABLE) {
         manualByField[F] = 0;
         nonManualStudentsByField[F] = 0;
-        for (const c of rawChildren) {
-          const ownVal = c.own_policy?.[F];
+        for (const c of allChildSiblings) {
+          const sibPol = policiesBy.get(flagKey(c.type, c.id));
+          const ownVal = sibPol ? (sibPol[F] as number | null | undefined) : null;
           if (ownVal !== null && ownVal !== undefined) manualByField[F] += Number(ownVal);
-          else nonManualStudentsByField[F] += childStudentCounts[`${c.type}#${c.id}`];
+          else nonManualStudentsByField[F] += childStudentCounts[`${c.type}#${c.id}`] ?? 0;
         }
       }
 
