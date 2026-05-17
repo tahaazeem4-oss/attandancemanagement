@@ -15,6 +15,7 @@ import ReportScreen from '../screens/ReportScreen';
 import TeacherLeavesScreen from '../screens/TeacherLeavesScreen';
 import StudentAttendanceDetailScreen from '../screens/StudentAttendanceDetailScreen';
 import TeacherStudentsScreen from '../screens/TeacherStudentsScreen';
+import TeacherSubjectsScreen from '../screens/TeacherSubjectsScreen';
 
 import AdminHomeScreen from '../screens/admin/AdminHomeScreen';
 import AdminTeachersScreen from '../screens/admin/AdminTeachersScreen';
@@ -47,6 +48,7 @@ import OrgAdminNotificationsScreen from '../screens/orgadmin/OrgAdminNotificatio
 import OrgAdminSubjectsScreen from '../screens/orgadmin/OrgAdminSubjectsScreen';
 
 import StudentHomeScreen from '../screens/student/StudentHomeScreen';
+import StudentProfileScreen from '../screens/student/StudentProfileScreen';
 import StudentHistoryScreen from '../screens/student/StudentHistoryScreen';
 import StudentLeaveScreen from '../screens/student/StudentLeaveScreen';
 import StudentLecturesScreen from '../screens/student/StudentLecturesScreen';
@@ -55,6 +57,7 @@ import StudentNotificationsScreen from '../screens/student/StudentNotificationsS
 
 import {
   StudentAiTutorHomeScreen,
+  StudentAiMaterialsScreen,
   StudentAiChatScreen,
   TeacherAiMaterialsScreen,
   AdminAiPolicyScreen,
@@ -75,6 +78,7 @@ export const teacherHomeScreens = [
   { name: 'StudentAttendanceDetail', component: StudentAttendanceDetailScreen },
   { name: 'UploadLecture', component: UploadLectureScreen },
   { name: 'LectureList', component: LectureListScreen },
+  { name: 'TeacherSubjects', component: TeacherSubjectsScreen, options: HIDDEN_HEADER },
   { name: 'SendNotification', component: SendNotificationScreen },
   { name: 'StaffNotifications', component: StaffNotificationsScreen },
   { name: 'ChatList', component: ChatListScreen },
@@ -142,19 +146,22 @@ export const superAdminHomeScreens = [
 
 export const studentHomeScreens = [
   { name: 'StudentHome', component: StudentHomeScreen },
+  { name: 'StudentProfile', component: StudentProfileScreen, options: { title: 'Student Profile' } },
   { name: 'StudentHistory', component: StudentHistoryScreen },
   { name: 'StudentLeaves', component: StudentLeaveScreen },
   { name: 'StudentClasswork', component: StudentLecturesScreen, initialParams: { fixedType: 'classwork', title: 'Class Work' } },
   { name: 'StudentHomework', component: StudentLecturesScreen, initialParams: { fixedType: 'homework', title: 'Homework' } },
   { name: 'StudentLectureDetail', component: StudentLectureDetailScreen },
   { name: 'StudentNotifications', component: StudentNotificationsScreen },
-  { name: 'StudentAiTutorHome', component: StudentAiTutorHomeScreen, options: { title: 'AI Tutor' } },
-  { name: 'StudentAiChat', component: StudentAiChatScreen, options: { title: 'AI Tutor' } },
+  { name: 'StudentAiTutorHome', component: StudentAiTutorHomeScreen, options: HIDDEN_HEADER },
+  { name: 'StudentAiMaterials', component: StudentAiMaterialsScreen, options: HIDDEN_HEADER },
+  { name: 'StudentAiChat', component: StudentAiChatScreen, options: HIDDEN_HEADER },
 ];
 
 export function buildParentChildScreens(activeChild) {
   return [
     { name: 'StudentHome', component: StudentHomeScreen, initialParams: { child: activeChild } },
+    { name: 'StudentProfile', component: StudentProfileScreen, initialParams: { child: activeChild }, options: { title: 'Student Profile' } },
     { name: 'StudentHistory', component: StudentHistoryScreen, initialParams: { child: activeChild } },
     { name: 'StudentLeaves', component: StudentLeaveScreen, initialParams: { child: activeChild } },
     {
@@ -167,8 +174,9 @@ export function buildParentChildScreens(activeChild) {
       component: StudentLecturesScreen,
       initialParams: { fixedType: 'homework', title: 'Homework', child: activeChild },
     },
-    { name: 'StudentAiTutorHome', component: StudentAiTutorHomeScreen, options: { title: 'AI Tutor' }, initialParams: { child: activeChild } },
-    { name: 'StudentAiChat', component: StudentAiChatScreen, options: { title: 'AI Tutor' }, initialParams: { child: activeChild } },
+    { name: 'StudentAiTutorHome', component: StudentAiTutorHomeScreen, options: HIDDEN_HEADER, initialParams: { child: activeChild } },
+    { name: 'StudentAiMaterials', component: StudentAiMaterialsScreen, options: HIDDEN_HEADER, initialParams: { child: activeChild } },
+    { name: 'StudentAiChat', component: StudentAiChatScreen, options: HIDDEN_HEADER, initialParams: { child: activeChild } },
     { name: 'StudentLectureDetail', component: StudentLectureDetailScreen },
     { name: 'StudentNotifications', component: StudentNotificationsScreen, initialParams: { child: activeChild } },
   ];

@@ -9,6 +9,9 @@ const withStudentParams = (studentId) => (
 export const fetchEffectiveConfig = (studentId) =>
   api.get('/ai-tutor/config/effective', withStudentParams(studentId));
 
+export const fetchStudentMaterials = (studentId) =>
+  api.get('/ai-tutor/student/materials', withStudentParams(studentId));
+
 // ── Sessions & chat ──────────────────────────────────────────
 export const createSession = (body, studentId) =>
   api.post('/ai-tutor/chat/session', body, withStudentParams(studentId));
@@ -45,6 +48,11 @@ export const deleteScopeConfig  = (scopeType, scopeId, target = 'both') =>
 export const fetchHierarchy     = (nodeType = 'root', nodeId) =>
   api.get('/ai-tutor/admin/hierarchy', { params: { node_type: nodeType, ...(nodeId ? { node_id: nodeId } : {}) } });
 export const cascadeFeatureFlag = (body) => api.post('/ai-tutor/admin/cascade-flag', body);
+
+// ── Provider key sync (super admin only) ─────────────────────
+export const fetchProviderStatus  = () => api.get('/ai-tutor/admin/provider-status');
+export const syncProviderQuota    = (overrides = {}) => api.post('/ai-tutor/admin/sync-provider-quota', overrides);
+export const resetQuotaCounters   = () => api.post('/ai-tutor/admin/reset-counters', {});
 
 // ── Analytics ────────────────────────────────────────────────
 export const fetchUsageAnalytics = (days = 30) => api.get('/ai-tutor/analytics/usage', { params: { days } });

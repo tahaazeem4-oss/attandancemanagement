@@ -3,18 +3,19 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import RoleDashboardScreen from '../../components/RoleDashboardScreen';
+import { buildDashboardCards } from '../../config/dashboardCards';
 
-const ACTIONS = [
-  { key: 'SuperAdminOrganizations', icon: 'layers-outline',   label: 'Organizations', sub: 'Manage organizations · assign org admins',              tint: '#7C3AED', bg: '#F5F3FF' },
-  { key: 'SuperAdminSchools',       icon: 'business-outline', label: 'Schools',       sub: 'Add, edit campuses · assign campus admins',              tint: '#2563EB', bg: '#EFF6FF' },
-  { key: 'SuperAdminTeachers',      icon: 'people-outline',   label: 'Teachers',      sub: 'Add, edit, delete teachers · reset passwords',           tint: '#10B981', bg: '#ECFDF5' },
-  { key: 'SuperAdminStudents',      icon: 'school-outline',   label: 'Students',      sub: 'Add, edit, delete students · reset portal passwords',    tint: '#F59E0B', bg: '#FFFBEB' },
-  { key: 'SuperAdminClasses',       icon: 'library-outline',  label: 'Classes',       sub: 'Manage classes and sections across campuses',            tint: '#06B6D4', bg: '#ECFEFF' },
-  { key: 'SuperAdminSubjects',      icon: 'book-outline',     label: 'Subjects',      sub: 'Manage subjects across campuses',                        tint: '#8B5CF6', bg: '#F5F3FF' },
-  { key: 'SuperAdminParents',       icon: 'people-circle-outline', label: 'Parents',  sub: 'Manage parent accounts by campus',                       tint: '#EC4899', bg: '#FCE7F3' },
-  { key: 'AdminAiPolicy',           icon: 'shield-checkmark-outline', label: 'AI Policy',     tint: '#7C3AED', bg: '#F5F3FF' },
-  { key: 'AdminAiAnalytics',        icon: 'analytics-outline',     label: 'AI Analytics',  tint: '#F97316', bg: '#FFF7ED' },
-];
+const ACTIONS = buildDashboardCards([
+  { type: 'organizations', key: 'SuperAdminOrganizations' },
+  { type: 'campuses', key: 'SuperAdminSchools' },
+  { type: 'teachers', key: 'SuperAdminTeachers' },
+  { type: 'students', key: 'SuperAdminStudents' },
+  { type: 'classes', key: 'SuperAdminClasses' },
+  { type: 'subjects', key: 'SuperAdminSubjects' },
+  { type: 'parents', key: 'SuperAdminParents' },
+  { type: 'aiPolicy', key: 'AdminAiPolicy' },
+  { type: 'aiAnalytics', key: 'AdminAiAnalytics' },
+]);
 
 export default function SuperAdminHomeScreen({ navigation }) {
   const { user, logout } = useAuth();
@@ -66,6 +67,7 @@ export default function SuperAdminHomeScreen({ navigation }) {
       navigation={navigation}
       refreshing={refreshing}
       onRefresh={onRefresh}
+      preferenceKey={`dashboard:super-admin:${user?.id || user?.email || 'anon'}`}
     />
   );
 }

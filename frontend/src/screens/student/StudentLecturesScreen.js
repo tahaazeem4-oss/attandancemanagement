@@ -245,7 +245,7 @@ export default function StudentLecturesScreen({ navigation, route }) {
 
   return (
     <View style={styles.rootWrap}>
-      <AppHeader title={screenTitle} navigation={navigation} />
+      <AppHeader title={screenTitle} eyebrow="Student Portal" navigation={navigation} />
       <View style={styles.root}>
         {loading ? (
           <ActivityIndicator color="#4F46E5" style={{ flex: 1, marginTop: 60 }} size="large" />

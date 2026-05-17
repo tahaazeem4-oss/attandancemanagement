@@ -9,6 +9,7 @@ import { C, S } from '../config/theme';
 import PickerField from './PickerField';
 import ImportExportBar from './ImportExportBar';
 import AppHeader from './AppHeader';
+import ScreenIntroCard from './ScreenIntroCard';
 import EntityEmptyState from './EntityEmptyState';
 import ManagerSearchAddRow from './ManagerSearchAddRow';
 import ModalFooterActions from './ModalFooterActions';
@@ -365,6 +366,12 @@ export default function StudentsManagerScreen({ navigation, mode }) {
   return (
     <View style={styles.container}>
       <AppHeader title="Students" navigation={navigation} />
+      <ScreenIntroCard
+        title="Student Records"
+        description="Use this screen to keep student profiles, class placement, section mapping, and roll numbers accurate before you work on attendance, reports, or parent access."
+        icon="school-outline"
+        tone="emerald"
+      />
 
       <ManagerSearchAddRow
         searchValue={search}

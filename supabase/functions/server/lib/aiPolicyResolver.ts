@@ -1,16 +1,21 @@
 // Shared resolver: computes the parent-node's effective pool and the sum of
-// other sibling manual overrides for a candidate (scope_type, scope_id) at
-// which someone is trying to set a quota policy. All entity / flag / policy
-// data is fetched in a small fixed number of queries up-front so this stays
-// fast regardless of tree size.
+// other sibling explicit allocations for a candidate (scope_type, scope_id)
+// at which someone is trying to set a quota policy. All entity / flag /
+// policy data is fetched in a small fixed number of queries up-front so this
+// stays fast regardless of tree size.
 
-export const DISTRIBUTABLE = [
-  "daily_requests","weekly_requests","monthly_requests",
-  "daily_tokens","weekly_tokens","monthly_tokens",
-] as const;
-export const NON_DISTRIBUTABLE = ["max_input_tokens","max_output_tokens"] as const;
-export const ALL_FIELDS = [...DISTRIBUTABLE, ...NON_DISTRIBUTABLE] as const;
-export type PolicyField = typeof ALL_FIELDS[number];
+import {
+  ALL_FIELDS,
+  DISTRIBUTABLE,
+  NON_DISTRIBUTABLE,
+  getAllocationMode,
+  hasExplicitAllocation,
+  numericOrNull,
+  resolveExplicitAllocation,
+  type PolicyField,
+} from "./aiQuotaPolicy.ts";
+
+export { ALL_FIELDS, DISTRIBUTABLE, NON_DISTRIBUTABLE, type PolicyField };
 
 type ScopeType = "global"|"organization"|"campus"|"class"|"section"|"student";
 
@@ -35,8 +40,8 @@ async function loadTree(db: DB) {
     db.from("classes").select("id, class_name, school_id"),
     db.from("sections").select("id, section_name, class_id"),
     db.from("students").select("id, section_id, class_id, school_id"),
-    db.from("ai_feature_flags").select("scope_type, scope_id, is_enabled"),
-    db.from("ai_quota_policies").select("*"),
+    db.from("ai_feature_flags").select("scope_type, scope_id, is_enabled, updated_at").order("updated_at", { ascending: true }),
+    db.from("ai_quota_policies").select("*").order("updated_at", { ascending: true }),
   ]);
 
   const orgs    = new Map<number, { id: number; name: string }>();
@@ -147,13 +152,25 @@ export async function resolveParentPoolFor(
     const ownPol = T.policyMap.get(polKey(node.type, node.id));
     const next = init();
     for (const F of ALL_FIELDS) {
-      const ownVal = ownPol ? (ownPol[F] as number | null | undefined) : null;
-      if (ownVal !== null && ownVal !== undefined) {
-        next[F] = Number(ownVal);
+      const ownVal = ownPol ? numericOrNull(ownPol[F]) : null;
+      if (NON_DISTRIBUTABLE.includes(F)) {
+        if (ownVal !== null) {
+          next[F] = ownVal;
+        } else if (i === 0) {
+          next[F] = null;
+        } else {
+          next[F] = current[F];
+        }
+        const v = next[F];
+        if (v !== null) perRequestCap[F] = perRequestCap[F] === null ? v : Math.min(perRequestCap[F] as number, v);
+        continue;
+      }
+
+      const explicit = resolveExplicitAllocation(ownPol, F, current[F]);
+      if (explicit) {
+        next[F] = T.countEnabled(node.type, node.id) > 0 ? explicit.value : 0;
       } else if (i === 0) {
         next[F] = null;
-      } else if ((NON_DISTRIBUTABLE as readonly string[]).includes(F)) {
-        next[F] = current[F];
       } else {
         const parentPool = current[F];
         if (parentPool === null) {
@@ -166,17 +183,14 @@ export async function resolveParentPoolFor(
           const myStudents = T.countEnabled(node.type, node.id);
           for (const sib of siblings) {
             const sp = T.policyMap.get(polKey(sib.type, sib.id));
-            const sv = sp ? (sp[F] as number | null | undefined) : null;
-            if (sv !== null && sv !== undefined) manualSum += Number(sv);
-            else nonManualStudents += T.countEnabled(sib.type, sib.id);
+            const explicitSibling = resolveExplicitAllocation(sp, F, parentPool);
+            const sibStudents = T.countEnabled(sib.type, sib.id);
+            if (explicitSibling && sibStudents > 0) manualSum += explicitSibling.value ?? 0;
+            else nonManualStudents += sibStudents;
           }
           const remaining = Math.max(0, parentPool - manualSum);
           next[F] = nonManualStudents > 0 ? Math.floor(remaining * myStudents / nonManualStudents) : 0;
         }
-      }
-      if ((NON_DISTRIBUTABLE as readonly string[]).includes(F)) {
-        const v = next[F];
-        if (v !== null) perRequestCap[F] = perRequestCap[F] === null ? v : Math.min(perRequestCap[F] as number, v);
       }
     }
     current = next;
@@ -192,8 +206,8 @@ export async function resolveParentPoolFor(
     const sp = T.policyMap.get(polKey(sib.type, sib.id));
     if (!sp) continue;
     for (const F of DISTRIBUTABLE) {
-      const sv = sp[F] as number | null | undefined;
-      if (sv !== null && sv !== undefined) siblingManualSum[F] += Number(sv);
+      const explicit = resolveExplicitAllocation(sp, F, parentEffective[F]);
+      if (explicit && T.countEnabled(sib.type, sib.id) > 0) siblingManualSum[F] += explicit.value ?? 0;
     }
   }
 

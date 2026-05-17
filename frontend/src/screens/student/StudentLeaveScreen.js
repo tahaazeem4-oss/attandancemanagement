@@ -185,7 +185,7 @@ export default function StudentLeaveScreen({ navigation, route }) {
 
   return (
     <View style={styles.wrapper}>
-      <AppHeader title="Leave Applications" navigation={navigation} />
+      <AppHeader title="Leave Applications" eyebrow="Student Portal" navigation={navigation} />
       <View style={styles.container}>
       {loading
         ? <ActivityIndicator color={C.primary} style={{ flex: 1 }} />

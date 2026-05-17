@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────
 //  App Design System — edit here to retheme the whole app
 //  Design: clean, minimal, premium (Notion / Stripe inspired)
-//  Primary: #2563EB (blue-600)  Background: #F8FAFC  Cards: #FFFFFF
+//  Primary: header-aligned brand blue  Background: #F8FAFC  Cards: #FFFFFF
 // ─────────────────────────────────────────────────────────────
 
 export const C = {
@@ -10,16 +10,23 @@ export const C = {
   card:         '#FFFFFF',
   cardAlt:      '#F1F5F9',   // slate-100
 
-  // Brand — single blue primary
-  primary:      '#2563EB',   // blue-600
-  primaryDark:  '#1D4ED8',   // blue-700
-  primaryLight: '#EFF6FF',   // blue-50
+  // Brand — button/action blue aligned with the shared header family
+  primary:      '#1D4ED8',   // brand-mid
+  primaryDark:  '#0F172A',   // brand-deep
+  primaryLight: '#EAF2FF',   // softened header-tint surface
   accent:       '#0EA5E9',   // sky-500
 
   // Header gradient endpoints
   headerBg:     '#1E40AF',   // blue-800
   headerText:   '#EFF6FF',   // blue-50
   headerSub:    '#93C5FD',   // blue-300
+  brandDeep:    '#0F172A',
+  brandMid:     '#1D4ED8',
+  brandBright:  '#2563EB',
+  brandSoft:    '#60A5FA',
+  footerBg:     '#0F172A',
+  footerActive: 'rgba(96,165,250,0.24)',
+  footerIdle:   'rgba(219,234,254,0.58)',
 
   // Text scale (slate family)
   text:         '#1E293B',   // slate-800
@@ -29,7 +36,7 @@ export const C = {
 
   // Borders
   border:       '#E2E8F0',   // slate-200
-  borderFocus:  '#2563EB',
+  borderFocus:  '#1D4ED8',
 
   // Status
   present:      '#10B981',   // emerald-500
@@ -46,6 +53,9 @@ export const C = {
   white:        '#FFFFFF',
   shadow:       '#64748B',   // neutral slate shadow (not colored)
 };
+
+C.brandGradient = [C.brandDeep, C.brandMid, C.brandBright];
+C.brandGradientSoft = [C.headerBg, C.brandBright, C.brandSoft];
 
 export const S = {
   // Shared style fragments — use these across all screens for consistency
@@ -84,11 +94,11 @@ export const S = {
     letterSpacing: 0.6,
   },
   btn: {
-    backgroundColor: '#2563EB',
+    backgroundColor: '#1D4ED8',
     borderRadius: 14,
     paddingVertical: 15,
     alignItems: 'center',
-    shadowColor: '#2563EB',
+    shadowColor: '#1D4ED8',
     shadowOpacity: 0.28,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },

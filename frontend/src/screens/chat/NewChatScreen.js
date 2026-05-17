@@ -4,13 +4,12 @@ import {
   ActivityIndicator, SectionList, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import api from '../../services/api';
 import { C } from '../../config/theme';
+import AppHeader from '../../components/AppHeader';
 
 export default function NewChatScreen({ navigation }) {
-  const insets = useSafeAreaInsets();
   const [teachers, setTeachers] = useState([]);
   const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -116,14 +115,12 @@ export default function NewChatScreen({ navigation }) {
   ].filter((s) => s.data.length > 0);
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </Pressable>
-        <Text style={styles.headerTitle}>New Message</Text>
-      </View>
+    <View style={styles.container}>
+      <AppHeader
+        title="New Message"
+        subtitle="Choose a teacher or admin"
+        navigation={navigation}
+      />
 
       {loading ? (
         <View style={styles.center}>
@@ -158,15 +155,6 @@ export default function NewChatScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  header: {
-    backgroundColor: C.primary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  backBtn: { marginRight: 12, padding: 2 },
-  headerTitle: { color: '#fff', fontSize: 20, fontWeight: '700' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   emptyTitle: { fontSize: 18, fontWeight: '600', color: C.textMed, marginTop: 16, textAlign: 'center' },
   emptySubtitle: { fontSize: 14, color: C.textLight, marginTop: 8, textAlign: 'center', lineHeight: 20 },

@@ -9,6 +9,7 @@ import * as ImagePicker from 'expo-image-picker';
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
 import AppHeader from '../../components/AppHeader';
+import ScreenIntroCard from '../../components/ScreenIntroCard';
 import PickerField from '../../components/PickerField';
 
 // ── CampusFormModal — add/edit a campus (with branding) ───────
@@ -493,6 +494,12 @@ export default function SuperAdminSchoolsScreen({ navigation }) {
       <StatusBar barStyle="dark-content" />
 
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+        <ScreenIntroCard
+          title="Campuses"
+          description="Manage each campus profile, branding, and campus admins here. These campuses become the operational scope for classes, teachers, students, and subject libraries."
+          icon="business-outline"
+          tone="pink"
+        />
         <View style={styles.topBar}>
           <Text style={styles.subtitle}>{campuses.length} campus{campuses.length !== 1 ? 'es' : ''}</Text>
           <Pressable style={styles.addBtn} onPress={() => setCampusModal({ open: true, campus: null })}>

@@ -3,21 +3,22 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import RoleDashboardScreen from '../../components/RoleDashboardScreen';
+import { buildDashboardCards } from '../../config/dashboardCards';
 import useAiTutorConfig from '../../features/aiTutor/hooks/useAiTutorConfig';
 
-const CARDS = [
-  { key: 'OrgAdminCampuses',      icon: 'business-outline',      label: 'Campuses',      tint: '#2563EB', bg: '#EFF6FF' },
-  { key: 'OrgAdminAdmins',        icon: 'person-circle-outline', label: 'Admins',        tint: '#7C3AED', bg: '#F5F3FF' },
-  { key: 'OrgAdminTeachers',      icon: 'people-outline',        label: 'Teachers',      tint: '#0EA5E9', bg: '#F0F9FF' },
-  { key: 'OrgAdminStudents',      icon: 'school-outline',        label: 'Students',      tint: '#10B981', bg: '#ECFDF5' },
-  { key: 'OrgAdminClasses',       icon: 'library-outline',       label: 'Classes',       tint: '#F59E0B', bg: '#FFFBEB' },
-  { key: 'OrgAdminSubjects',      icon: 'book-outline',          label: 'Subjects',      tint: '#EC4899', bg: '#FDF2F8' },
-  { key: 'OrgAdminParents',       icon: 'people-circle-outline', label: 'Parents',       tint: '#06B6D4', bg: '#ECFEFF' },
-  { key: 'OrgAdminLeaves',        icon: 'mail-open-outline',     label: 'Leaves',        tint: '#EF4444', bg: '#FEF2F2' },
-  { key: 'OrgAdminNotifications', icon: 'notifications-outline', label: 'Notifications', tint: '#8B5CF6', bg: '#F5F3FF' },
-  { key: 'AdminAiPolicy',         icon: 'shield-checkmark-outline', label: 'AI Policy',  tint: '#7C3AED', bg: '#F5F3FF' },
-  { key: 'AdminAiAnalytics',      icon: 'analytics-outline',     label: 'AI Analytics',  tint: '#F97316', bg: '#FFF7ED' },
-];
+const CARDS = buildDashboardCards([
+  { type: 'campuses', key: 'OrgAdminCampuses' },
+  { type: 'admins', key: 'OrgAdminAdmins' },
+  { type: 'teachers', key: 'OrgAdminTeachers' },
+  { type: 'students', key: 'OrgAdminStudents' },
+  { type: 'classes', key: 'OrgAdminClasses' },
+  { type: 'subjects', key: 'OrgAdminSubjects' },
+  { type: 'parents', key: 'OrgAdminParents' },
+  { type: 'leaves', key: 'OrgAdminLeaves' },
+  { type: 'notifications', key: 'OrgAdminNotifications' },
+  { type: 'aiPolicy', key: 'AdminAiPolicy' },
+  { type: 'aiAnalytics', key: 'AdminAiAnalytics' },
+]);
 
 export default function OrgAdminHomeScreen({ navigation }) {
   const { user, logout } = useAuth();
@@ -72,6 +73,7 @@ export default function OrgAdminHomeScreen({ navigation }) {
       navigation={navigation}
       refreshing={refreshing}
       onRefresh={onRefresh}
+      preferenceKey={`dashboard:org-admin:${user?.id || user?.email || 'anon'}`}
     />
   );
 }

@@ -60,7 +60,7 @@ export default function StudentHistoryScreen({ navigation, route }) {
 
   return (
     <View style={styles.wrapper}>
-      <AppHeader title="Attendance History" navigation={navigation} />
+      <AppHeader title="Attendance History" eyebrow="Student Portal" navigation={navigation} />
       <View style={styles.container}>
       {/* Month navigator */}
       <View style={styles.navRow}>

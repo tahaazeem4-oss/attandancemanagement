@@ -3,24 +3,24 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import RoleDashboardScreen from '../../components/RoleDashboardScreen';
+import { buildDashboardCards } from '../../config/dashboardCards';
 import useAiTutorConfig from '../../features/aiTutor/hooks/useAiTutorConfig';
 
-// Each card: Ionicons icon + subtle tinted icon box + label
-const CARDS = [
-  { key: 'AdminTeachers',    icon: 'people-outline',        label: 'Teachers',       tint: '#2563EB', bg: '#EFF6FF' },
-  { key: 'AdminStudents',    icon: 'school-outline',        label: 'Students',       tint: '#0EA5E9', bg: '#F0F9FF' },
-  { key: 'AdminClasses',     icon: 'library-outline',       label: 'Classes',        tint: '#10B981', bg: '#ECFDF5' },
-  { key: 'AdminLeaves',      icon: 'mail-open-outline',     label: 'Leaves',         tint: '#EF4444', bg: '#FEF2F2' },
-  { key: 'SendNotification', icon: 'notifications-outline', label: 'Notifications',  tint: '#8B5CF6', bg: '#F5F3FF' },
-  { key: 'UploadLecture',      icon: 'cloud-upload-outline',  label: 'Upload',         tint: '#0891B2', bg: '#F0F9FF' },
-  { key: 'LectureList',        icon: 'videocam-outline',      label: 'Lectures',       tint: '#2563EB', bg: '#EFF6FF' },
-  { key: 'AdminSubjects',           icon: 'book-outline',          label: 'Subjects',         tint: '#7C3AED', bg: '#F5F3FF' },
-  { key: 'AdminParents',            icon: 'heart-outline',         label: 'Parents',          tint: '#EC4899', bg: '#FCE7F3' },
-  { key: 'AdminTeacherAttendance',  icon: 'calendar-outline',      label: 'Teacher Report',   tint: '#10B981', bg: '#ECFDF5' },
-  { key: 'TeacherAiMaterials',      icon: 'cloud-upload-outline',  label: 'AI Materials',     tint: '#0EA5E9', bg: '#F0F9FF' },
-  { key: 'AdminAiPolicy',           icon: 'shield-checkmark-outline', label: 'AI Policy',     tint: '#7C3AED', bg: '#F5F3FF' },
-  { key: 'AdminAiAnalytics',        icon: 'analytics-outline',     label: 'AI Analytics',     tint: '#F97316', bg: '#FFF7ED' },
-];
+const CARDS = buildDashboardCards([
+  { type: 'teachers', key: 'AdminTeachers' },
+  { type: 'students', key: 'AdminStudents' },
+  { type: 'classes', key: 'AdminClasses' },
+  { type: 'leaves', key: 'AdminLeaves' },
+  { type: 'notifications', key: 'SendNotification' },
+  { type: 'upload', key: 'UploadLecture' },
+  { type: 'lectures', key: 'LectureList' },
+  { type: 'subjects', key: 'AdminSubjects' },
+  { type: 'parents', key: 'AdminParents' },
+  { type: 'teacherAttendanceReport', key: 'AdminTeacherAttendance' },
+  { type: 'aiMaterials', key: 'TeacherAiMaterials' },
+  { type: 'aiPolicy', key: 'AdminAiPolicy' },
+  { type: 'aiAnalytics', key: 'AdminAiAnalytics' },
+]);
 
 export default function AdminHomeScreen({ navigation }) {
   const { user, school, logout } = useAuth();
@@ -83,6 +83,7 @@ export default function AdminHomeScreen({ navigation }) {
       navigation={navigation}
       refreshing={refreshing}
       onRefresh={onRefresh}
+      preferenceKey={`dashboard:admin:${user?.id || user?.email || 'anon'}`}
     />
   );
 }

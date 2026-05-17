@@ -4,6 +4,8 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator }   from '@react-navigation/bottom-tabs';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
+import AppHeader from '../components/AppHeader';
+import SharedTabBar from '../components/SharedTabBar';
 import {
   teacherHomeScreens,
   adminHomeScreens,
@@ -17,6 +19,7 @@ import {
   RoleTabs,
   useTabBarOptions,
   tabIcon,
+  createHomeTabListeners,
   notificationBadgeValue,
   notificationTabIcon,
   renderTabScreens,
@@ -43,11 +46,25 @@ const Stack = createNativeStackNavigator();
 const Tab   = createBottomTabNavigator();
 const HIDDEN_HEADER = { headerShown: false };
 
-// â”€â”€ Shared style applied to all headers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-const headerStyle = {
-  headerStyle:      { backgroundColor: '#2563EB' },
-  headerTintColor:  '#fff',
-  headerTitleStyle: { fontWeight: '700' },
+function prettyRouteTitle(name) {
+  return String(name || '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/\bAi\b/g, 'AI')
+    .trim();
+}
+
+const sharedStackOptions = {
+  headerShadowVisible: false,
+  contentStyle: { backgroundColor: '#F8FAFC' },
+  header: ({ navigation, route, options, back }) => (
+    <AppHeader
+      title={options?.title || prettyRouteTitle(route?.name)}
+      subtitle={options?.headerSubtitle}
+      navigation={navigation}
+      showBack={!!back}
+    />
+  ),
 };
 
 function renderStackScreens(screens) {
@@ -62,10 +79,10 @@ function renderStackScreens(screens) {
   ));
 }
 
-function createConfiguredStack(screens) {
+function createConfiguredStack(screens, extraScreenOptions = {}) {
   return function ConfiguredStack() {
     return (
-      <Stack.Navigator screenOptions={headerStyle}>
+      <Stack.Navigator screenOptions={{ ...sharedStackOptions, ...extraScreenOptions }}>
         {renderStackScreens(screens)}
       </Stack.Navigator>
     );
@@ -153,7 +170,7 @@ function SuperAdminTabs() {
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // STUDENT TABS
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-const StudentHomeStack = createConfiguredStack(studentHomeScreens);
+const StudentHomeStack = createConfiguredStack(studentHomeScreens, { headerEyebrow: 'Student Portal' });
 
 function StudentTabs() {
   return (
@@ -181,7 +198,10 @@ function ParentChatStack() {
 function ParentChildHomeStack({ route, child }) {
   const activeChild = child || route?.params?.child || null;
   return (
-    <Stack.Navigator key={activeChild?.student_id ? `child-${activeChild.student_id}` : 'child-none'} screenOptions={headerStyle}>
+    <Stack.Navigator
+      key={activeChild?.student_id ? `child-${activeChild.student_id}` : 'child-none'}
+      screenOptions={{ ...sharedStackOptions, headerEyebrow: 'Student Portal' }}
+    >
       {renderStackScreens(buildParentChildScreens(activeChild))}
     </Stack.Navigator>
   );
@@ -273,6 +293,7 @@ function ParentStudentPortalTabs({ route, navigation }) {
           child={currentChild}
         />
       ),
+      listeners: createHomeTabListeners(),
       options: { title: 'Home', tabBarIcon: ({ focused }) => tabIcon(focused, 'home', 'home-outline', 26) },
     },
     {
@@ -301,7 +322,7 @@ function ParentStudentPortalTabs({ route, navigation }) {
   ];
 
   return (
-    <Tab.Navigator screenOptions={{ ...tabBarOptions, headerShown: false }} initialRouteName="HomeTab">
+    <Tab.Navigator tabBar={(props) => <SharedTabBar {...props} />} screenOptions={{ ...tabBarOptions, headerShown: false }} initialRouteName="HomeTab">
       {renderTabScreens(parentPortalTabScreens)}
     </Tab.Navigator>
   );

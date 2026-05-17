@@ -10,6 +10,7 @@ import api from '../services/api';
 import { C } from '../config/theme';
 import { exportFile } from '../services/importExport';
 import AppHeader from '../components/AppHeader';
+import ScreenIntroCard from '../components/ScreenIntroCard';
 
 const MONTHS = [
   'January','February','March','April','May','June',
@@ -347,14 +348,17 @@ export default function ReportScreen({ route, navigation }) {
 
   return (
     <View style={st.container}>
-      {/* Header */}
-      <View style={st.header}>
-        <Pressable onPress={() => navigation.goBack()} style={st.backBtn}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
-        </Pressable>
+      <AppHeader title="Attendance Report" navigation={navigation} />
+      <ScreenIntroCard
+        title={`${class_name} - ${section_name}`}
+        description="Review monthly attendance trends here and export the exact date range or student slice you need for sharing, audits, or follow-up."
+        icon="bar-chart-outline"
+        tone="amber"
+      />
+      <View style={st.reportTopBar}>
         <View style={{ flex: 1 }}>
-          <Text style={st.headerTitle}>{class_name}  -  {section_name}</Text>
-          <Text style={st.headerSub}>Monthly Attendance Report</Text>
+          <Text style={st.reportTitle}>Monthly Attendance Report</Text>
+          <Text style={st.reportSub}>{class_name}  -  {section_name}</Text>
         </View>
         <Pressable style={st.exportHeaderBtn} onPress={() => setExportOptions(true)} disabled={exporting}>
           {exporting
@@ -446,11 +450,10 @@ export default function ReportScreen({ route, navigation }) {
 const st = StyleSheet.create({
   container:   { flex: 1, backgroundColor: C.bg },
 
-  header:      { backgroundColor: C.primary, flexDirection: 'row', alignItems: 'center', paddingTop: 52, paddingBottom: 16, paddingHorizontal: 16, gap: 10 },
-  backBtn:     { padding: 4 },
-  headerTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  headerSub:   { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 1 },
-  exportHeaderBtn:     { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  reportTopBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 10, gap: 10 },
+  reportTitle: { color: C.textDark, fontSize: 16, fontWeight: '800' },
+  reportSub:   { color: C.textMed, fontSize: 12, marginTop: 1 },
+  exportHeaderBtn:     { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: C.primary, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   exportHeaderBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 
   filtersRow:  { flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 4 },

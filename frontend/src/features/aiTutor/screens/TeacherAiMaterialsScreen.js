@@ -4,13 +4,15 @@ import { View, Text, TouchableOpacity, FlatList, TextInput, StyleSheet, Alert, A
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import api from '../../../services/api';
-import { deleteMaterial, listMaterials, uploadMaterial, processIngestion } from '../api/aiTutorApi';
+import { deleteMaterial, listMaterials, uploadMaterial } from '../api/aiTutorApi';
+import ScreenIntroCard from '../../../components/ScreenIntroCard';
+import { C, S } from '../../../config/theme';
 
 const STATUS_COLORS = {
   uploaded: '#9CA3AF', processing: '#F59E0B', ready: '#10B981', failed: '#EF4444', archived: '#6B7280',
 };
 
-export default function TeacherAiMaterialsScreen({ route }) {
+export default function TeacherAiMaterialsScreen({ navigation, route }) {
   const paramCampus = route?.params?.campusId;
   const paramSubject = route?.params?.subjectId;
   const paramClass = route?.params?.classId;
@@ -28,7 +30,6 @@ export default function TeacherAiMaterialsScreen({ route }) {
   const [title, setTitle] = useState('');
   const [topic, setTopic] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [processing, setProcessing] = useState(false);
 
   useEffect(() => {
     api.get('/subjects')
@@ -105,18 +106,6 @@ export default function TeacherAiMaterialsScreen({ route }) {
     ]);
   };
 
-  const runIngestion = async () => {
-    setProcessing(true);
-    try {
-      const { data } = await processIngestion();
-      const n = data?.processed ?? data?.count ?? 0;
-      Alert.alert('Processing complete', n ? `Processed ${n} job(s).` : 'No pending jobs.');
-      await refresh();
-    } catch (e) {
-      Alert.alert('Failed', e?.response?.data?.message || 'Could not process pending uploads');
-    } finally { setProcessing(false); }
-  };
-
   const classLabel = classSel
     ? (classes.find((c) => c.class_id === classSel.class_id && c.section_id === classSel.section_id)
         ? `${classes.find((c) => c.class_id === classSel.class_id && c.section_id === classSel.section_id).class_name} · ${classes.find((c) => c.class_id === classSel.class_id && c.section_id === classSel.section_id).section_name}`
@@ -124,98 +113,138 @@ export default function TeacherAiMaterialsScreen({ route }) {
     : 'All classes (campus-wide)';
 
   return (
-    <SafeAreaView style={styles.container}>
-      <Text style={styles.h1}>AI Study Materials</Text>
+    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
+      <FlatList
+        data={items}
+        keyExtractor={(it) => String(it.id)}
+        contentContainerStyle={styles.listContent}
+        ListHeaderComponent={(
+          <>
+            <ScreenIntroCard
+              title="Teacher AI Materials"
+              description="Upload and organize the documents AI Tutor uses for answers. Keep subject and class scope accurate so students only get relevant material."
+              icon="cloud-upload-outline"
+              tone="violet"
+            />
 
-      <View style={styles.card}>
-        <Text style={styles.label}>Subject</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 6 }}>
-          {subjects.map((s) => (
-            <TouchableOpacity key={s.id} style={[styles.chip, subjectId === s.id && styles.chipOn]} onPress={() => setSubjectId(s.id)}>
-              <Text style={[styles.chipText, subjectId === s.id && styles.chipTextOn]}>{s.name}</Text>
-            </TouchableOpacity>
-          ))}
-          {subjects.length === 0 && <Text style={styles.hint}>No subjects available.</Text>}
-        </ScrollView>
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>Filter Scope</Text>
+              <Text style={styles.supportingText}>Pick the subject first, then optionally narrow the material to a class and section.</Text>
 
-        <Text style={styles.label}>Scope (optional)</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 6 }}>
-          <TouchableOpacity style={[styles.chip, !classSel && styles.chipOn]} onPress={() => setClassSel(null)}>
-            <Text style={[styles.chipText, !classSel && styles.chipTextOn]}>All</Text>
-          </TouchableOpacity>
-          {classes.map((c) => {
-            const active = classSel?.class_id === c.class_id && classSel?.section_id === c.section_id;
-            return (
-              <TouchableOpacity key={`${c.class_id}-${c.section_id}`} style={[styles.chip, active && styles.chipOn]} onPress={() => setClassSel({ class_id: c.class_id, section_id: c.section_id })}>
-                <Text style={[styles.chipText, active && styles.chipTextOn]}>{c.class_name}·{c.section_name}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+              <Text style={styles.label}>Subject</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRail}>
+                {subjects.map((s) => (
+                  <TouchableOpacity key={s.id} style={[styles.chip, subjectId === s.id && styles.chipOn]} onPress={() => setSubjectId(s.id)}>
+                    <Text style={[styles.chipText, subjectId === s.id && styles.chipTextOn]}>{s.name}</Text>
+                  </TouchableOpacity>
+                ))}
+                {subjects.length === 0 && <Text style={styles.hint}>No subjects available.</Text>}
+              </ScrollView>
 
-        <Text style={styles.subtle}>Subject: {subjectName} · {classLabel}</Text>
-      </View>
+              <Text style={styles.label}>Scope</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRail}>
+                <TouchableOpacity style={[styles.chip, !classSel && styles.chipOn]} onPress={() => setClassSel(null)}>
+                  <Text style={[styles.chipText, !classSel && styles.chipTextOn]}>All classes</Text>
+                </TouchableOpacity>
+                {classes.map((c) => {
+                  const active = classSel?.class_id === c.class_id && classSel?.section_id === c.section_id;
+                  return (
+                    <TouchableOpacity key={`${c.class_id}-${c.section_id}`} style={[styles.chip, active && styles.chipOn]} onPress={() => setClassSel({ class_id: c.class_id, section_id: c.section_id })}>
+                      <Text style={[styles.chipText, active && styles.chipTextOn]}>{c.class_name} · {c.section_name}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
 
-      <View style={styles.card}>
-        <TextInput style={styles.input} placeholder="Title (e.g. Chapter 4 Summary)" value={title} onChangeText={setTitle} />
-        <TextInput style={styles.input} placeholder="Topic / Chapter (optional)" value={topic} onChangeText={setTopic} />
-        <TouchableOpacity style={[styles.btn, uploading && styles.btnDisabled]} onPress={pickAndUpload} disabled={uploading}>
-          <Text style={styles.btnText}>{uploading ? 'Uploading…' : 'Choose file & upload'}</Text>
-        </TouchableOpacity>
-          <Text style={styles.hint}>PDF, DOCX, PPTX, PPT, TXT · up to 25 MB</Text>
-        <TouchableOpacity style={[styles.btnSecondary, processing && styles.btnDisabled]} onPress={runIngestion} disabled={processing}>
-          <Text style={styles.btnSecondaryText}>{processing ? 'Processing…' : 'Process pending uploads now'}</Text>
-        </TouchableOpacity>
-      </View>
-
-      {loading ? <ActivityIndicator style={{ marginTop: 20 }} /> : (
-        <FlatList
-          data={items}
-          keyExtractor={(it) => it.id}
-          contentContainerStyle={{ paddingBottom: 40 }}
-          ListEmptyComponent={<Text style={styles.empty}>No materials yet.</Text>}
-          renderItem={({ item }) => (
-            <View style={styles.row}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.rowTitle}>{item.title}</Text>
-                <Text style={styles.rowMeta}>{(item.topic ? `${item.topic} · ` : '')}{(item.file_ext || '').toUpperCase()} · {Math.round((item.file_size_bytes || 0) / 1024)} KB</Text>
-                <Text style={[styles.status, { color: STATUS_COLORS[item.status] || '#6B7280' }]}>{item.status}</Text>
-                {item.error_message ? <Text style={styles.err}>{item.error_message}</Text> : null}
+              <View style={styles.scopeSummary}>
+                <Text style={styles.scopeLabel}>Current scope</Text>
+                <Text style={styles.scopeValue}>{subjectName} · {classLabel}</Text>
               </View>
-              <TouchableOpacity onPress={() => onDelete(item.id)} style={styles.delBtn}>
-                <Text style={styles.delText}>Delete</Text>
-              </TouchableOpacity>
             </View>
-          )}
-        />
-      )}
+
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>Upload Material</Text>
+              <Text style={styles.supportingText}>Use a clear title and optional topic so students can quickly find the right file in AI Tutor.</Text>
+              <TextInput style={styles.input} placeholder="Title (e.g. Chapter 4 Summary)" placeholderTextColor={C.textLight} value={title} onChangeText={setTitle} />
+              <TextInput style={styles.input} placeholder="Topic / Chapter (optional)" placeholderTextColor={C.textLight} value={topic} onChangeText={setTopic} />
+              <TouchableOpacity style={[styles.btn, uploading && styles.btnDisabled]} onPress={pickAndUpload} disabled={uploading}>
+                <Text style={styles.btnText}>{uploading ? 'Uploading...' : 'Choose File and Upload'}</Text>
+              </TouchableOpacity>
+              <Text style={styles.hint}>PDF, DOCX, PPTX, PPT, TXT · up to 25 MB</Text>
+            </View>
+
+            <View style={styles.sectionHeadRow}>
+              <Text style={styles.sectionTitle}>Uploaded Materials</Text>
+              {!loading ? <Text style={styles.counterText}>{items.length} file{items.length === 1 ? '' : 's'}</Text> : null}
+            </View>
+          </>
+        )}
+        ListEmptyComponent={loading ? null : <Text style={styles.empty}>No materials yet.</Text>}
+        renderItem={({ item }) => (
+          <View style={styles.rowCard}>
+            <View style={styles.rowMain}>
+              <Text style={styles.rowTitle}>{item.title}</Text>
+              <Text style={styles.rowMeta}>{(item.topic ? `${item.topic} · ` : '')}{(item.file_ext || '').toUpperCase()} · {Math.round((item.file_size_bytes || 0) / 1024)} KB</Text>
+              <View style={styles.statusRow}>
+                <View style={[styles.statusPill, { backgroundColor: `${STATUS_COLORS[item.status] || '#6B7280'}18` }]}>
+                  <Text style={[styles.status, { color: STATUS_COLORS[item.status] || '#6B7280' }]}>{item.status}</Text>
+                </View>
+              </View>
+              {item.error_message ? <Text style={styles.err}>{item.error_message}</Text> : null}
+            </View>
+            <TouchableOpacity onPress={() => onDelete(item.id)} style={styles.delBtn}>
+              <Text style={styles.delText}>Delete</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 14, backgroundColor: '#fff' },
-  h1: { fontSize: 18, fontWeight: '700', marginBottom: 10 },
-  card: { backgroundColor: '#F9FAFB', borderRadius: 12, padding: 12, gap: 8, marginBottom: 14 },
-  label: { fontWeight: '600', color: '#374151' },
-  subtle: { color: '#6B7280', fontSize: 12 },
-  chip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16, backgroundColor: '#E5E7EB', marginRight: 6 },
-  chipOn: { backgroundColor: '#2563EB' },
-  chipText: { color: '#374151', fontWeight: '600', fontSize: 12 },
+  container: { flex: 1, backgroundColor: C.bg },
+  listContent: { paddingBottom: 34, paddingHorizontal: 16 },
+  card: {
+    ...S.card,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+    marginBottom: 14,
+  },
+  sectionHeadRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 6,
+    marginBottom: 10,
+  },
+  sectionTitle: { fontSize: 15, fontWeight: '700', color: C.textDark },
+  counterText: { fontSize: 12, color: C.textMed, fontWeight: '700' },
+  supportingText: { fontSize: 12, color: C.textMed, lineHeight: 18, marginTop: 4, marginBottom: 12 },
+  label: { ...S.label, marginBottom: 8 },
+  chipRail: { marginBottom: 10 },
+  chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, backgroundColor: C.cardAlt, marginRight: 8, borderWidth: 1, borderColor: C.border },
+  chipOn: { backgroundColor: C.primary, borderColor: C.primary },
+  chipText: { color: C.textMed, fontWeight: '700', fontSize: 12 },
   chipTextOn: { color: '#fff' },
-  input: { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: '#fff' },
-  btn: { backgroundColor: '#2563EB', paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
-  btnDisabled: { backgroundColor: '#93C5FD' },
-  btnText: { color: '#fff', fontWeight: '700' },
-  btnSecondary: { marginTop: 6, backgroundColor: '#E0E7FF', paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
-  btnSecondaryText: { color: '#3730A3', fontWeight: '700' },
-  hint: { fontSize: 12, color: '#6B7280' },
-  row: { flexDirection: 'row', padding: 12, borderBottomWidth: 1, borderColor: '#F3F4F6', alignItems: 'center' },
-  rowTitle: { fontWeight: '700', color: '#111827' },
-  rowMeta: { color: '#6B7280', fontSize: 12, marginTop: 2 },
-  status: { marginTop: 4, fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
-  err: { color: '#B91C1C', fontSize: 12, marginTop: 2 },
-  delBtn: { paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#FEE2E2', borderRadius: 8 },
-  delText: { color: '#B91C1C', fontWeight: '700' },
-  empty: { color: '#6B7280', textAlign: 'center', marginTop: 20 },
+  scopeSummary: { backgroundColor: C.primaryLight, borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 12, padding: 12, marginTop: 4 },
+  scopeLabel: { fontSize: 11, color: C.primary, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 },
+  scopeValue: { fontSize: 12, color: C.textDark, fontWeight: '700', marginTop: 4 },
+  input: { ...S.input },
+  btn: { ...S.btn },
+  btnDisabled: { opacity: 0.65 },
+  btnText: { ...S.btnText },
+  hint: { fontSize: 12, color: C.textMed, marginTop: 8, lineHeight: 18 },
+  rowCard: { ...S.card, padding: 16, borderWidth: 1, borderColor: C.border, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  rowMain: { flex: 1 },
+  rowTitle: { fontWeight: '700', color: C.textDark, fontSize: 15 },
+  rowMeta: { color: C.textMed, fontSize: 12, marginTop: 4, lineHeight: 18 },
+  statusRow: { marginTop: 10, flexDirection: 'row' },
+  statusPill: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
+  status: { fontSize: 11, fontWeight: '800', textTransform: 'uppercase' },
+  err: { color: '#B91C1C', fontSize: 12, marginTop: 8, lineHeight: 18 },
+  delBtn: { paddingHorizontal: 14, paddingVertical: 10, backgroundColor: '#FEE2E2', borderRadius: 12, borderWidth: 1, borderColor: '#FECACA' },
+  delText: { color: '#B91C1C', fontWeight: '800' },
+  empty: { color: C.textMed, textAlign: 'center', marginTop: 24, fontSize: 14 },
 });

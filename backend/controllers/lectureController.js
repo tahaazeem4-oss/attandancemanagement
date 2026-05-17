@@ -272,17 +272,25 @@ exports.getSubjects = async (req, res) => {
     let names = [];
     try {
       const [rows] = await db.query(
-        `SELECT name FROM school_subjects WHERE school_id = $1
-         UNION
-         SELECT DISTINCT subject_name AS name FROM lectures WHERE school_id = $1
-         ORDER BY name`,
+        `SELECT DISTINCT ON (LOWER(BTRIM(name))) BTRIM(name) AS name
+         FROM (
+           SELECT name FROM school_subjects WHERE school_id = $1
+           UNION ALL
+           SELECT subject_name AS name FROM lectures WHERE school_id = $1
+         ) merged
+         WHERE BTRIM(name) <> ''
+         ORDER BY LOWER(BTRIM(name)), BTRIM(name)`,
         [school_id]
       );
       names = rows.map(r => r.name);
     } catch (unionErr) {
       // school_subjects table may not exist yet — fall back to lectures only
       const [rows] = await db.query(
-        `SELECT DISTINCT subject_name AS name FROM lectures WHERE school_id = $1 ORDER BY subject_name`,
+        `SELECT DISTINCT ON (LOWER(BTRIM(subject_name))) BTRIM(subject_name) AS name
+         FROM lectures
+         WHERE school_id = $1
+           AND BTRIM(subject_name) <> ''
+         ORDER BY LOWER(BTRIM(subject_name)), BTRIM(subject_name)`,
         [school_id]
       );
       names = rows.map(r => r.name);

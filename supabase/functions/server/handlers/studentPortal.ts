@@ -30,6 +30,99 @@ export async function handleStudentPortal(
   const sectionId = user.section_id as number;
   const schoolId = user.school_id as number;
 
+  if (path === "/student-portal/profile" && method === "GET") {
+    try {
+      const { data: student } = await db
+        .from("students")
+        .select("id, first_name, last_name, age, roll_no, class_id, section_id, school_id")
+        .eq("id", studentId)
+        .maybeSingle();
+
+      if (!student)
+        return json({ message: "Student not found" }, 404);
+
+      const typedStudent = student as Record<string, unknown>;
+      const currentClassId = typedStudent.class_id as number | null;
+      const currentSectionId = typedStudent.section_id as number | null;
+      const currentSchoolId = (typedStudent.school_id as number | null) ?? schoolId;
+
+      const [{ data: classRow }, { data: sectionRow }, { data: schoolRow }] = await Promise.all([
+        currentClassId
+          ? db.from("classes").select("id, class_name").eq("id", currentClassId).maybeSingle()
+          : Promise.resolve({ data: null }),
+        currentSectionId
+          ? db.from("sections").select("id, section_name").eq("id", currentSectionId).maybeSingle()
+          : Promise.resolve({ data: null }),
+        currentSchoolId
+          ? db.from("schools").select("id, name, logo_url, city, address, phone").eq("id", currentSchoolId).maybeSingle()
+          : Promise.resolve({ data: null }),
+      ]);
+
+      const { data: teacherAssignments } = currentClassId
+        ? await db
+            .from("teacher_classes")
+            .select("teacher_id, class_id, section_id")
+            .eq("class_id", currentClassId)
+        : { data: [] as Record<string, unknown>[] };
+
+      const matchingAssignments = (teacherAssignments || []).filter((assignment: Record<string, unknown>) =>
+        Number(assignment.class_id) === Number(currentClassId)
+        && (
+          assignment.section_id == null
+          || Number(assignment.section_id) === Number(currentSectionId)
+        )
+      );
+
+      const teacherIds = Array.from(new Set(
+        matchingAssignments
+          .map((assignment: Record<string, unknown>) => Number(assignment.teacher_id))
+          .filter(Boolean),
+      ));
+
+      const { data: matchingTeachersData } = teacherIds.length
+        ? await db.from("teachers").select("id, first_name, last_name, teacher_role").in("id", teacherIds)
+        : { data: [] as Record<string, unknown>[] };
+
+      const matchingTeachers = (matchingTeachersData || [])
+        .filter((teacher: Record<string, unknown>) => teacher.teacher_role === "class_teacher")
+        .sort((left: Record<string, unknown>, right: Record<string, unknown>) => {
+          const leftPriority = left.teacher_role === "class_teacher" ? 0 : 1;
+          const rightPriority = right.teacher_role === "class_teacher" ? 0 : 1;
+          if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+          return String(left.last_name || "").localeCompare(String(right.last_name || ""));
+        });
+
+      const teacherNames = matchingTeachers
+        .map((teacher: Record<string, unknown>) => [teacher.first_name, teacher.last_name].filter(Boolean).join(" "))
+        .filter(Boolean);
+
+      return json({
+        student_id: typedStudent.id,
+        first_name: typedStudent.first_name,
+        last_name: typedStudent.last_name,
+        age: typedStudent.age,
+        roll_no: typedStudent.roll_no,
+        class_id: currentClassId,
+        section_id: currentSectionId,
+        school_id: currentSchoolId,
+        class_name: (classRow as Record<string, unknown> | null)?.class_name || null,
+        section_name: (sectionRow as Record<string, unknown> | null)?.section_name || null,
+        school_name: (schoolRow as Record<string, unknown> | null)?.name || null,
+        campus_name: (schoolRow as Record<string, unknown> | null)?.name || null,
+        school_logo_url: (schoolRow as Record<string, unknown> | null)?.logo_url || null,
+        campus_image_url: (schoolRow as Record<string, unknown> | null)?.logo_url || null,
+        school_city: (schoolRow as Record<string, unknown> | null)?.city || null,
+        school_address: (schoolRow as Record<string, unknown> | null)?.address || null,
+        school_phone: (schoolRow as Record<string, unknown> | null)?.phone || null,
+        teacher_names: teacherNames,
+        primary_teacher_name: teacherNames[0] || null,
+      });
+    } catch (err) {
+      console.error("[student-portal/profile]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
   // ── GET /student-portal/attendance ───────────────────────────
   if (path === "/student-portal/attendance" && method === "GET") {
     try {

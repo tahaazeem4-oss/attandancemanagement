@@ -9,6 +9,7 @@ import api from '../../services/api';
 import { C } from '../../config/theme';
 import AppHeader from '../../components/AppHeader';
 import ImportExportBar from '../../components/ImportExportBar';
+import ScreenIntroCard from '../../components/ScreenIntroCard';
 import { showDestructiveConfirm } from '../../lib/confirmDialog';
 
 const EMPTY_FORM = { name: '', tagline: '', initials: '' };
@@ -136,6 +137,12 @@ export default function OrgAdminCampusesScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <AppHeader title="Campuses" navigation={navigation} />
+      <ScreenIntroCard
+        title="Campuses"
+        description="Manage campus details, branding, and imports here so class, teacher, student, and subject data all stay aligned to the correct campus."
+        icon="business-outline"
+        tone="pink"
+      />
       <View style={styles.topRow}>
         <View style={styles.searchBox}>
           <Ionicons name="search-outline" size={16} color="#94A3B8" style={{ marginRight: 6 }} />

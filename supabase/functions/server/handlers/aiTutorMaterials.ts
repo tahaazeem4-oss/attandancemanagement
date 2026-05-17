@@ -2,6 +2,10 @@
 // Upload AI study material → record document → enqueue ingestion.
 import { getDb, json, verifyToken } from "../_shared.ts";
 import { getEffectiveAiAccess, getEffectiveAiAccessForUser } from "../lib/aiScope.ts";
+import { processDocument } from "./aiTutorIngestion.ts";
+
+// Deno deploy global for background tasks (defined in Supabase Edge runtime).
+declare const EdgeRuntime: { waitUntil?: (p: Promise<unknown>) => void } | undefined;
 
 const ALLOWED_EXT = new Set(["pdf","docx","pptx","ppt","txt"]);
 const ALLOWED_MIME = new Set([
@@ -141,11 +145,46 @@ export async function handleAiTutorMaterials(req: Request, path: string, _url: U
     }).select().single();
     if (docErr) return json({ message: docErr.message }, 500);
 
-    await db.from("ai_document_jobs").insert({
+    const { data: jobRow } = await db.from("ai_document_jobs").insert({
       document_id: doc.id,
       job_type: "extract",
-      status: "pending",
-    });
+      status: "running",
+      attempt: 1,
+    }).select().single();
+
+    // Fire-and-forget ingestion so the document reaches 'ready' without waiting on cron.
+    const ingestTask = (async () => {
+      try {
+        await processDocument(doc.id);
+        if (jobRow?.id) {
+          await db.from("ai_document_jobs").update({
+            status: "done",
+            updated_at: new Date().toISOString(),
+          }).eq("id", jobRow.id);
+        }
+      } catch (err) {
+        const msg = (err as Error).message || "ingest failed";
+        if (jobRow?.id) {
+          await db.from("ai_document_jobs").update({
+            status: "failed",
+            error_message: msg,
+            updated_at: new Date().toISOString(),
+          }).eq("id", jobRow.id);
+        }
+        await db.from("ai_documents").update({
+          status: "failed",
+          error_message: msg,
+          updated_at: new Date().toISOString(),
+        }).eq("id", doc.id);
+        await db.from("ai_usage_logs").insert({
+          event_type: "ingest_failed",
+          meta: { document_id: doc.id, error: msg },
+        });
+      }
+    })();
+    if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) {
+      EdgeRuntime.waitUntil(ingestTask);
+    }
 
     return json({ document: doc });
   }

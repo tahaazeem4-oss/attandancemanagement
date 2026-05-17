@@ -5,14 +5,100 @@ import { resolveStudentScope, getEffectiveAiAccess, getEffectiveAiAccessForUser 
 import { getEffectiveQuota, loadQuotaState, assertCanQuery, incrementUsage } from "../lib/aiQuota.ts";
 import { enforceRateLimit } from "../lib/aiRateLimit.ts";
 import { buildPrompt } from "../lib/aiPrompt.ts";
-import { embedText, chatComplete } from "../lib/aiOpenAI.ts";
+import { embedText, chatComplete, hasEmbeddings } from "../lib/aiOpenAI.ts";
 
 const MAX_QUESTION_CHARS = 2000;
+
+type RetrievedChunk = {
+  chunk_id: string;
+  document_id: string;
+  content: string;
+  similarity: number;
+  metadata: Record<string, unknown>;
+};
 
 function toPositiveInt(value: unknown): number | null {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return null;
   return n;
+}
+
+function queryTerms(question: string): string[] {
+  return Array.from(new Set(
+    question
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .map((x) => x.trim())
+      .filter((x) => x.length >= 2),
+  ));
+}
+
+function scoreSelectedDocumentChunk(question: string, chunk: { content: string; metadata?: Record<string, unknown> }): number {
+  const q = question.toLowerCase().trim();
+  const title = String(chunk.metadata?.title || "").toLowerCase();
+  const topic = String(chunk.metadata?.topic || "").toLowerCase();
+  const content = String(chunk.content || "").toLowerCase();
+  const searchText = `${title} ${topic} ${content}`;
+  let score = 0;
+  if (q && searchText.includes(q)) score += 0.35;
+  for (const term of queryTerms(question)) {
+    if (title.includes(term)) score += 0.14;
+    else if (topic.includes(term)) score += 0.12;
+    else if (content.includes(term)) score += 0.08;
+  }
+  return score;
+}
+
+async function loadSelectedDocumentChunks(
+  db: ReturnType<typeof getDb>,
+  params: {
+    documentId: string;
+    organizationId: number | undefined;
+    campusId: number | undefined;
+    classId: number | undefined;
+    sectionId: number | undefined;
+    subjectId: number;
+    question: string;
+  },
+): Promise<RetrievedChunk[]> {
+  let q = db
+    .from("ai_document_chunks")
+    .select("id, document_id, content, metadata, organization_id, campus_id, class_id, section_id, subject_id, chunk_index")
+    .eq("document_id", params.documentId)
+    .eq("organization_id", params.organizationId)
+    .eq("campus_id", params.campusId)
+    .eq("subject_id", params.subjectId)
+    .order("chunk_index", { ascending: true })
+    .limit(50);
+
+  if (params.classId) q = (q as typeof q).or(`class_id.is.null,class_id.eq.${params.classId}`);
+  else q = (q as typeof q).is("class_id", null);
+
+  const { data, error } = await (params.sectionId
+    ? (q as typeof q).or(`section_id.is.null,section_id.eq.${params.sectionId}`)
+    : (q as typeof q).is("section_id", null));
+  if (error) throw new Error(error.message);
+
+  const rows = (data || []) as Array<{
+    id: string;
+    document_id: string;
+    content: string;
+    metadata: Record<string, unknown> | null;
+  }>;
+  if (!rows.length) return [];
+
+  const ranked = rows
+    .map((row, index) => ({
+      chunk_id: row.id,
+      document_id: row.document_id,
+      content: row.content,
+      metadata: row.metadata || {},
+      similarity: scoreSelectedDocumentChunk(params.question, { content: row.content, metadata: row.metadata || {} }),
+      index,
+    }))
+    .sort((a, b) => (b.similarity - a.similarity) || (a.index - b.index));
+
+  return ranked.slice(0, Math.min(6, ranked.length));
 }
 
 async function resolveStudentFromUser(
@@ -80,6 +166,82 @@ export async function handleAiTutorChat(req: Request, path: string, url: URL): P
     return json({ enabled: true, scope: scopeForConfig, quota: state });
   }
 
+  // GET /ai-tutor/student/materials
+  // Returns ready ai_documents visible to the student's class (for subject cards and chat material info cards).
+  if (path === "/ai-tutor/student/materials" && req.method === "GET") {
+    const resolvedMats = await resolveStudentFromUser(db, user, url);
+    if (resolvedMats.unauthorizedParentAccess) return json({ message: "Forbidden" }, 403);
+    const studentIdMats = resolvedMats.studentId;
+    if (!studentIdMats) return json({ message: "Student context required" }, 403);
+
+    const scopeMats = await resolveStudentScope(studentIdMats);
+    if (!scopeMats) return json({ message: "Student not found" }, 404);
+
+    const subjectIdParam = url.searchParams.get("subject_id");
+
+    let q = db
+      .from("ai_documents")
+      .select("id, subject_id, title, topic, uploaded_by_role, uploaded_by_id, created_at, page_count, file_ext, file_size_bytes, status")
+      .eq("campus_id", scopeMats.campus_id!)
+      .in("status", ["uploaded", "processing", "ready"])
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    // Show materials for this class OR campus-wide materials (class_id IS NULL)
+    if (scopeMats.class_id) {
+      q = (q as any).or(`class_id.is.null,class_id.eq.${scopeMats.class_id}`);
+    } else {
+      q = (q as any).is("class_id", null);
+    }
+
+    if (subjectIdParam) q = (q as any).eq("subject_id", Number(subjectIdParam));
+
+    const { data: docs, error: docsErr } = await (q as any);
+    if (docsErr) return json({ message: docsErr.message }, 500);
+
+    // Resolve teacher names for teacher-uploaded materials
+    const teacherIds = [
+      ...new Set(
+        ((docs || []) as any[])
+          .filter((d: any) => d.uploaded_by_role === "teacher")
+          .map((d: any) => Number(d.uploaded_by_id))
+      ),
+    ];
+    const teacherMap: Record<number, string> = {};
+    if (teacherIds.length) {
+      const { data: teachers } = await db
+        .from("teachers")
+        .select("id, first_name, last_name")
+        .in("id", teacherIds);
+      for (const t of (teachers || []) as any[]) {
+        teacherMap[Number(t.id)] = `${t.first_name || ""} ${t.last_name || ""}`.trim();
+      }
+    }
+
+    // Resolve subject names for all subject_ids present in the docs.
+    const subjectIds = [
+      ...new Set(((docs || []) as any[]).map((d: any) => Number(d.subject_id)).filter(Boolean)),
+    ];
+    const subjectMap: Record<number, string> = {};
+    if (subjectIds.length) {
+      const { data: subs } = await db
+        .from("subjects")
+        .select("id, name")
+        .in("id", subjectIds);
+      for (const s of (subs || []) as any[]) {
+        subjectMap[Number(s.id)] = String(s.name || "");
+      }
+    }
+
+    const materials = ((docs || []) as any[]).map((d: any) => ({
+      ...d,
+      uploaded_by_name: teacherMap[Number(d.uploaded_by_id)] || d.uploaded_by_role,
+      subject_name: subjectMap[Number(d.subject_id)] || null,
+    }));
+
+    return json({ materials });
+  }
+
   const resolved = await resolveStudentFromUser(db, user, url);
   if (resolved.unauthorizedParentAccess) return json({ message: "Forbidden" }, 403);
   const studentId = resolved.studentId;
@@ -145,6 +307,7 @@ export async function handleAiTutorChat(req: Request, path: string, url: URL): P
     const b = await req.json().catch(() => ({}));
     const question = String(b.question || "").trim();
     const subject_id = b.subject_id ? Number(b.subject_id) : null;
+    const document_id = b.document_id ? String(b.document_id) : null;
     let session_id = b.session_id ? String(b.session_id) : null;
 
     if (!question) return json({ message: "question required" }, 400);
@@ -199,28 +362,59 @@ export async function handleAiTutorChat(req: Request, path: string, url: URL): P
       session_id = s!.id;
     }
 
-    // Embed question
-    let queryEmbedding: number[];
-    try {
-      queryEmbedding = await embedText(question);
-    } catch (err) {
-      return json({ message: `Embedding failed: ${(err as Error).message}` }, 502);
+    let usableChunks: RetrievedChunk[] = [];
+    if (document_id) {
+      try {
+        usableChunks = await loadSelectedDocumentChunks(db, {
+          documentId: document_id,
+          organizationId: scope.organization_id,
+          campusId: scope.campus_id,
+          classId: scope.class_id,
+          sectionId: scope.section_id,
+          subjectId: subject_id,
+          question,
+        });
+      } catch (err) {
+        return json({ message: `Search failed: ${(err as Error).message}` }, 500);
+      }
+    } else {
+      // Retrieve scoped chunks: vector search when embeddings available, else FTS.
+      const useVectors = hasEmbeddings();
+      let queryEmbedding: number[] | null = null;
+      if (useVectors) {
+        try {
+          queryEmbedding = await embedText(question);
+        } catch (err) {
+          return json({ message: `Embedding failed: ${(err as Error).message}` }, 502);
+        }
+      }
+
+      const { data: matches, error: matchErr } = useVectors
+        ? await db.rpc("match_ai_chunks", {
+            p_query_embedding: queryEmbedding as unknown as string,
+            p_org_id: scope.organization_id,
+            p_campus_id: scope.campus_id,
+            p_class_id: scope.class_id ?? null,
+            p_section_id: scope.section_id ?? null,
+            p_subject_id: subject_id,
+            p_match_count: 8,
+          })
+        : await db.rpc("match_ai_chunks_fts", {
+            p_query: question,
+            p_org_id: scope.organization_id,
+            p_campus_id: scope.campus_id,
+            p_class_id: scope.class_id ?? null,
+            p_section_id: scope.section_id ?? null,
+            p_subject_id: subject_id,
+            p_match_count: 8,
+          });
+      if (matchErr) return json({ message: `Search failed: ${matchErr.message}` }, 500);
+
+      const chunks = (matches || []) as RetrievedChunk[];
+      // Vector cosine sim threshold ~0.20; FTS ts_rank threshold ~0 (any match).
+      const simThreshold = useVectors ? 0.20 : 0.0001;
+      usableChunks = chunks.filter((c) => (c.similarity ?? 0) >= simThreshold);
     }
-
-    // Retrieve scoped chunks
-    const { data: matches, error: matchErr } = await db.rpc("match_ai_chunks", {
-      p_query_embedding: queryEmbedding as unknown as string,
-      p_org_id: scope.organization_id,
-      p_campus_id: scope.campus_id,
-      p_class_id: scope.class_id ?? null,
-      p_section_id: scope.section_id ?? null,
-      p_subject_id: subject_id,
-      p_match_count: 8,
-    });
-    if (matchErr) return json({ message: `Search failed: ${matchErr.message}` }, 500);
-
-    const chunks = (matches || []) as Array<{ chunk_id: string; document_id: string; content: string; similarity: number; metadata: Record<string, unknown> }>;
-    const usableChunks = chunks.filter((c) => c.similarity >= 0.20);
 
     // Save user message
     await db.from("ai_chat_messages").insert({

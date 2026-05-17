@@ -1,42 +1,46 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet, StatusBar, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { C } from '../config/theme';
 
-export default function AppHeader({ title, navigation, showBack = true }) {
+export default function AppHeader({ title, subtitle, navigation, showBack = true, rightSlot = null, onBackPress = null }) {
   const insets = useSafeAreaInsets();
   const statusInset = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0;
   const topInset = Math.max(insets.top, statusInset);
-  const topPad = topInset + 10;
+  const topPad = topInset + 8;
 
   return (
     <>
-      <StatusBar barStyle="light-content" backgroundColor="#1E3A8A" translucent={false} />
+      <StatusBar barStyle="light-content" backgroundColor={C.brandDeep} translucent={false} />
       <LinearGradient
-        colors={['#1E3A8A', '#2563EB']}
+        colors={C.brandGradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={[styles.header, { paddingTop: topPad }]}
       >
+        <View style={styles.glowPrimary} pointerEvents="none" />
+        <View style={styles.glowSecondary} pointerEvents="none" />
         <View style={styles.row}>
-          {/* Left: back arrow */}
           {showBack ? (
             <Pressable
-              onPress={() => navigation?.goBack()}
+              onPress={() => (onBackPress ? onBackPress() : navigation?.goBack())}
               style={styles.backBtn}
               hitSlop={10}
             >
-              <Text style={styles.backIcon}>‹</Text>
+              <Ionicons name="chevron-back" size={22} color="#F8FAFC" />
             </Pressable>
           ) : (
             <View style={styles.side} />
           )}
 
-          {/* Center: title */}
-          <Text style={styles.title} numberOfLines={1}>{title}</Text>
+          <View style={styles.titleWrap}>
+            <Text style={styles.title} numberOfLines={1}>{title}</Text>
+            {subtitle ? <Text style={styles.subtitle} numberOfLines={1}>{subtitle}</Text> : null}
+          </View>
 
-          {/* Right: empty placeholder to keep title centered */}
-          <View style={styles.side} />
+          {rightSlot ? <View style={styles.rightSlot}>{rightSlot}</View> : <View style={styles.side} />}
         </View>
       </LinearGradient>
     </>
@@ -45,39 +49,74 @@ export default function AppHeader({ title, navigation, showBack = true }) {
 
 const styles = StyleSheet.create({
   header: {
-    paddingBottom: 12,
-    paddingHorizontal: 8,
-    borderBottomLeftRadius: 14,
-    borderBottomRightRadius: 14,
+    paddingBottom: 16,
+    paddingHorizontal: 14,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    overflow: 'hidden',
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.16,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8,
+  },
+  glowPrimary: {
+    position: 'absolute',
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    top: -58,
+    right: -36,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  glowSecondary: {
+    position: 'absolute',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    bottom: -36,
+    left: -26,
+    backgroundColor: 'rgba(125,211,252,0.14)',
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 42,
+    minHeight: 52,
+    gap: 12,
   },
   backBtn: {
-    width: 42,
-    height: 42,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.14)',
   },
-  backIcon: {
-    color: '#fff',
-    fontSize: 30,
-    lineHeight: 34,
-    marginTop: -2,
+  titleWrap: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
   },
   title: {
-    flex: 1,
-    textAlign: 'center',
-    color: '#fff',
-    fontSize: 17,
+    color: C.white,
+    fontSize: 20,
     fontWeight: '800',
-    letterSpacing: 0.2,
+    letterSpacing: 0.1,
+    textAlign: 'center',
+  },
+  subtitle: {
+    color: '#DBEAFE',
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 3,
+    textAlign: 'center',
   },
   side: {
-    width: 42,
+    width: 44,
+    height: 44,
+  },
+  rightSlot: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
   },
 });

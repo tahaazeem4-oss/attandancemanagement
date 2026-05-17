@@ -1,7 +1,8 @@
 // frontend/src/features/aiTutor/components/AiQuotaBanner.js
-// Compact daily/weekly/monthly usage card with progress bars.
+// Compact daily/weekly/monthly usage summary.
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { C } from '../../../config/theme';
 
 function fmtReset(periodType) {
   const now = new Date();
@@ -27,21 +28,14 @@ function fmtReset(periodType) {
 
 function Row({ label, periodType, used, limit }) {
   const hasLimit = typeof limit === 'number' && limit > 0;
-  const ratio = hasLimit ? Math.min(1, (used || 0) / limit) : 0;
   const exhausted = hasLimit && (used || 0) >= limit;
-  const color = exhausted ? '#DC2626' : ratio > 0.8 ? '#D97706' : '#2563EB';
   return (
-    <View style={styles.row}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <View style={styles.rowRight}>
-        <Text style={[styles.rowMeta, exhausted && styles.rowMetaBad]}>
-          {hasLimit ? `${used || 0} / ${limit} tok` : `${used || 0} tok`}
-          {exhausted ? `  ·  ${fmtReset(periodType)}` : ''}
-        </Text>
-        <View style={styles.barTrack}>
-          <View style={[styles.barFill, { width: `${ratio * 100}%`, backgroundColor: color }]} />
-        </View>
-      </View>
+    <View style={[styles.row, exhausted && styles.rowExhausted]}>
+      <Text style={[styles.rowLabel, exhausted && styles.rowLabelBad]}>{label}</Text>
+      <Text style={[styles.rowMeta, exhausted && styles.rowMetaBad]} numberOfLines={1}>
+        {hasLimit ? `${used || 0}/${limit}` : `${used || 0}`}
+      </Text>
+      {exhausted ? <Text style={styles.rowReset}>{fmtReset(periodType)}</Text> : null}
     </View>
   );
 }
@@ -50,22 +44,25 @@ export default function AiQuotaBanner({ quota }) {
   if (!quota) return null;
   return (
     <View style={styles.card}>
-      <Text style={styles.h}>Your AI usage</Text>
-      <Row label="Today"      periodType="daily"   used={quota.used_today_tokens}  limit={quota.daily_tokens} />
-      <Row label="This week"  periodType="weekly"  used={quota.used_week_tokens}   limit={quota.weekly_tokens} />
-      <Row label="This month" periodType="monthly" used={quota.used_month_tokens}  limit={quota.monthly_tokens} />
+      <Text style={styles.h}>AI usage</Text>
+      <View style={styles.rowWrap}>
+        <Row label="Today" periodType="daily" used={quota.used_today_tokens} limit={quota.daily_tokens} />
+        <Row label="Week" periodType="weekly" used={quota.used_week_tokens} limit={quota.weekly_tokens} />
+        <Row label="Month" periodType="monthly" used={quota.used_month_tokens} limit={quota.monthly_tokens} />
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { backgroundColor: '#F9FAFB', borderRadius: 12, padding: 12, marginHorizontal: 12, marginBottom: 10, gap: 6 },
-  h: { fontWeight: '700', color: '#111827', marginBottom: 4 },
-  row: { paddingVertical: 4 },
-  rowLabel: { color: '#374151', fontSize: 12, fontWeight: '600' },
-  rowRight: { marginTop: 2 },
-  rowMeta: { color: '#6B7280', fontSize: 11 },
-  rowMetaBad: { color: '#B91C1C', fontWeight: '700' },
-  barTrack: { height: 6, backgroundColor: '#E5E7EB', borderRadius: 3, marginTop: 4, overflow: 'hidden' },
-  barFill: { height: '100%', borderRadius: 3 },
+  card: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FBFF', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8, marginHorizontal: 12, marginBottom: 8, gap: 10, borderWidth: 1, borderColor: '#DBEAFE' },
+  h: { fontWeight: '700', color: C.textDark, fontSize: 12 },
+  rowWrap: { flex: 1, flexDirection: 'row', gap: 8 },
+  row: { flex: 1, backgroundColor: C.white, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 6, borderWidth: 1, borderColor: '#DBEAFE' },
+  rowExhausted: { backgroundColor: '#FEF2F2', borderColor: '#FECACA' },
+  rowLabel: { color: C.textMed, fontSize: 10, fontWeight: '700', marginBottom: 1 },
+  rowLabelBad: { color: '#B91C1C' },
+  rowMeta: { color: C.primaryDark, fontSize: 11, fontWeight: '700' },
+  rowMetaBad: { color: '#B91C1C' },
+  rowReset: { color: '#B91C1C', fontSize: 9, marginTop: 2, fontWeight: '600' },
 });

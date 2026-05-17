@@ -2,6 +2,13 @@
 // Resolves effective quotas (most restrictive across scopes) and updates counters atomically.
 import { getDb } from "../_shared.ts";
 import type { AiScope } from "./aiScope.ts";
+import {
+  DISTRIBUTABLE,
+  getAllocationMode,
+  minDefined as _unused,
+  numericOrNull,
+  resolveExplicitAllocation,
+} from "./aiQuotaPolicy.ts";
 
 export interface QuotaLimits {
   daily_requests: number | null;
@@ -26,10 +33,6 @@ export interface QuotaState extends QuotaLimits {
   remaining_monthly_requests: number | null;
 }
 
-const DISTRIBUTABLE: (keyof QuotaLimits)[] = [
-  "daily_requests","weekly_requests","monthly_requests",
-  "daily_tokens","weekly_tokens","monthly_tokens",
-];
 const PER_REQUEST_CAPS: (keyof QuotaLimits)[] = ["max_input_tokens","max_output_tokens"];
 
 function minDefined(values: Array<number | null | undefined>): number | null {
@@ -63,7 +66,8 @@ export async function getEffectiveQuota(scope: AiScope): Promise<QuotaLimits> {
     .join(",");
   const { data: chainRows } = await db
     .from("ai_quota_policies")
-    .select("scope_type, scope_id, daily_requests, weekly_requests, monthly_requests, daily_tokens, weekly_tokens, monthly_tokens, max_input_tokens, max_output_tokens")
+    .select("*")
+    .order("updated_at", { ascending: true })
     .or(chainOr);
 
   const chainPolicyBy = new Map<string, Partial<QuotaLimits>>();
@@ -81,7 +85,7 @@ export async function getEffectiveQuota(scope: AiScope): Promise<QuotaLimits> {
     max_input_tokens: null, max_output_tokens: null,
   };
   for (const f of PER_REQUEST_CAPS) {
-    const vals = chain.map((c) => (ownOf(c.type, c.id)[f] as number | null | undefined));
+    const vals = chain.map((c) => numericOrNull(ownOf(c.type, c.id)[f] as number | null | undefined));
     (merged as Record<string, number | null>)[f] = minDefined(vals);
   }
 
@@ -122,19 +126,24 @@ export async function getEffectiveQuota(scope: AiScope): Promise<QuotaLimits> {
       const { data } = await db.from("students").select("id").eq("section_id", sk.parentId);
       entityRows = (data || []) as Array<{ id: number }>;
     }
-    // Student counts for each sibling.
     const enriched: Array<{ id: number; students: number }> = [];
-    for (const r of entityRows) {
-      let n = 1;
-      if (sk.childType !== "student") {
-        n = await countStudentsForEntity(sk.childType, r.id);
+    if (sk.childType === "student") {
+      // Pool at student level is divided across AI-ENABLED siblings only.
+      // A disabled student takes no share. (Caller is always enabled, since
+      // the feature flag is checked upstream of quota resolution.)
+      const enabled = await enabledStudentIdsInSection(sk.parentId as number);
+      for (const r of entityRows) {
+        enriched.push({ id: r.id, students: enabled.has(r.id) ? 1 : 0 });
       }
-      enriched.push({ id: r.id, students: n });
+    } else {
+      for (const r of entityRows) {
+        const n = await countStudentsForEntity(sk.childType, r.id);
+        enriched.push({ id: r.id, students: n });
+      }
     }
     siblingsByLevel.set(sk.level, enriched);
   }
 
-  // Fetch all sibling manual policies in batch per level.
   const sibPoliciesByLevel = new Map<number, Map<number, Partial<QuotaLimits>>>();
   for (const sk of sibKeysByLevel) {
     const sibs = siblingsByLevel.get(sk.level) || [];
@@ -142,7 +151,8 @@ export async function getEffectiveQuota(scope: AiScope): Promise<QuotaLimits> {
     const ids = sibs.map((s) => s.id);
     const { data } = await db
       .from("ai_quota_policies")
-      .select("scope_id, daily_requests, weekly_requests, monthly_requests, daily_tokens, weekly_tokens, monthly_tokens")
+      .select("*")
+      .order("updated_at", { ascending: true })
       .eq("scope_type", sk.childType)
       .in("scope_id", ids);
     const map = new Map<number, Partial<QuotaLimits>>();
@@ -152,38 +162,39 @@ export async function getEffectiveQuota(scope: AiScope): Promise<QuotaLimits> {
     sibPoliciesByLevel.set(sk.level, map);
   }
 
-  // Walk each distributable field independently.
   for (const F of DISTRIBUTABLE) {
-    // Start at global.
-    let pool: number | null = (ownOf("global", null)[F] as number | null | undefined) ?? null;
+    let pool: number | null = numericOrNull(ownOf("global", null)[F] as number | null | undefined) ?? null;
 
     for (let i = 1; i < chain.length; i++) {
       const here = chain[i];
-      const ownVal = (ownOf(here.type, here.id)[F] as number | null | undefined);
-      if (ownVal !== null && ownVal !== undefined) {
-        pool = Number(ownVal);
+      const sibs = siblingsByLevel.get(i) || [];
+      const mySibling = sibs.find((s) => s.id === here.id);
+      const myStudents = mySibling?.students ?? 0;
+      const explicitOwn = resolveExplicitAllocation(ownOf(here.type, here.id), F, pool);
+      if (explicitOwn) {
+        pool = myStudents > 0 ? explicitOwn.value : 0;
         continue;
       }
-      // Auto: derive from parent pool.
-      if (pool === null) continue; // unlimited stays unlimited.
-      const sibs = siblingsByLevel.get(i) || [];
+      if (pool === null) continue;
       const sibPol = sibPoliciesByLevel.get(i) || new Map();
       let manualSum = 0;
       let nonManualStudents = 0;
-      let myStudents = 1;
       for (const s of sibs) {
-        const own = sibPol.get(s.id)?.[F] as number | null | undefined;
-        if (own !== null && own !== undefined) {
-          manualSum += Number(own);
+        const explicitSibling = resolveExplicitAllocation(sibPol.get(s.id) || null, F, pool);
+        if (explicitSibling && s.students > 0) {
+          manualSum += explicitSibling.value ?? 0;
         } else {
           nonManualStudents += s.students;
         }
-        if (s.id === here.id) myStudents = s.students;
       }
       const remaining = Math.max(0, pool - manualSum);
-      pool = nonManualStudents > 0
-        ? Math.floor(remaining * myStudents / nonManualStudents)
-        : 0;
+      // Disabled scopes (0 enabled students beneath them) get 0 share.
+      // The pool is only divided among enabled siblings.
+      if (myStudents <= 0 || nonManualStudents <= 0) {
+        pool = 0;
+      } else {
+        pool = Math.floor(remaining * myStudents / nonManualStudents);
+      }
     }
     (merged as Record<string, number | null>)[F] = pool;
   }
@@ -193,8 +204,7 @@ export async function getEffectiveQuota(scope: AiScope): Promise<QuotaLimits> {
 
 // Count of AI-enabled students under any entity. A student is enabled iff
 // the effective AI feature flag along its chain resolves to TRUE.
-async function countStudentsForEntity(type: string, id: number): Promise<number> {
-  const db = getDb();
+async function countStudentsForEntity(type: string, id: number): Promise<number> {  const db = getDb();
   // Gather candidate students for the entity.
   let candidates: Array<{ id: number; section_id: number; class_id: number; school_id: number }> = [];
   if (type === "section") {
@@ -236,7 +246,8 @@ async function countStudentsForEntity(type: string, id: number): Promise<number>
 
   const { data: flagRows } = await db
     .from("ai_feature_flags")
-    .select("scope_type, scope_id, is_enabled")
+    .select("scope_type, scope_id, is_enabled, updated_at")
+    .order("updated_at", { ascending: true })
     .or(orFilters.join(","));
   const flagBy = new Map<string, boolean>();
   for (const r of (flagRows || []) as Array<{ scope_type: string; scope_id: number | null; is_enabled: boolean }>) {
@@ -259,6 +270,58 @@ async function countStudentsForEntity(type: string, id: number): Promise<number>
   return n;
 }
 
+// Returns the set of student ids in a section whose effective AI feature
+// flag resolves to TRUE. Used for fair pool-division at the student level.
+async function enabledStudentIdsInSection(sectionId: number): Promise<Set<number>> {
+  const db = getDb();
+  const { data: students } = await db
+    .from("students")
+    .select("id, section_id, class_id, school_id")
+    .eq("section_id", sectionId);
+  const rows = (students || []) as Array<{ id: number; section_id: number; class_id: number; school_id: number }>;
+  const out = new Set<number>();
+  if (!rows.length) return out;
+
+  const studentIds = rows.map((r) => r.id);
+  const classIds = Array.from(new Set(rows.map((r) => r.class_id)));
+  const schoolIds = Array.from(new Set(rows.map((r) => r.school_id)));
+  const { data: schoolRows } = await db.from("schools").select("id, org_id").in("id", schoolIds);
+  const orgBySchool = new Map<number, number | null>();
+  for (const r of (schoolRows || []) as Array<{ id: number; org_id: number | null }>) orgBySchool.set(r.id, r.org_id);
+  const orgIds = Array.from(new Set(Array.from(orgBySchool.values()).filter((x): x is number => x !== null)));
+
+  const orFilters: string[] = [`and(scope_type.eq.global,scope_id.is.null)`];
+  if (orgIds.length)     orFilters.push(`and(scope_type.eq.organization,scope_id.in.(${orgIds.join(",")}))`);
+  if (schoolIds.length)  orFilters.push(`and(scope_type.eq.campus,scope_id.in.(${schoolIds.join(",")}))`);
+  if (classIds.length)   orFilters.push(`and(scope_type.eq.class,scope_id.in.(${classIds.join(",")}))`);
+  orFilters.push(`and(scope_type.eq.section,scope_id.eq.${sectionId})`);
+  if (studentIds.length) orFilters.push(`and(scope_type.eq.student,scope_id.in.(${studentIds.join(",")}))`);
+
+  const { data: flagRows } = await db
+    .from("ai_feature_flags")
+    .select("scope_type, scope_id, is_enabled, updated_at")
+    .order("updated_at", { ascending: true })
+    .or(orFilters.join(","));
+  const flagBy = new Map<string, boolean>();
+  for (const r of (flagRows || []) as Array<{ scope_type: string; scope_id: number | null; is_enabled: boolean }>) {
+    const k = r.scope_id === null ? `${r.scope_type}#null` : `${r.scope_type}#${r.scope_id}`;
+    flagBy.set(k, Boolean(r.is_enabled));
+  }
+  const globalEnabled = flagBy.get("global#null") ?? false;
+
+  for (const st of rows) {
+    const orgId = orgBySchool.get(st.school_id) ?? null;
+    let on = globalEnabled;
+    if (orgId !== null && flagBy.has(`organization#${orgId}`)) on = flagBy.get(`organization#${orgId}`)!;
+    if (flagBy.has(`campus#${st.school_id}`))                   on = flagBy.get(`campus#${st.school_id}`)!;
+    if (flagBy.has(`class#${st.class_id}`))                     on = flagBy.get(`class#${st.class_id}`)!;
+    if (flagBy.has(`section#${st.section_id}`))                 on = flagBy.get(`section#${st.section_id}`)!;
+    if (flagBy.has(`student#${st.id}`))                         on = flagBy.get(`student#${st.id}`)!;
+    if (on) out.add(st.id);
+  }
+  return out;
+}
+
 function periodStart(type: "daily" | "weekly" | "monthly"): string {
   const d = new Date();
   d.setUTCHours(0, 0, 0, 0);
@@ -273,13 +336,21 @@ function periodStart(type: "daily" | "weekly" | "monthly"): string {
   return d.toISOString().slice(0, 10);
 }
 
+async function currentPolicyEpoch(): Promise<number> {
+  const db = getDb();
+  const { data } = await db.from("ai_quota_runtime_state").select("policy_epoch").eq("singleton_id", true).maybeSingle();
+  return Number(data?.policy_epoch || 1);
+}
+
 export async function loadQuotaState(scope: AiScope, limits: QuotaLimits): Promise<QuotaState> {
   const db = getDb();
+  const policyEpoch = await currentPolicyEpoch();
   const periods = (["daily","weekly","monthly"] as const).map((p) => ({ p, start: periodStart(p) }));
   const { data } = await db
     .from("ai_quota_counters")
     .select("period_type, period_start, used_requests, used_tokens")
     .eq("student_id", scope.student_id!)
+    .eq("policy_epoch", policyEpoch)
     .in("period_type", periods.map((x) => x.p))
     .in("period_start", periods.map((x) => x.start));
 
@@ -325,12 +396,14 @@ export function assertCanQuery(state: QuotaState): { ok: boolean; reason?: strin
 /** Increment current-period counters by 1 request and the tokens used. */
 export async function incrementUsage(studentId: number, totalTokens: number): Promise<void> {
   const db = getDb();
+  const policyEpoch = await currentPolicyEpoch();
   for (const p of ["daily","weekly","monthly"] as const) {
     const start = periodStart(p);
     const { data: existing } = await db
       .from("ai_quota_counters")
       .select("id, used_requests, used_tokens")
       .eq("student_id", studentId)
+      .eq("policy_epoch", policyEpoch)
       .eq("period_type", p)
       .eq("period_start", start)
       .maybeSingle();
@@ -345,6 +418,7 @@ export async function incrementUsage(studentId: number, totalTokens: number): Pr
     } else {
       await db.from("ai_quota_counters").insert({
         student_id: studentId,
+        policy_epoch: policyEpoch,
         period_type: p,
         period_start: start,
         used_requests: 1,

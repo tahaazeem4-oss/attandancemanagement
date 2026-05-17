@@ -65,7 +65,8 @@ export async function getEffectiveAiAccess(scope: AiScope): Promise<EffectiveAcc
 
   const { data, error } = await db
     .from("ai_feature_flags")
-    .select("scope_type, scope_id, is_enabled")
+    .select("scope_type, scope_id, is_enabled, updated_at")
+    .order("updated_at", { ascending: true })
     .or(conditions);
 
   if (error) {

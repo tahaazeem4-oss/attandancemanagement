@@ -197,7 +197,7 @@ export default function StudentNotificationsScreen({ navigation, route }) {
 
   return (
     <View style={styles.rootWrap}>
-      <AppHeader title="Notifications" navigation={navigation} />
+      <AppHeader title="Notifications" eyebrow="Student Portal" navigation={navigation} />
     <View style={styles.root}>
 
       {/* Mark all read row */}

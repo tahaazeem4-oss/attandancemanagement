@@ -7,6 +7,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import api from '../services/api';
 import { C } from '../config/theme';
 import AppHeader from '../components/AppHeader';
+import ScreenIntroCard from '../components/ScreenIntroCard';
 
 const STATUS_OPTIONS = ['present', 'absent', 'leave'];
 const STATUS_COLOR   = { present: C.present,  absent: C.absent,  leave: C.leave };
@@ -119,6 +120,12 @@ export default function StudentAttendanceScreen({ navigation, route }) {
   return (
     <View style={styles.container}>
       <AppHeader title="Mark Attendance" navigation={navigation} />
+      <ScreenIntroCard
+        title="Attendance Entry"
+        description="Mark each student once for the selected class and section. Review the summary counts before saving so the report and history screens remain accurate."
+        icon="checkbox-outline"
+        tone="emerald"
+      />
 
       {/* Class info strip */}
       <View style={styles.infoBar}>

@@ -9,11 +9,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import ScreenIntroCard from '../../../components/ScreenIntroCard';
 import {
   fetchHierarchy, setFeatureFlag, setFeatureFlagsBulk,
   setQuotaPolicy, deleteScopeConfig, cascadeFeatureFlag,
 } from '../api/aiTutorApi';
 import { useAuth } from '../../../context/AuthContext';
+import { C, S } from '../../../config/theme';
 
 const POLICY_FIELDS = [
   { key: 'daily_requests',    label: 'Requests / day' },
@@ -26,12 +28,25 @@ const POLICY_FIELDS = [
   { key: 'max_output_tokens', label: 'Max output tokens / request' },
 ];
 
+const DISTRIBUTABLE_KEYS = new Set([
+  'daily_requests', 'weekly_requests', 'monthly_requests',
+  'daily_tokens', 'weekly_tokens', 'monthly_tokens',
+]);
+
+const numericOnly = (v) => v.replace(/[^0-9]/g, '');
+const percentInput = (v) => v.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+const percentFromBps = (bps) => {
+  if (bps === null || bps === undefined || Number.isNaN(Number(bps))) return '';
+  const pct = Number(bps) / 100;
+  return Number.isInteger(pct) ? String(pct) : String(pct.toFixed(2)).replace(/\.0+$/, '').replace(/(\.\d*[1-9])0+$/, '$1');
+};
+
 const TYPE_LABEL = {
   global: 'Global', organization: 'Org', campus: 'Campus',
-  class: 'Class', section: 'Section', student: 'Student', root: 'Top',
+  class: 'Class', section: 'Section', student: 'Student', root: 'Level 1',
 };
 const CHILD_LABEL_PLURAL = {
-  root: 'top level',
+  root: 'Level 1',
   organization: 'campuses',
   campus: 'classes',
   class: 'sections',
@@ -50,13 +65,14 @@ export default function AdminAiHierarchyScreen() {
   const role = user?.role;
   const navigation = useNavigation();
 
-  const [stack, setStack] = useState([{ type: 'root', id: null, name: 'Top' }]);
+  const [stack, setStack] = useState([{ type: 'root', id: null, name: 'Level 1' }]);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState(null);     // child currently being toggled
   const [showQuotaEditor, setShowQuotaEditor] = useState(false);
   const [quotaDraft, setQuotaDraft] = useState({});
+  const [quotaTarget, setQuotaTarget] = useState(null);
   const [savingQuota, setSavingQuota] = useState(false);
   const [filter, setFilter] = useState('');
 
@@ -104,7 +120,14 @@ export default function AdminAiHierarchyScreen() {
     setBusyId(`${child.type}#${child.id}`);
     try {
       if (value === null) {
-        await deleteScopeConfig(child.type, child.id, 'flag');
+        if (child.has_children) {
+          await cascadeFeatureFlag({
+            scope_type: child.type, scope_id: child.id,
+            is_enabled: null, mode: 'inherit', clear_subtree: true,
+          });
+        } else {
+          await deleteScopeConfig(child.type, child.id, 'flag');
+        }
       } else {
         // Cascade so any conflicting overrides in this child's subtree are cleared
         // and everyone below truly inherits the new decision.
@@ -124,17 +147,32 @@ export default function AdminAiHierarchyScreen() {
   // ── Current node's flag override ───────────────────────────────
   const setCurrentFlag = async (value) => {
     if (data?.is_root) return;
-    // For "Inherit" we just delete this node's flag and keep children as-is.
     if (value === null) {
-      setBusyId('node');
-      try {
-        await deleteScopeConfig(current.type, current.id, 'flag');
-        await load();
-      } catch (e) {
-        Alert.alert('Failed', e?.response?.data?.message || e?.message || 'Could not update');
-      } finally {
-        setBusyId(null);
-      }
+      Alert.alert(
+        `Set ${current.name} to inherit?`,
+        `This will clear the explicit AI flag on ${current.name} and clear any ON/OFF overrides below it so the whole subtree inherits from the parent above. Per-child quota allocations are kept.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Clear & inherit',
+            style: 'destructive',
+            onPress: async () => {
+              setBusyId('node');
+              try {
+                await cascadeFeatureFlag({
+                  scope_type: current.type, scope_id: current.id,
+                  is_enabled: null, mode: 'inherit', clear_subtree: true,
+                });
+                await load();
+              } catch (e) {
+                Alert.alert('Failed', e?.response?.data?.message || e?.message || 'Could not update');
+              } finally {
+                setBusyId(null);
+              }
+            },
+          },
+        ]
+      );
       return;
     }
     // For ON / OFF we cascade so any conflicting child overrides are cleared
@@ -170,36 +208,75 @@ export default function AdminAiHierarchyScreen() {
   };
 
   // ── Quota allocation for current node ──────────────────────────
-  const openQuotaEditor = () => {
-    if (data?.is_root) return;
-    const own = data?.node?.own_policy || {};
+  const openQuotaEditorFor = (target, effectivePolicy = {}) => {
+    if (!target) return;
+    const own = target?.own_policy || {};
     const draft = {};
     POLICY_FIELDS.forEach((f) => {
       draft[f.key] = own[f.key] !== null && own[f.key] !== undefined ? String(own[f.key]) : '';
+      if (DISTRIBUTABLE_KEYS.has(f.key)) {
+        draft[`${f.key}_mode`] = own[`${f.key}_mode`] || (own[f.key] !== null && own[f.key] !== undefined ? 'fixed' : 'inherit');
+        draft[`${f.key}_percent`] = percentFromBps(own[`${f.key}_percent_bps`]);
+      }
     });
+    setQuotaTarget({ ...target, effective_policy: effectivePolicy || {} });
     setQuotaDraft(draft);
     setShowQuotaEditor(true);
+  };
+
+  const openQuotaEditor = () => {
+    if (data?.is_root || !data?.node) return;
+    openQuotaEditorFor(data.node, data.node.effective_policy || {});
+  };
+
+  const openChildQuotaEditor = (child) => {
+    if (!child) return;
+    openQuotaEditorFor(child, child.allocation || {});
   };
 
   const saveQuota = async () => {
     setSavingQuota(true);
     try {
-      const body = { scope_type: current.type, scope_id: current.id };
+      const target = quotaTarget || data?.node;
+      if (!target?.type || target?.id === undefined) throw new Error('No quota target selected');
+      const body = { scope_type: target.type, scope_id: target.id };
       let anySet = false;
       POLICY_FIELDS.forEach((f) => {
-        const v = quotaDraft[f.key];
-        if (v && v.trim() !== '') {
-          const n = Number(v);
-          if (!Number.isNaN(n)) { body[f.key] = n; anySet = true; }
+        if (DISTRIBUTABLE_KEYS.has(f.key)) {
+          const mode = quotaDraft[`${f.key}_mode`] || (quotaDraft[f.key] ? 'fixed' : 'inherit');
+          body[`${f.key}_mode`] = mode;
+          if (mode === 'fixed') {
+            const v = quotaDraft[f.key];
+            if (v && v.trim() !== '') {
+              const n = Number(v);
+              if (!Number.isNaN(n)) { body[f.key] = n; anySet = true; }
+            }
+          } else if (mode === 'percent') {
+            const pctRaw = quotaDraft[`${f.key}_percent`];
+            if (pctRaw && pctRaw.trim() !== '') {
+              const pct = Number(pctRaw);
+              if (!Number.isNaN(pct)) {
+                body[`${f.key}_percent_bps`] = Math.round(pct * 100);
+                anySet = true;
+              }
+            }
+          }
+        } else {
+          const v = quotaDraft[f.key];
+          if (v && v.trim() !== '') {
+            const n = Number(v);
+            if (!Number.isNaN(n)) { body[f.key] = n; anySet = true; }
+          }
         }
       });
       if (!anySet) {
         // Treat as "clear all" → inherit from parent
-        await deleteScopeConfig(current.type, current.id, 'policy');
+        await deleteScopeConfig(target.type, target.id, 'policy');
       } else {
         await setQuotaPolicy(body);
       }
       setShowQuotaEditor(false);
+      setQuotaTarget(null);
       await load();
     } catch (e) {
       const data = e?.response?.data;
@@ -228,9 +305,11 @@ export default function AdminAiHierarchyScreen() {
   };
 
   const clearQuota = async () => {
+    const target = quotaTarget || data?.node;
+    if (!target?.type || target?.id === undefined) return;
     Alert.alert(
       'Clear allocation?',
-      `This will remove ${current.name}'s own quota allocation. It will inherit from its parent again.`,
+      `This will remove ${target.name}'s own quota allocation. It will inherit from its parent again.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -239,8 +318,9 @@ export default function AdminAiHierarchyScreen() {
           onPress: async () => {
             setSavingQuota(true);
             try {
-              await deleteScopeConfig(current.type, current.id, 'policy');
+              await deleteScopeConfig(target.type, target.id, 'policy');
               setShowQuotaEditor(false);
+              setQuotaTarget(null);
               await load();
             } catch (e) {
               Alert.alert('Failed', e?.response?.data?.message || e?.message || 'Could not clear');
@@ -279,31 +359,22 @@ export default function AdminAiHierarchyScreen() {
   const node = data?.node;
   const effFlag = node?.effective_flag;
   const effPolicy = node?.effective_policy || {};
+  const contextEffFlag = data?.context_effective_flag || effFlag;
+  const modalTarget = quotaTarget || node;
+  const modalEffPolicy = quotaTarget?.effective_policy || effPolicy;
 
   return (
-    <SafeAreaView style={styles.root} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.root} edges={['left', 'right', 'bottom']}>
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}
       >
-        {/* Breadcrumb */}
-        <View style={styles.breadcrumbRow}>
-          {stack.map((s, i) => (
-            <React.Fragment key={`${s.type}#${s.id ?? 'root'}#${i}`}>
-              {i > 0 && <Text style={styles.crumbSep}>›</Text>}
-              <TouchableOpacity onPress={() => goUp(i)} disabled={i === stack.length - 1}>
-                <Text style={[styles.crumb, i === stack.length - 1 && styles.crumbActive]}>
-                  {i === 0 ? 'Top' : `${TYPE_LABEL[s.type]}: ${s.name}`}
-                </Text>
-              </TouchableOpacity>
-            </React.Fragment>
-          ))}
-        </View>
-
-        <Text style={styles.helpTop}>
-          Pick where the rule applies. Empty values inherit from the parent above.
-          Use the {'\u25BA'} to drill in.
-        </Text>
+        <ScreenIntroCard
+          title="AI Tutor Policies"
+          description="Manage inheritance, overrides, and quota distribution across organizations, campuses, classes, sections, and students from one hierarchy."
+          icon="git-merge-outline"
+          tone="violet"
+        />
 
         {!!error && <Text style={styles.errorBanner}>{error}</Text>}
 
@@ -471,7 +542,7 @@ export default function AdminAiHierarchyScreen() {
           {!loading && filteredChildren.length === 0 && (
             <Text style={styles.empty}>
               {data?.is_root
-                ? 'Nothing to manage at the top level.'
+                ? 'Nothing to manage at Level 1.'
                 : `No ${CHILD_LABEL_PLURAL[current.type] || 'children'} under this node.`}
             </Text>
           )}
@@ -480,10 +551,11 @@ export default function AdminAiHierarchyScreen() {
             <ChildRow
               key={`${child.type}#${child.id}`}
               child={child}
-              parentEffFlag={effFlag?.is_enabled ?? null}
+              parentEffFlag={contextEffFlag?.is_enabled ?? null}
               currentNodeName={node?.name || 'global default'}
               busy={busyId === `${child.type}#${child.id}`}
               onTriState={(v) => setChildFlag(child, v)}
+              onEditQuota={() => openChildQuotaEditor(child)}
               onDrillIn={() => goInto(child)}
             />
           ))}
@@ -505,30 +577,58 @@ export default function AdminAiHierarchyScreen() {
         <View style={styles.modalBackdrop} pointerEvents="auto">
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>
-              Allocation for {node?.name}
+              Allocation for {modalTarget?.name}
             </Text>
             <Text style={styles.modalHelp}>
-              Leave a field blank to receive an auto pro-rata share of the parent's pool
-              (based on student count). Set a value to claim a fixed allocation off the top —
-              the remaining pool is then split among the other children.
+              Use inherit for auto pro-rata distribution, fixed for a hard reserved amount,
+              or percent to scale with the parent pool. Request limits and token pools support
+              all three modes; per-request caps stay fixed only.
             </Text>
             <ScrollView style={{ maxHeight: 380 }}>
               {POLICY_FIELDS.map((f) => {
-                const eff = effPolicy[f.key];
+                const eff = modalEffPolicy[f.key];
+                const mode = quotaDraft[`${f.key}_mode`] || (DISTRIBUTABLE_KEYS.has(f.key) ? 'inherit' : 'fixed');
                 const placeholder = eff?.value === null || eff?.value === undefined
                   ? 'No limit'
                   : `${eff.value} (from ${eff.from_name})`;
                 return (
                   <View key={f.key} style={styles.modalField}>
                     <Text style={styles.modalFieldLabel}>{f.label}</Text>
-                    <TextInput
-                      style={styles.modalInput}
-                      keyboardType="numeric"
-                      placeholder={placeholder}
-                      placeholderTextColor="#9ca3af"
-                      value={quotaDraft[f.key] ?? ''}
-                      onChangeText={(v) => setQuotaDraft({ ...quotaDraft, [f.key]: v.replace(/[^0-9]/g, '') })}
-                    />
+                    {DISTRIBUTABLE_KEYS.has(f.key) && (
+                      <View style={styles.modeRow}>
+                        {['inherit', 'fixed', 'percent'].map((option) => (
+                          <TouchableOpacity
+                            key={option}
+                            style={[styles.modeChip, mode === option && styles.modeChipActive]}
+                            onPress={() => setQuotaDraft({ ...quotaDraft, [`${f.key}_mode`]: option })}
+                          >
+                            <Text style={[styles.modeChipText, mode === option && styles.modeChipTextActive]}>
+                              {option}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+                    {(!DISTRIBUTABLE_KEYS.has(f.key) || mode === 'fixed') && (
+                      <TextInput
+                        style={styles.modalInput}
+                        keyboardType="numeric"
+                        placeholder={placeholder}
+                        placeholderTextColor="#9ca3af"
+                        value={quotaDraft[f.key] ?? ''}
+                        onChangeText={(v) => setQuotaDraft({ ...quotaDraft, [f.key]: numericOnly(v) })}
+                      />
+                    )}
+                    {DISTRIBUTABLE_KEYS.has(f.key) && mode === 'percent' && (
+                      <TextInput
+                        style={styles.modalInput}
+                        keyboardType="decimal-pad"
+                        placeholder="Percent of parent pool"
+                        placeholderTextColor="#9ca3af"
+                        value={quotaDraft[`${f.key}_percent`] ?? ''}
+                        onChangeText={(v) => setQuotaDraft({ ...quotaDraft, [`${f.key}_percent`]: percentInput(v) })}
+                      />
+                    )}
                   </View>
                 );
               })}
@@ -536,7 +636,10 @@ export default function AdminAiHierarchyScreen() {
             <View style={styles.modalBtnRow}>
               <TouchableOpacity
                 style={[styles.modalBtn, styles.modalBtnGhost]}
-                onPress={() => setShowQuotaEditor(false)}
+                onPress={() => {
+                  setShowQuotaEditor(false);
+                  setQuotaTarget(null);
+                }}
                 disabled={savingQuota}
               >
                 <Text style={styles.modalBtnGhostText}>Cancel</Text>
@@ -576,7 +679,7 @@ function TriButton({ label, active, onPress, busy, color }) {
   );
 }
 
-function ChildRow({ child, parentEffFlag, currentNodeName, busy, onTriState, onDrillIn }) {
+function ChildRow({ child, parentEffFlag, currentNodeName, busy, onTriState, onEditQuota, onDrillIn }) {
   // Determine effective for this child: own_flag if set else inherit parentEffFlag.
   const ownFlag = child.own_flag;
   const isOwn = ownFlag !== null;
@@ -632,6 +735,9 @@ function ChildRow({ child, parentEffFlag, currentNodeName, busy, onTriState, onD
       </TouchableOpacity>
 
       <View style={styles.childActions}>
+        <TouchableOpacity style={styles.quotaBtn} onPress={onEditQuota}>
+          <Text style={styles.quotaBtnText}>Quota</Text>
+        </TouchableOpacity>
         <SmallTri
           label="Inh"
           active={!isOwn}
@@ -678,18 +784,12 @@ function SmallTri({ label, active, onPress, busy, color }) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#f3f4f6' },
-  content: { padding: 12, paddingBottom: 64 },
+  root: { flex: 1, backgroundColor: C.bg },
+  content: { paddingBottom: 24 },
 
-  breadcrumbRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', marginBottom: 6 },
-  crumb: { color: '#2563eb', fontSize: 13, paddingVertical: 2 },
-  crumbActive: { color: '#111827', fontWeight: '700' },
-  crumbSep: { color: '#9ca3af', marginHorizontal: 4 },
+  errorBanner: { backgroundColor: '#fee2e2', color: '#991b1b', padding: 10, borderRadius: 10, marginBottom: 8, marginHorizontal: 16 },
 
-  helpTop: { fontSize: 12, color: '#6b7280', marginBottom: 10 },
-  errorBanner: { backgroundColor: '#fee2e2', color: '#991b1b', padding: 8, borderRadius: 6, marginBottom: 8 },
-
-  card: { backgroundColor: '#fff', borderRadius: 10, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: '#e5e7eb' },
+  card: { ...S.card, padding: 16, marginHorizontal: 16, marginBottom: 14, borderWidth: 1, borderColor: C.border },
   cardTitle: { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 8 },
 
   statusRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 },
@@ -697,28 +797,28 @@ const styles = StyleSheet.create({
   statusOn: { backgroundColor: '#dcfce7' },
   statusOff: { backgroundColor: '#fee2e2' },
   statusPillText: { fontSize: 12, fontWeight: '700', color: '#111827' },
-  subtle: { fontSize: 12, color: '#6b7280' },
-  subtleSmall: { fontSize: 10, color: '#9ca3af', marginTop: -4, marginBottom: 10, fontStyle: 'italic' },
+  subtle: { fontSize: 12, color: C.textMed, lineHeight: 18 },
+  subtleSmall: { fontSize: 11, color: C.textLight, marginTop: -4, marginBottom: 10, fontStyle: 'italic', lineHeight: 16 },
 
   triRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  triBtn: { flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#d1d5db', alignItems: 'center', backgroundColor: '#fff' },
+  triBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: C.border, alignItems: 'center', backgroundColor: '#fff' },
   triBtnText: { fontSize: 13, fontWeight: '600', color: '#374151' },
   triBtnTextActive: { color: '#fff' },
 
-  sectionLabel: { fontSize: 12, fontWeight: '700', color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
+  sectionLabel: { fontSize: 12, fontWeight: '700', color: C.textMed, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
   quotaGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -4 },
   quotaCell: { width: '50%', paddingHorizontal: 4, marginBottom: 8 },
-  quotaLabel: { fontSize: 11, color: '#6b7280' },
-  quotaValue: { fontSize: 15, fontWeight: '700', color: '#111827' },
+  quotaLabel: { fontSize: 11, color: C.textMed },
+  quotaValue: { fontSize: 15, fontWeight: '700', color: C.textDark },
   quotaFromOwn: { fontSize: 10, color: '#2563eb', fontWeight: '600' },
-  quotaFromInherited: { fontSize: 10, color: '#9ca3af', fontStyle: 'italic' },
+  quotaFromInherited: { fontSize: 10, color: C.textLight, fontStyle: 'italic' },
 
-  poolBox: { backgroundColor: '#eff6ff', borderColor: '#bfdbfe', borderWidth: 1, borderRadius: 8, padding: 10, marginTop: 4, marginBottom: 10 },
+  poolBox: { backgroundColor: '#eff6ff', borderColor: '#bfdbfe', borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 4, marginBottom: 10 },
   poolTitle: { fontSize: 12, fontWeight: '700', color: '#1d4ed8', marginBottom: 4 },
-  poolHelp: { fontSize: 11, color: '#1e40af', marginBottom: 6 },
+  poolHelp: { fontSize: 11, color: '#1e40af', marginBottom: 6, lineHeight: 17 },
   poolRow: { marginBottom: 4 },
   poolRowLabel: { fontSize: 11, fontWeight: '700', color: '#1e3a8a' },
-  poolRowValue: { fontSize: 11, color: '#1e3a8a' },
+  poolRowValue: { fontSize: 11, color: '#1e3a8a', lineHeight: 17 },
 
   btnRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
   primaryBtn: { flex: 1, backgroundColor: '#2563eb', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
@@ -728,49 +828,56 @@ const styles = StyleSheet.create({
 
   childrenHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 },
   bulkRow: { flexDirection: 'row', gap: 6 },
-  bulkBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 },
+  bulkBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   bulkOn: { backgroundColor: '#dcfce7' },
   bulkOff: { backgroundColor: '#fee2e2' },
   bulkBtnText: { fontSize: 12, fontWeight: '700', color: '#111827' },
 
-  search: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 8, backgroundColor: '#fff' },
-  empty: { padding: 16, color: '#6b7280', textAlign: 'center' },
+  search: { ...S.input, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 8, backgroundColor: '#fff' },
+  empty: { padding: 16, color: C.textMed, textAlign: 'center', fontSize: 12 },
 
-  childRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#f3f4f6' },
+  childRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
   childMain: { flex: 1, paddingRight: 6 },
   childNameRow: { flexDirection: 'row', alignItems: 'center' },
-  childName: { fontSize: 14, fontWeight: '600', color: '#111827', flexShrink: 1 },
+  childName: { fontSize: 15, fontWeight: '700', color: C.textDark, flexShrink: 1 },
   dot: { width: 8, height: 8, borderRadius: 4, marginHorizontal: 8 },
   dotOn: { backgroundColor: '#16a34a' },
   dotOff: { backgroundColor: '#dc2626' },
-  childStatusText: { fontSize: 11, color: '#6b7280' },
-  childMeta: { fontSize: 11, color: '#2563eb', marginTop: 2 },
+  childStatusText: { fontSize: 11, color: C.textMed },
+  childMeta: { fontSize: 11, color: '#2563eb', marginTop: 2, lineHeight: 17 },
   childMetaManual: { fontSize: 11, color: '#b45309', marginTop: 2, fontWeight: '700' },
-  childMetaMuted: { fontSize: 11, color: '#9ca3af', marginTop: 2, fontStyle: 'italic' },
+  childMetaMuted: { fontSize: 11, color: C.textLight, marginTop: 2, fontStyle: 'italic', lineHeight: 17 },
 
   childActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  smallTri: { paddingHorizontal: 8, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#d1d5db', backgroundColor: '#fff', minWidth: 36, alignItems: 'center' },
+  quotaBtn: { paddingHorizontal: 8, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: '#bfdbfe', backgroundColor: '#eff6ff', minWidth: 48, alignItems: 'center' },
+  quotaBtnText: { fontSize: 11, fontWeight: '700', color: '#1d4ed8' },
+  smallTri: { paddingHorizontal: 8, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: C.border, backgroundColor: '#fff', minWidth: 36, alignItems: 'center' },
   smallTriText: { fontSize: 11, fontWeight: '700', color: '#374151' },
   smallTriTextActive: { color: '#fff' },
   drillBtn: { paddingHorizontal: 8, paddingVertical: 6, marginLeft: 2 },
-  drillBtnText: { fontSize: 18, color: '#6b7280', fontWeight: '700' },
+  drillBtnText: { fontSize: 18, color: C.textMed, fontWeight: '700' },
 
-  advancedLink: { padding: 14, alignItems: 'center' },
-  advancedLinkText: { color: '#2563eb', fontSize: 13, textDecorationLine: 'underline' },
+  advancedLink: { paddingTop: 8, paddingBottom: 10, alignItems: 'center' },
+  advancedLinkText: { color: C.primary, fontSize: 12, textDecorationLine: 'underline' },
 
   // modal
   modalBackdrop: {
     position: 'absolute', left: 0, right: 0, top: 0, bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', alignItems: 'center', padding: 12,
   },
-  modalCard: { width: '100%', maxWidth: 480, backgroundColor: '#fff', borderRadius: 12, padding: 16 },
-  modalTitle: { fontSize: 16, fontWeight: '700', color: '#111827', marginBottom: 4 },
-  modalHelp: { fontSize: 12, color: '#6b7280', marginBottom: 10 },
+  modalCard: { width: '100%', maxWidth: 480, backgroundColor: '#fff', borderRadius: 18, padding: 16 },
+  modalTitle: { fontSize: 15, fontWeight: '700', color: C.textDark, marginBottom: 4 },
+  modalHelp: { fontSize: 12, color: C.textMed, marginBottom: 10, lineHeight: 18 },
   modalField: { marginBottom: 8 },
-  modalFieldLabel: { fontSize: 12, color: '#374151', marginBottom: 4, fontWeight: '600' },
-  modalInput: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: '#fff', color: '#111827' },
+  modalFieldLabel: { fontSize: 12, color: C.textMed, marginBottom: 4, fontWeight: '600' },
+  modeRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  modeChip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: '#e5e7eb' },
+  modeChipActive: { backgroundColor: '#dbeafe' },
+  modeChipText: { color: '#475569', fontSize: 12, fontWeight: '700', textTransform: 'capitalize' },
+  modeChipTextActive: { color: '#1d4ed8' },
+  modalInput: { ...S.input, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: '#fff', color: C.textDark, marginBottom: 0 },
   modalBtnRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  modalBtn: { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
+  modalBtn: { flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center' },
   modalBtnGhost: { backgroundColor: '#f3f4f6' },
   modalBtnGhostText: { color: '#374151', fontWeight: '700' },
   modalBtnPrimary: { backgroundColor: '#2563eb' },

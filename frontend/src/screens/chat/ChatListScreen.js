@@ -4,11 +4,11 @@ import {
   ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import api from '../../services/api';
 import { C } from '../../config/theme';
 import { useAuth } from '../../context/AuthContext';
+import AppHeader from '../../components/AppHeader';
 
 function timeAgo(dateStr) {
   if (!dateStr) return '';
@@ -36,7 +36,6 @@ function roleLabel(role) {
 
 export default function ChatListScreen({ navigation }) {
   const { user } = useAuth();
-  const insets = useSafeAreaInsets();
   const [conversations, setConversations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -146,20 +145,21 @@ export default function ChatListScreen({ navigation }) {
   };
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Pressable style={styles.backBtn} onPress={goHome}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
-        </Pressable>
-        <Text style={styles.headerTitle}>Messages</Text>
-        <Pressable
-          style={styles.newBtn}
-          onPress={() => navigation.navigate(isParent ? 'NewChat' : 'StaffNewChat')}
-        >
-          <Ionicons name="create-outline" size={24} color="#fff" />
-        </Pressable>
-      </View>
+    <View style={styles.container}>
+      <AppHeader
+        title="Messages"
+        subtitle={isParent ? 'Parent conversations' : 'Staff conversations'}
+        navigation={navigation}
+        onBackPress={goHome}
+        rightSlot={(
+          <Pressable
+            style={styles.headerActionBtn}
+            onPress={() => navigation.navigate(isParent ? 'NewChat' : 'StaffNewChat')}
+          >
+            <Ionicons name="create-outline" size={20} color="#F8FAFC" />
+          </Pressable>
+        )}
+      />
 
       {loading ? (
         <View style={styles.center}>
@@ -198,16 +198,16 @@ export default function ChatListScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  header: {
-    backgroundColor: C.primary,
-    flexDirection: 'row',
+  headerActionBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
   },
-  backBtn: { marginRight: 10, padding: 4 },
-  headerTitle: { color: '#fff', fontSize: 20, fontWeight: '700' },
-  newBtn: { padding: 4, marginLeft: 'auto' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   empty: { flexGrow: 1 },
   emptyTitle: { fontSize: 18, fontWeight: '600', color: C.textMed, marginTop: 16, textAlign: 'center' },

@@ -11,6 +11,7 @@ import api from '../../services/api';
 import { C } from '../../config/theme';
 import { useAuth } from '../../context/AuthContext';
 import { emitChatUnreadRefresh } from '../../lib/chatEvents';
+import AppHeader from '../../components/AppHeader';
 
 const POLL_INTERVAL = 6000; // 6 seconds
 
@@ -330,28 +331,17 @@ export default function ChatScreen({ route, navigation }) {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 12}
     >
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top }]}>
-        <Pressable onPress={goBackToHome} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </Pressable>
-        <View style={styles.headerAvatarWrap}>
-          <View style={[styles.headerAvatar, { backgroundColor: conversation.participant_type === 'admin' ? '#7C3AED' : C.primaryDark }]}>
-            <Text style={styles.headerAvatarText}>
-              {(participantName || '?').charAt(0).toUpperCase()}
-            </Text>
-          </View>
-        </View>
-        <View style={styles.headerInfo}>
-          <Text style={styles.headerName} numberOfLines={1}>{participantName}</Text>
-          <Text style={styles.headerSub}>
-            {conversation.participant_type === 'admin' ? 'Admin' : conversation.participant_type === 'parent' ? 'Parent' : 'Teacher'}
-          </Text>
-        </View>
-        <Pressable onPress={() => setChatMenuOpen(true)} style={styles.headerMenuBtn}>
-          <Ionicons name="ellipsis-vertical" size={20} color="#fff" />
-        </Pressable>
-      </View>
+      <AppHeader
+        title={participantName}
+        subtitle={conversation.participant_type === 'admin' ? 'Admin' : conversation.participant_type === 'parent' ? 'Parent' : 'Teacher'}
+        navigation={navigation}
+        onBackPress={goBackToHome}
+        rightSlot={(
+          <Pressable onPress={() => setChatMenuOpen(true)} style={styles.headerActionBtn}>
+            <Ionicons name="ellipsis-vertical" size={18} color="#F8FAFC" />
+          </Pressable>
+        )}
+      />
 
       {/* Messages */}
       {loading ? (
@@ -498,30 +488,15 @@ export default function ChatScreen({ route, navigation }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-
-  // Header
-  header: {
-    backgroundColor: C.primary,
-    flexDirection: 'row',
+  headerActionBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.2)',
-  },
-  backBtn: { padding: 4, marginRight: 4 },
-  headerAvatarWrap: { marginRight: 10 },
-  headerAvatar: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  headerAvatarText: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  headerInfo: { flex: 1 },
-  headerName: { color: '#fff', fontSize: 17, fontWeight: '700' },
-  headerSub: { color: 'rgba(255,255,255,0.75)', fontSize: 12 },
-  headerMenuBtn: {
-    padding: 6,
-    marginLeft: 8,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
   },
 
   // Messages

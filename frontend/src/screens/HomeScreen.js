@@ -10,6 +10,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import { C } from '../config/theme';
+import DashboardCardGrid from '../components/DashboardCardGrid';
+import { buildDashboardCards } from '../config/dashboardCards';
 import useAiTutorConfig from '../features/aiTutor/hooks/useAiTutorConfig';
 
 const ROLE_CFG = {
@@ -24,6 +26,18 @@ function greet() {
   if (h < 17) return 'Good Afternoon';
   return 'Good Evening';
 }
+
+const TEACHER_HOME_CARDS = buildDashboardCards([
+  { type: 'attendance', key: 'TeacherAttendance' },
+  { type: 'leaves', key: 'TeacherLeavesCard' },
+  { type: 'attendanceReports', key: 'TeacherAttendanceReports' },
+  { type: 'upload', key: 'UploadLectureCard' },
+  { type: 'lectures', key: 'LectureListCard' },
+  { type: 'students', key: 'TeacherStudentsCard' },
+  { type: 'notifications', key: 'SendNotificationCard' },
+  { type: 'subjects', key: 'TeacherSubjectsCard' },
+  { type: 'aiMaterials', key: 'TeacherAiMaterialsCard' },
+]);
 
 export default function HomeScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -46,13 +60,7 @@ export default function HomeScreen({ navigation }) {
           : 'floor_incharge'
   );
 
-  // Card entrance animations
-  const aY = [useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current, useRef(new Animated.Value(30)).current];
-  const aO = [useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current,  useRef(new Animated.Value(0)).current];
-  const sc = [useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current,  useRef(new Animated.Value(1)).current];
   const pulse = useRef(new Animated.Value(1)).current;
-  const pi = (i) => () => Animated.spring(sc[i], { toValue: 0.97, useNativeDriver: true, speed: 50 }).start();
-  const po = (i) => () => Animated.spring(sc[i], { toValue: 1,    useNativeDriver: true, speed: 20 }).start();
 
   const todayLabel = new Date().toLocaleDateString('en-GB', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
@@ -66,12 +74,6 @@ export default function HomeScreen({ navigation }) {
       const pendingWithdrawals = data.filter(l => l.withdrawal_status === 'pending').length;
       setPendingLeaveCount(pendingLeaves + pendingWithdrawals);
     }).catch(() => setPendingLeaveCount(0));
-    Animated.stagger(100, aO.map((o, i) =>
-      Animated.parallel([
-        Animated.timing(o, { toValue: 1, duration: 380, useNativeDriver: true }),
-        Animated.spring(aY[i], { toValue: 0, tension: 60, friction: 9, useNativeDriver: true }),
-      ])
-    )).start();
   }, []);
 
   // Re-fetch unread count and pending leave count whenever this screen comes into focus
@@ -143,7 +145,41 @@ export default function HomeScreen({ navigation }) {
   const initials   = school?.initials || schoolName.slice(0, 2).toUpperCase();
   const isLocked   = teacherRole === 'subject_teacher';
   const statusInset = StatusBar.currentHeight ?? 0;
-  const headerTopPad = Math.max(insets.top, statusInset) + 18;
+  const topInset = Math.max(insets.top, statusInset, 0);
+  const headerTopMargin = topInset + 12;
+  const quickActions = TEACHER_HOME_CARDS
+    .filter((card) => !(card.key === 'TeacherAiMaterialsCard' && !aiEnabled))
+    .filter((card) => !isLocked || !['TeacherAttendance', 'TeacherLeavesCard', 'TeacherAttendanceReports', 'TeacherStudentsCard'].includes(card.key))
+    .map((card) => {
+      if (card.key === 'TeacherAttendance') {
+        return { ...card, onPress: () => navigation.navigate('ClassSelection') };
+      }
+      if (card.key === 'TeacherLeavesCard') {
+        return { ...card, badge: pendingLeaveCount, onPress: () => navigation.navigate('TeacherLeaves') };
+      }
+      if (card.key === 'TeacherAttendanceReports') {
+        return { ...card, onPress: () => navigation.navigate('ClassSelection', { mode: 'report' }) };
+      }
+      if (card.key === 'UploadLectureCard') {
+        return { ...card, onPress: () => navigation.navigate('UploadLecture') };
+      }
+      if (card.key === 'LectureListCard') {
+        return { ...card, onPress: () => navigation.navigate('LectureList') };
+      }
+      if (card.key === 'TeacherStudentsCard') {
+        return { ...card, onPress: () => navigation.navigate('TeacherStudents') };
+      }
+      if (card.key === 'SendNotificationCard') {
+        return { ...card, onPress: () => navigation.navigate('SendNotification') };
+      }
+      if (card.key === 'TeacherSubjectsCard') {
+        return { ...card, onPress: () => navigation.navigate('TeacherSubjects') };
+      }
+      if (card.key === 'TeacherAiMaterialsCard') {
+        return { ...card, onPress: () => navigation.navigate('TeacherAiMaterials') };
+      }
+      return card;
+    });
 
   return (
     <ScrollView
@@ -152,47 +188,47 @@ export default function HomeScreen({ navigation }) {
       contentContainerStyle={{ paddingBottom: 60 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} colors={[C.primary]} />}
     >
-      <StatusBar barStyle="light-content" backgroundColor="#1E40AF" translucent={false} />
+      <StatusBar barStyle="light-content" backgroundColor={C.brandDeep} translucent={false} />
 
-      {/* ══ HEADER ══════════════════════════════════════════════ */}
       <LinearGradient
-        colors={['#1E3A8A', '#2563EB']}
+        colors={C.brandGradient}
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={[styles.header, { paddingTop: headerTopPad }]}
+        style={[styles.header, { marginTop: headerTopMargin }]}
       >
-        {/* Subtle decorative circle */}
         <View style={styles.headerDeco} pointerEvents="none" />
+        <View style={styles.headerDecoSecondary} pointerEvents="none" />
+
+        <View style={styles.schoolRow}>
+          {school?.logo_url
+            ? <Image source={{ uri: school.logo_url }} style={styles.schoolLogo} resizeMode="contain" />
+            : <View style={styles.schoolLogoFallback}><Text style={styles.schoolLogoText}>{initials}</Text></View>
+          }
+          <Text style={styles.schoolName} numberOfLines={1}>{schoolName}</Text>
+        </View>
 
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
-            {/* School logo + name */}
-            <View style={styles.schoolRow}>
-              {school?.logo_url
-                ? <Image source={{ uri: school.logo_url }} style={styles.schoolLogo} resizeMode="contain" />
-                : <View style={styles.schoolLogoFallback}><Text style={styles.schoolLogoText}>{initials}</Text></View>
-              }
-              <Text style={styles.schoolName} numberOfLines={1}>{schoolName}</Text>
-            </View>
-
-            {/* Teacher name + greeting */}
-            <Text style={styles.greetTxt}>{greet()}, {teacher.first_name} {teacher.last_name}</Text>
-
-            {/* Role badge + date on same line */}
-            <View style={styles.metaRow}>
-              {teacherRole && ROLE_CFG[teacherRole] && (
-                <View style={[styles.rolePill, { backgroundColor: ROLE_CFG[teacherRole].bg }]}>
-                  <Text style={[styles.roleTxt, { color: ROLE_CFG[teacherRole].color }]}>
-                    {ROLE_CFG[teacherRole].label}
-                  </Text>
-                </View>
-              )}
-              <Text style={styles.dateTxt} numberOfLines={1}>{todayLabel}</Text>
-            </View>
+            <Text style={styles.roleLabel}>Teacher Command Center</Text>
+            <Text style={styles.heroTitle}>Teacher Portal</Text>
+            <Text style={styles.heroSub}>Handle attendance, messages, and learning tasks from one place.</Text>
           </View>
 
           <Pressable onPress={logout} style={({ pressed }) => [styles.signOutBtn, pressed && { opacity: 0.7 }]}>
+            <Ionicons name="log-out-outline" size={14} color="#DBEAFE" />
             <Text style={styles.signOutTxt}>Sign Out</Text>
           </Pressable>
+        </View>
+
+        <View style={styles.metaRow}>
+          {teacherRole && ROLE_CFG[teacherRole] && (
+            <View style={[styles.rolePill, { backgroundColor: 'rgba(255,255,255,0.14)', borderColor: 'rgba(191,219,254,0.28)' }]}>
+              <Text style={styles.roleTxt}>{ROLE_CFG[teacherRole].label}</Text>
+            </View>
+          )}
+          <View style={styles.datePill}>
+            <Ionicons name="calendar-outline" size={13} color="#DBEAFE" />
+            <Text style={styles.dateTxt} numberOfLines={1}>{todayLabel}</Text>
+          </View>
         </View>
       </LinearGradient>
 
@@ -244,76 +280,11 @@ export default function HomeScreen({ navigation }) {
       </View>
 
       {/* ══ QUICK ACTIONS ════════════════════════════════════════ */}
-
-      <Text style={styles.sectionLabel2}>QUICK ACTIONS</Text>
-
-      <View style={styles.grid}>
-        {[
-          {
-            i: 0, icon: 'clipboard-outline', label: 'Mark Attendance',
-            tint: isLocked ? '#94A3B8' : '#2563EB', bg: isLocked ? '#F1F5F9' : '#EFF6FF',
-            locked: isLocked, badge: 0, onPress: () => navigation.navigate('ClassSelection'),
-          },
-          {
-            i: 1, icon: 'mail-open-outline', label: 'Leave Requests',
-            tint: isLocked ? '#94A3B8' : '#EF4444', bg: isLocked ? '#F1F5F9' : '#FEF2F2',
-            locked: isLocked, badge: pendingLeaveCount, onPress: () => navigation.navigate('TeacherLeaves'),
-          },
-          {
-            i: 2, icon: 'bar-chart-outline', label: 'Attendance Report',
-            tint: isLocked ? '#94A3B8' : '#F59E0B', bg: isLocked ? '#F1F5F9' : '#FFFBEB',
-            locked: isLocked, badge: 0, onPress: () => navigation.navigate('ClassSelection', { mode: 'report' }),
-          },
-          {
-            i: 3, icon: 'cloud-upload-outline', label: 'Upload Lecture',
-            tint: '#7C3AED', bg: '#F5F3FF',
-            locked: false, badge: 0, onPress: () => navigation.navigate('UploadLecture'),
-          },
-          {
-            i: 4, icon: 'videocam-outline', label: 'Browse Lectures',
-            tint: '#10B981', bg: '#ECFDF5',
-            locked: false, badge: 0, onPress: () => navigation.navigate('LectureList'),
-          },
-          {
-            i: 5, icon: 'school-outline', label: 'Manage Students',
-            tint: isLocked ? '#94A3B8' : '#14B8A6', bg: isLocked ? '#F1F5F9' : '#ECFEFF',
-            locked: isLocked, badge: 0, onPress: () => navigation.navigate('TeacherStudents'),
-          },
-          {
-            i: 6, icon: 'notifications-outline', label: 'Send Notification',
-            tint: '#0EA5E9', bg: '#F0F9FF',
-            locked: false, badge: 0, onPress: () => navigation.navigate('SendNotification'),
-          },
-          {
-            i: 7, icon: 'sparkles-outline', label: 'AI Materials',
-            tint: '#7C3AED', bg: '#F5F3FF',
-            locked: false, badge: 0, onPress: () => navigation.navigate('TeacherAiMaterials'),
-          },
-        ]
-          .filter(({ label }) => !(label === 'AI Materials' && !aiEnabled))
-          .filter(({ locked }) => !locked)
-          .map(({ i, icon, label, tint, bg, locked, badge, onPress }) => (
-          <Animated.View key={i} style={[styles.cardWrap, { opacity: aO[i], transform: [{ translateY: aY[i] }, { scale: sc[i] }] }]}>
-            <Pressable
-              style={({ pressed }) => [styles.navCard, locked && styles.navCardLocked, pressed && !locked && styles.navCardPressed]}
-              onPress={locked ? null : onPress}
-              disabled={locked}
-              onPressIn={!locked ? pi(i) : undefined}
-              onPressOut={!locked ? po(i) : undefined}
-            >
-              <View style={[styles.iconBox, { backgroundColor: bg }]}>
-                <Ionicons name={icon} size={24} color={tint} />
-              </View>
-              <Text style={[styles.navLabel, locked && { color: C.textMed }]}>{label}</Text>
-              {badge > 0 && (
-                <View style={styles.notifBadge}>
-                  <Text style={styles.notifBadgeTxt}>{badge}</Text>
-                </View>
-              )}
-            </Pressable>
-          </Animated.View>
-        ))}
-      </View>
+      <DashboardCardGrid
+        cards={quickActions}
+        sectionTitle="Quick Actions"
+        preferenceKey={`dashboard:teacher:${teacher?.id || teacher?.email || 'anon'}`}
+      />
     </ScrollView>
   );
 }
@@ -323,65 +294,79 @@ export default function HomeScreen({ navigation }) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
 
-  // ── Header ──────────────────────────────────────────────
   header: {
-    paddingTop: 52, paddingBottom: 24,
-    paddingHorizontal: 20,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 24,
+    paddingTop: 24,
+    paddingBottom: 18,
+    paddingHorizontal: 18,
+    minHeight: 220,
+    justifyContent: 'center',
     overflow: 'hidden',
+    shadowColor: C.brandDeep,
+    shadowOpacity: 0.14,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
   },
-  headerDeco: { position: 'absolute', width: 200, height: 200, borderRadius: 100, backgroundColor: 'rgba(255,255,255,0.05)', top: -70, right: -50 },
-
-  // Header
+  headerDeco: { position: 'absolute', width: 190, height: 190, borderRadius: 95, backgroundColor: 'rgba(255,255,255,0.08)', top: -68, right: -50 },
+  headerDecoSecondary: { position: 'absolute', width: 140, height: 140, borderRadius: 70, backgroundColor: 'rgba(96,165,250,0.12)', left: -48, bottom: -56 },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
-
-  // School row inside header
   schoolRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
-  schoolLogo: { width: 36, height: 36, borderRadius: 8 },
+  schoolLogo: { width: 30, height: 30, borderRadius: 9 },
   schoolLogoFallback: {
-    width: 36, height: 36, borderRadius: 8,
+    width: 30, height: 30, borderRadius: 9,
     backgroundColor: 'rgba(255,255,255,0.18)',
     justifyContent: 'center', alignItems: 'center',
   },
-  schoolLogoText: { color: '#fff', fontSize: 13, fontWeight: '900', letterSpacing: 0.5 },
-  schoolName: { color: '#BFDBFE', fontSize: 14, fontWeight: '700', flex: 1 },
-
-  // Teacher greeting line — always single line
-  greetTxt: {
-    color: '#fff', fontSize: 17, fontWeight: '800',
-    numberOfLines: 1, flexShrink: 1,
+  schoolLogoText: { color: '#fff', fontSize: 11, fontWeight: '900', letterSpacing: 0.5 },
+  schoolName: { color: '#DBEAFE', fontSize: 13, fontWeight: '700', flex: 1 },
+  roleLabel: {
+    color: '#93C5FD',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 2,
   },
-
-  // Meta row: role pill + date
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' },
-  dateTxt: { color: 'rgba(191,219,254,0.65)', fontSize: 11, flexShrink: 1 },
+  heroTitle: { color: '#fff', fontSize: 22, fontWeight: '800', marginTop: 2 },
+  heroSub: { color: '#DBEAFE', fontSize: 12, marginTop: 4, lineHeight: 17 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, flexWrap: 'wrap' },
+  datePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(191,219,254,0.28)',
+  },
+  dateTxt: { color: '#DBEAFE', fontSize: 11, fontWeight: '700', flexShrink: 1 },
 
   rolePill: {
-    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4,
+    borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6,
     alignItems: 'center',
+    borderWidth: 1,
   },
-  roleTxt: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
+  roleTxt: { color: '#DBEAFE', fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
 
   signOutBtn: {
-    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)',
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderWidth: 1, borderColor: 'rgba(191,219,254,0.45)',
     marginLeft: 10,
   },
-  signOutTxt: { color: '#BFDBFE', fontSize: 12, fontWeight: '600' },
+  signOutTxt: { color: '#DBEAFE', fontSize: 11, fontWeight: '800', letterSpacing: 0.4, textTransform: 'uppercase' },
 
-  // ── Section labels ───────────────────────────────────────────
   section: { marginHorizontal: 16, marginTop: 20 },
   sectionLabel: {
     fontSize: 10, fontWeight: '800', color: C.textMed,
     letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 8,
   },
-  sectionLabel2: {
-    fontSize: 10, fontWeight: '800', color: C.textMed,
-    letterSpacing: 1.5, textTransform: 'uppercase',
-    marginHorizontal: 16, marginTop: 24, marginBottom: 10,
-  },
-
-  // ── Attendance card ──────────────────────────────────────────
   attCard: {
     backgroundColor: '#fff', borderRadius: 16, padding: 18,
     shadowColor: '#94A3B8', shadowOpacity: 0.10, shadowRadius: 12,
@@ -395,8 +380,6 @@ const styles = StyleSheet.create({
   },
   attBtnIcon:  { fontSize: 18, marginBottom: 4 },
   attBtnLabel: { fontSize: 12, fontWeight: '700' },
-
-  // Marked badge
   markedBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
     borderRadius: 14, padding: 16,
@@ -405,27 +388,4 @@ const styles = StyleSheet.create({
   markedStatus: { fontSize: 18, fontWeight: '800' },
   markedSub:    { fontSize: 12, color: C.textMed, marginTop: 2 },
 
-  // ── Grid ─────────────────────────────────────────────────────────
-  grid:     { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 14, gap: 12 },
-  cardWrap: { width: '30%', flexGrow: 1 },
-  navCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    alignItems: 'center',
-    shadowColor: '#94A3B8',
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 2,
-    position: 'relative',
-    height: 110,
-    justifyContent: 'center',
-  },
-  navCardLocked:  { opacity: 0.5 },
-  navCardPressed: { opacity: 0.75 },
-  iconBox:  { width: 52, height: 52, borderRadius: 14, justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
-  navLabel: { color: C.textDark, fontSize: 12, fontWeight: '700', textAlign: 'center', lineHeight: 16 },
-  notifBadge:    { position: 'absolute', top: -5, right: -5, backgroundColor: '#EF4444', borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4, borderWidth: 2, borderColor: '#fff' },
-  notifBadgeTxt: { color: '#fff', fontSize: 10, fontWeight: '900' },
 });

@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
 import { C } from '../config/theme';
 import AppHeader from './AppHeader';
+import ScreenIntroCard from './ScreenIntroCard';
 import ImportExportBar from './ImportExportBar';
 import PickerField from './PickerField';
 import EntityEmptyState from './EntityEmptyState';
@@ -360,6 +361,12 @@ export default function ClassesManagerScreen({ navigation, mode }) {
   return (
     <View style={styles.container}>
       <AppHeader title="Classes" navigation={navigation} />
+      <ScreenIntroCard
+        title="Classes and Sections"
+        description="Create the academic structure here first. Class names and section names defined on this screen are reused by student records, attendance, lectures, and reporting."
+        icon="layers-outline"
+        tone="amber"
+      />
 
       <ManagerSearchAddRow
         searchValue={search}

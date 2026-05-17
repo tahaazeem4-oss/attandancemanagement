@@ -74,13 +74,13 @@ export default function LoginScreen({ navigation }) {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ flexGrow: 1 }}
       >
-      <StatusBar barStyle="light-content" backgroundColor="#1E40AF" />
+      <StatusBar barStyle="light-content" backgroundColor={C.brandDeep} />
 
-      <View style={styles.hero}>
+      <LinearGradient colors={C.brandGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
         <View style={styles.deco1} pointerEvents="none" />
         <View style={styles.deco2} pointerEvents="none" />
         <LogoHero markSize={72} />
-      </View>
+      </LinearGradient>
 
       <Animated.View style={[styles.card, { opacity: cardFade, transform: [{ translateY: cardY }] }]}>
         <View style={{ paddingBottom: 8 }}>
@@ -135,7 +135,7 @@ export default function LoginScreen({ navigation }) {
           <Pressable onPress={handleLogin} onPressIn={pIn} onPressOut={pOut} disabled={loading}>
             <Animated.View style={{ transform: [{ scale: btnScale }] }}>
               <LinearGradient
-                colors={['#2563EB', '#1D4ED8']}
+                colors={C.brandGradientSoft}
                 start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
                 style={styles.btn}
               >
@@ -154,7 +154,7 @@ export default function LoginScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#2563EB' },
+  root: { flex: 1, backgroundColor: C.brandBright },
 
   hero: {
     flex: 0.40,
@@ -179,7 +179,7 @@ const styles = StyleSheet.create({
     shadowRadius: 20, shadowOffset: { width: 0, height: -4 },
     elevation: 14,
   },
-  heading: { fontSize: 22, fontWeight: '800', color: '#0F172A', marginBottom: 4 },
+  heading: { fontSize: 22, fontWeight: '800', color: C.textDark, marginBottom: 4 },
   sub:     { fontSize: 14, color: '#64748B', marginBottom: 24 },
 
   errorBanner:     { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', borderRadius: 10, padding: 12, marginBottom: 16 },
@@ -192,12 +192,12 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: '#F8FAFC', borderWidth: 1.5, borderColor: '#E2E8F0',
     borderRadius: 12, paddingHorizontal: 16, paddingVertical: 13,
-    fontSize: 15, color: '#0F172A',
+    fontSize: 15, color: C.textDark,
   },
   inputErr:   { borderColor: '#FCA5A5', backgroundColor: '#FFF5F5' },
   inputFocus: {
-    borderColor: '#2563EB', backgroundColor: '#EFF6FF',
-    shadowColor: '#2563EB', shadowOpacity: 0.12, shadowRadius: 6,
+    borderColor: C.primary, backgroundColor: C.primaryLight,
+    shadowColor: C.primary, shadowOpacity: 0.12, shadowRadius: 6,
     shadowOffset: { width: 0, height: 0 }, elevation: 2,
   },
   fieldErr: { color: '#EF4444', fontSize: 12, marginTop: 4, marginLeft: 2 },
@@ -207,11 +207,11 @@ const styles = StyleSheet.create({
   eyeBtn:  { position: 'absolute', right: 14, height: '100%', justifyContent: 'center' },
 
   forgotRow:  { alignItems: 'flex-end', marginTop: 10, marginBottom: 22 },
-  forgotText: { color: '#2563EB', fontSize: 13, fontWeight: '600' },
+  forgotText: { color: C.primary, fontSize: 13, fontWeight: '600' },
 
   btn: {
     borderRadius: 13, paddingVertical: 15, alignItems: 'center',
-    shadowColor: '#1D4ED8', shadowOpacity: 0.35, shadowRadius: 10,
+    shadowColor: C.primaryDark, shadowOpacity: 0.35, shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 }, elevation: 7,
   },
   btnText: { color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: 0.3 },

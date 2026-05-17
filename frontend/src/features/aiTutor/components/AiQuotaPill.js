@@ -1,6 +1,7 @@
 // frontend/src/features/aiTutor/components/AiQuotaPill.js
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { C } from '../../../config/theme';
 
 export default function AiQuotaPill({ quota }) {
   if (!quota) return null;
@@ -20,7 +21,7 @@ export default function AiQuotaPill({ quota }) {
 const styles = StyleSheet.create({
   pill: {
     paddingHorizontal: 10, paddingVertical: 4,
-    borderRadius: 12, backgroundColor: '#EEF2FF',
+    borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.16)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)',
   },
-  text: { color: '#3730A3', fontWeight: '600', fontSize: 12 },
+  text: { color: C.white, fontWeight: '700', fontSize: 12 },
 });

@@ -25,7 +25,7 @@ export default function StudentLectureDetailScreen({ navigation, route }) {
   if (!lecture) {
     return (
       <View style={styles.root}>
-        <AppHeader title="Details" navigation={navigation} />
+        <AppHeader title="Details" eyebrow="Student Portal" navigation={navigation} />
         <View style={styles.emptyWrap}>
           <Text style={styles.emptyTitle}>Item not found</Text>
           <Text style={styles.emptySub}>Go back and open the item again.</Text>
@@ -41,7 +41,7 @@ export default function StudentLectureDetailScreen({ navigation, route }) {
 
   return (
     <View style={styles.root}>
-      <AppHeader title="Lecture Details" navigation={navigation} />
+      <AppHeader title="Lecture Details" eyebrow="Student Portal" navigation={navigation} />
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
         {/* ── Header card ── */}

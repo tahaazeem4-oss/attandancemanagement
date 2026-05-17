@@ -3,7 +3,7 @@
 // Triggered by Supabase cron OR an authorized super_admin call.
 import { getDb, json, verifyToken } from "../_shared.ts";
 import { chunkText } from "../lib/aiChunking.ts";
-import { embedBatch } from "../lib/aiOpenAI.ts";
+import { embedBatch, hasEmbeddings } from "../lib/aiOpenAI.ts";
 
 const MAX_JOBS_PER_RUN = 5;
 
@@ -44,7 +44,7 @@ async function extractText(bucket: string, storagePath: string, ext: string): Pr
   throw new Error(`unsupported extension: ${ext}`);
 }
 
-async function processDocument(docId: string): Promise<void> {
+export async function processDocument(docId: string): Promise<void> {
   const db = getDb();
   const { data: doc, error } = await db.from("ai_documents").select("*").eq("id", docId).maybeSingle();
   if (error || !doc) throw new Error("document not found");
@@ -60,10 +60,13 @@ async function processDocument(docId: string): Promise<void> {
   // Clear existing chunks (idempotent re-ingest)
   await db.from("ai_document_chunks").delete().eq("document_id", docId);
 
+  const withEmbeddings = hasEmbeddings();
   const BATCH = 32;
   for (let i = 0; i < chunks.length; i += BATCH) {
     const slice = chunks.slice(i, i + BATCH);
-    const embeddings = await embedBatch(slice.map((c) => c.content));
+    const embeddings = withEmbeddings
+      ? await embedBatch(slice.map((c) => c.content))
+      : new Array(slice.length).fill(null);
     const rows = slice.map((c, j) => ({
       document_id: docId,
       organization_id: doc.organization_id,
@@ -74,7 +77,7 @@ async function processDocument(docId: string): Promise<void> {
       chunk_index:     c.index,
       content:         c.content,
       token_count:     c.tokenCount,
-      embedding:       embeddings[j] as unknown as string, // pgvector accepts JSON array
+      embedding:       withEmbeddings ? (embeddings[j] as unknown as string) : null,
       metadata:        { title: doc.title, topic: doc.topic },
     }));
     const { error: insErr } = await db.from("ai_document_chunks").insert(rows);

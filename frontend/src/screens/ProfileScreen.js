@@ -74,11 +74,11 @@ export default function ProfileScreen() {
       contentContainerStyle={{ paddingBottom: 60 }}
       showsVerticalScrollIndicator={false}
     >
-      <StatusBar barStyle="light-content" backgroundColor="#1E40AF" translucent={false} />
+      <StatusBar barStyle="light-content" backgroundColor={C.brandDeep} translucent={false} />
 
       {/* ── Header ────────────────────────────────────────── */}
       <LinearGradient
-        colors={['#1E3A8A', '#2563EB']}
+        colors={C.brandGradient}
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
         style={[styles.header, { paddingTop: headerTopPad }]}
       >

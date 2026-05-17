@@ -8,6 +8,7 @@ import api from '../services/api';
 import { C, S } from '../config/theme';
 import ImportExportBar from './ImportExportBar';
 import AppHeader from './AppHeader';
+import ScreenIntroCard from './ScreenIntroCard';
 import PickerField from './PickerField';
 import EntityEmptyState from './EntityEmptyState';
 import ManagerSearchAddRow from './ManagerSearchAddRow';
@@ -400,6 +401,12 @@ export default function TeachersManagerScreen({ navigation, mode }) {
   return (
     <View style={styles.container}>
       <AppHeader title="Teachers" navigation={navigation} />
+      <ScreenIntroCard
+        title="Teacher Directory"
+        description="Add teachers, update their details, and keep class or section assignments clean so attendance, lectures, and notifications stay correctly scoped."
+        icon="people-outline"
+        tone="blue"
+      />
 
       <ManagerSearchAddRow
         searchValue={search}

@@ -10,6 +10,7 @@ import api from '../services/api';
 import { C } from '../config/theme';
 import PickerField from '../components/PickerField';
 import AppHeader from '../components/AppHeader';
+import ScreenIntroCard from '../components/ScreenIntroCard';
 
 const TYPES = [
   { label: '📖  Class Work', value: 'classwork' },
@@ -196,6 +197,12 @@ export default function UploadLectureScreen({ navigation }) {
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <AppHeader title="Post Lecture / Work" navigation={navigation} />
       <ScrollView style={styles.root} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 60 }}>
+        <ScreenIntroCard
+          title="Upload Documents and Work"
+          description="Add class work, homework, notes, or PDFs with the correct subject, class, and section so students only receive material that belongs to their academic scope."
+          icon="cloud-upload-outline"
+          tone="violet"
+        />
         <View style={styles.body}>
 
           {/* ── Type selector ── */}

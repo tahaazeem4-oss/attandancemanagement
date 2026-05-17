@@ -4,13 +4,12 @@ import {
   ActivityIndicator, TextInput, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../../services/api';
 import { C } from '../../config/theme';
 import PickerField from '../../components/PickerField';
+import AppHeader from '../../components/AppHeader';
 
 export default function StaffNewChatScreen({ navigation }) {
-  const insets = useSafeAreaInsets();
   const [classes, setClasses] = useState([]);
   const [sections, setSections] = useState([]);
   const [students, setStudents] = useState([]);
@@ -188,15 +187,12 @@ export default function StaffNewChatScreen({ navigation }) {
   const selectedSectionObj = sections.find(s => String(s.id) === String(filter.section_id));
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [styles.backBtn, pressed && { opacity: 0.7 }]}>
-          <Ionicons name="chevron-back" size={28} color={C.primary} />
-        </Pressable>
-        <Text style={styles.headerTitle}>Message Parent</Text>
-        <View style={{ width: 28 }} />
-      </View>
+    <View style={styles.container}>
+      <AppHeader
+        title="Message Parent"
+        subtitle="Choose a student to open a parent chat"
+        navigation={navigation}
+      />
 
       {/* Filter Summary */}
       <View style={styles.filterSummary}>
@@ -311,25 +307,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  backBtn: {
-    padding: 8,
-    marginLeft: -8,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
   },
   filterSummary: {
     flexDirection: 'row',

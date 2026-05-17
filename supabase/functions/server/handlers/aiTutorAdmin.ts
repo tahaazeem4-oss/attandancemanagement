@@ -2,16 +2,94 @@
 // Endpoints for managing feature flags + quota policies at any scope.
 import { getDb, json, verifyToken } from "../_shared.ts";
 import { resolveParentPoolFor, DISTRIBUTABLE, NON_DISTRIBUTABLE, ALL_FIELDS, type PolicyField } from "../lib/aiPolicyResolver.ts";
+import {
+  getAllocationMode,
+  hasExplicitAllocation,
+  modeKey,
+  numericOrNull,
+  percentKey,
+  resolveExplicitAllocation,
+  type DistributableField,
+} from "../lib/aiQuotaPolicy.ts";
 import { getEffectiveAiAccessForUser } from "../lib/aiScope.ts";
 
 const ALLOWED_SCOPES = ["global","organization","campus","class","section","student"] as const;
 type ScopeType = typeof ALLOWED_SCOPES[number];
+
+type ScopeRow = { scope_type: string; scope_id: number | null; updated_at?: string | null; [k: string]: unknown };
+
+function scopeKey(scopeType: string, scopeId: number | null) {
+  return `${scopeType}#${scopeId ?? "null"}`;
+}
+
+function latestByScope<T extends ScopeRow>(rows: T[]): Map<string, T> {
+  const out = new Map<string, T>();
+  for (const row of rows) out.set(scopeKey(String(row.scope_type), (row.scope_id ?? null) as number | null), row);
+  return out;
+}
 
 function canManage(role: string, scopeType: ScopeType): boolean {
   if (role === "super_admin") return true;
   if (role === "org_admin")   return ["organization","campus","class","section","student"].includes(scopeType);
   if (role === "admin")       return ["campus","class","section","student"].includes(scopeType);
   return false;
+}
+
+function policyPayloadView(row: Record<string, unknown> | null | undefined) {
+  if (!row) return null;
+  const out: Record<string, unknown> = {};
+  for (const F of ALL_FIELDS) out[F] = row[F] ?? null;
+  for (const F of DISTRIBUTABLE) {
+    out[modeKey(F)] = getAllocationMode(row, F);
+    out[percentKey(F)] = row[percentKey(F)] ?? null;
+  }
+  return out;
+}
+
+function readQuotaDraft(body: Record<string, unknown>, scopeType: ScopeType) {
+  const row: Record<string, unknown> = {
+    scope_type: scopeType,
+    scope_id: body.scope_id === null || body.scope_id === undefined ? null : Number(body.scope_id),
+  };
+  const configErrors: string[] = [];
+
+  for (const F of DISTRIBUTABLE) {
+    const fallbackMode = body[F] === null || body[F] === undefined || body[F] === "" ? "inherit" : "fixed";
+    const requestedMode = String(body[modeKey(F)] || fallbackMode);
+    const mode = requestedMode === "percent" || requestedMode === "fixed" || requestedMode === "inherit"
+      ? requestedMode
+      : fallbackMode;
+    const fixedValue = numericOrNull(body[F]);
+    const percentBps = numericOrNull(body[percentKey(F)]);
+
+    if (scopeType === "global" && mode === "percent") {
+      configErrors.push(`${F} cannot use percent mode at the global scope.`);
+    }
+    if (mode === "fixed" && fixedValue === null) {
+      configErrors.push(`${F} needs a numeric value in fixed mode.`);
+    }
+    if (mode === "percent" && percentBps === null) {
+      configErrors.push(`${F} needs a percentage value in percent mode.`);
+    }
+
+    row[F] = mode === "fixed" ? fixedValue : null;
+    row[modeKey(F)] = mode;
+    row[percentKey(F)] = mode === "percent" ? percentBps : null;
+  }
+
+  for (const F of NON_DISTRIBUTABLE) {
+    row[F] = numericOrNull(body[F]);
+  }
+
+  return { row, configErrors };
+}
+
+async function bumpQuotaEpoch(db: ReturnType<typeof getDb>): Promise<number> {
+  const { data } = await db.from("ai_quota_runtime_state").select("policy_epoch").eq("singleton_id", true).maybeSingle();
+  const next = Number(data?.policy_epoch || 1) + 1;
+  const { error } = await db.from("ai_quota_runtime_state").upsert({ singleton_id: true, policy_epoch: next, updated_at: new Date().toISOString() });
+  if (error) throw new Error(error.message);
+  return next;
 }
 
 export async function handleAiTutorAdmin(req: Request, path: string, _url: URL): Promise<Response> {
@@ -40,12 +118,20 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
     if (scope_type === "global" && scope_id !== null) return json({ message: "scope_id must be null for global" }, 400);
     if (scope_type !== "global" && !scope_id)         return json({ message: "scope_id required" }, 400);
 
-    const { data, error } = await db.from("ai_feature_flags").upsert({
+    const payload = {
       scope_type, scope_id, is_enabled, reason,
       updated_by_role: role, updated_by_id: userId, updated_at: new Date().toISOString(),
-    }, { onConflict: "scope_type,scope_id" }).select().single();
+    };
+    let data, error;
+    if (scope_type === "global") {
+      await db.from("ai_feature_flags").delete().eq("scope_type", "global").is("scope_id", null);
+      ({ data, error } = await db.from("ai_feature_flags").insert(payload).select().single());
+    } else {
+      ({ data, error } = await db.from("ai_feature_flags").upsert(payload, { onConflict: "scope_type,scope_id" }).select().single());
+    }
     if (error) return json({ message: error.message }, 500);
-    return json({ flag: data });
+    const policy_epoch = await bumpQuotaEpoch(db).catch(() => null);
+    return json({ flag: data, policy_epoch });
   }
 
   // POST /ai-tutor/admin/feature-flag/bulk
@@ -67,18 +153,19 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
     }));
     const { data, error } = await db.from("ai_feature_flags").upsert(rows, { onConflict: "scope_type,scope_id" }).select();
     if (error) return json({ message: error.message }, 500);
-    return json({ count: (data || []).length, flags: data });
+    const policy_epoch = await bumpQuotaEpoch(db).catch(() => null);
+    return json({ count: (data || []).length, flags: data, policy_epoch });
   }
 
   // GET /ai-tutor/admin/feature-flags?scope_type=&scope_id=
   if (path === "/ai-tutor/admin/feature-flags" && req.method === "GET") {
     const url = new URL(req.url);
     const scope_type = url.searchParams.get("scope_type");
-    let q = db.from("ai_feature_flags").select("*").order("updated_at", { ascending: false });
+    let q = db.from("ai_feature_flags").select("*").order("updated_at", { ascending: true });
     if (scope_type) q = q.eq("scope_type", scope_type);
     const { data, error } = await q;
     if (error) return json({ message: error.message }, 500);
-    return json({ flags: data });
+    return json({ flags: Array.from(latestByScope((data || []) as ScopeRow[]).values()).reverse() });
   }
 
   // POST /ai-tutor/admin/quota-policy
@@ -91,50 +178,47 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
     if (scope_type === "global" && scope_id !== null) return json({ message: "scope_id must be null for global" }, 400);
     if (scope_type !== "global" && !scope_id)         return json({ message: "scope_id required" }, 400);
 
-    const numOrNull = (v: unknown) => v === null || v === undefined || v === "" ? null : Number(v);
-    const row = {
-      scope_type, scope_id,
-      daily_requests:    numOrNull(b.daily_requests),
-      weekly_requests:   numOrNull(b.weekly_requests),
-      monthly_requests:  numOrNull(b.monthly_requests),
-      daily_tokens:      numOrNull(b.daily_tokens),
-      weekly_tokens:     numOrNull(b.weekly_tokens),
-      monthly_tokens:    numOrNull(b.monthly_tokens),
-      max_input_tokens:  numOrNull(b.max_input_tokens),
-      max_output_tokens: numOrNull(b.max_output_tokens),
-      updated_by_role: role, updated_by_id: userId, updated_at: new Date().toISOString(),
-    };
+    const { row, configErrors } = readQuotaDraft({ ...b, scope_id }, scope_type);
+    row.updated_by_role = role;
+    row.updated_by_id = userId;
+    row.updated_at = new Date().toISOString();
+    if (configErrors.length) return json({ message: configErrors.join(" ") }, 400);
+
+    const hasAnyPolicy = ALL_FIELDS.some((F) => numericOrNull(row[F]) !== null)
+      || DISTRIBUTABLE.some((F) => getAllocationMode(row, F) === "percent");
 
     // ── Pool-cap validation ──────────────────────────────────────
-    // Non-global scopes can never allocate more than the parent has available.
-    // If the parent has no quota (null for that field), the child cannot set
-    // a value there either — there's nothing to take from.
     if (scope_type !== "global") {
       try {
         const ctx = await resolveParentPoolFor(db, scope_type, scope_id);
         if (ctx) {
-          const violations: Array<{ field: string; message: string; parent_pool: number | null; sibling_sum: number; max_allowed: number | null }> = [];
+          const violations: Array<{ field: string; message: string; parent_pool: number | null; sibling_sum: number; max_allowed: number | null; requested_mode?: string; requested_percent_bps?: number | null }> = [];
           for (const F of ALL_FIELDS as readonly PolicyField[]) {
-            const newVal = row[F as keyof typeof row] as number | null;
-            if (newVal === null || newVal === undefined) continue;
             if ((DISTRIBUTABLE as readonly string[]).includes(F)) {
+              const mode = getAllocationMode(row, F as DistributableField);
+              if (mode === "inherit" && !hasExplicitAllocation(row, F as DistributableField)) continue;
               const parentPool = ctx.parentEffective[F];
+              const explicit = resolveExplicitAllocation(row, F as DistributableField, parentPool);
               if (parentPool === null) {
                 violations.push({
                   field: F, parent_pool: null, sibling_sum: ctx.siblingManualSum[F], max_allowed: null,
+                  requested_mode: mode,
                   message: `No quota is set for "${F}" anywhere above ${ctx.parentNode.name}. Set it at a higher level first.`,
                 });
                 continue;
               }
               const maxAllowed = Math.max(0, parentPool - ctx.siblingManualSum[F]);
-              if (newVal > maxAllowed) {
+              if (explicit && (explicit.value ?? 0) > maxAllowed) {
                 violations.push({
                   field: F, parent_pool: parentPool, sibling_sum: ctx.siblingManualSum[F], max_allowed: maxAllowed,
+                  requested_mode: explicit.mode,
+                  requested_percent_bps: explicit.percent_bps,
                   message: `"${F}" exceeds available pool. ${ctx.parentNode.name} has ${parentPool} total; siblings already use ${ctx.siblingManualSum[F]}; you can set up to ${maxAllowed}.`,
                 });
               }
             } else {
-              // Per-request cap: must not exceed strictest ancestor cap.
+              const newVal = numericOrNull(row[F]);
+              if (newVal === null) continue;
               const cap = ctx.perRequestCap[F];
               if (cap !== null && newVal > cap) {
                 violations.push({
@@ -154,24 +238,41 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
         }
       } catch (e) {
         console.error("[ai-tutor quota-policy validate]", e);
-        // Don't block on resolver crash — fall through to upsert.
       }
     }
 
-    const { data, error } = await db.from("ai_quota_policies").upsert(row, { onConflict: "scope_type,scope_id" }).select().single();
+    let data, error;
+    if (scope_type === "global") {
+      await db.from("ai_quota_policies").delete().eq("scope_type", "global").is("scope_id", null);
+      if (hasAnyPolicy) {
+        ({ data, error } = await db.from("ai_quota_policies").insert(row).select().single());
+      } else {
+        data = null;
+        error = null;
+      }
+    } else {
+      if (hasAnyPolicy) {
+        ({ data, error } = await db.from("ai_quota_policies").upsert(row, { onConflict: "scope_type,scope_id" }).select().single());
+      } else {
+        ({ error } = await db.from("ai_quota_policies").delete().eq("scope_type", scope_type).eq("scope_id", scope_id));
+        data = null;
+      }
+    }
     if (error) return json({ message: error.message }, 500);
-    return json({ policy: data });
+
+    const policy_epoch = await bumpQuotaEpoch(db).catch(() => null);
+    return json({ policy: data, counters_cleared: 0, policy_epoch });
   }
 
   // GET /ai-tutor/admin/quota-policies?scope_type=
   if (path === "/ai-tutor/admin/quota-policies" && req.method === "GET") {
     const url = new URL(req.url);
     const scope_type = url.searchParams.get("scope_type");
-    let q = db.from("ai_quota_policies").select("*").order("updated_at", { ascending: false });
+    let q = db.from("ai_quota_policies").select("*").order("updated_at", { ascending: true });
     if (scope_type) q = q.eq("scope_type", scope_type);
     const { data, error } = await q;
     if (error) return json({ message: error.message }, 500);
-    return json({ policies: data });
+    return json({ policies: Array.from(latestByScope((data || []) as ScopeRow[]).values()).reverse() });
   }
 
   // POST /ai-tutor/admin/cascade-flag
@@ -183,22 +284,39 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
     const b = await req.json().catch(() => ({}));
     const scope_type = String(b.scope_type || "") as ScopeType;
     const scope_id   = b.scope_id === null || b.scope_id === undefined ? null : Number(b.scope_id);
-    const is_enabled = Boolean(b.is_enabled);
+    const inheritMode = b.is_enabled === null || b.mode === "inherit";
+    const is_enabled = inheritMode ? null : Boolean(b.is_enabled);
     const reason     = b.reason ? String(b.reason) : null;
     const clearSubtree = b.clear_subtree === undefined ? true : Boolean(b.clear_subtree);
     if (!ALLOWED_SCOPES.includes(scope_type)) return json({ message: "Invalid scope_type" }, 400);
     if (!canManage(role, scope_type))         return json({ message: "Forbidden" }, 403);
     if (scope_type === "global" && scope_id !== null) return json({ message: "scope_id must be null for global" }, 400);
     if (scope_type !== "global" && !scope_id)         return json({ message: "scope_id required" }, 400);
+    if (inheritMode && scope_type === "global") return json({ message: "Global scope cannot inherit from a parent" }, 400);
 
-    // Upsert the node's own flag.
-    const { error: upErr } = await db.from("ai_feature_flags").upsert({
-      scope_type, scope_id, is_enabled, reason,
-      updated_by_role: role, updated_by_id: userId, updated_at: new Date().toISOString(),
-    }, { onConflict: "scope_type,scope_id" });
+    let upErr;
+    if (inheritMode) {
+      ({ error: upErr } = await db.from("ai_feature_flags").delete().eq("scope_type", scope_type).eq("scope_id", scope_id));
+    } else if (scope_type === "global") {
+      const cascadePayload = {
+        scope_type, scope_id, is_enabled, reason,
+        updated_by_role: role, updated_by_id: userId, updated_at: new Date().toISOString(),
+      };
+      ({ error: upErr } = await db.from("ai_feature_flags").delete().eq("scope_type", "global").is("scope_id", null));
+      if (!upErr) ({ error: upErr } = await db.from("ai_feature_flags").insert(cascadePayload));
+    } else {
+      const cascadePayload = {
+        scope_type, scope_id, is_enabled, reason,
+        updated_by_role: role, updated_by_id: userId, updated_at: new Date().toISOString(),
+      };
+      ({ error: upErr } = await db.from("ai_feature_flags").upsert(cascadePayload, { onConflict: "scope_type,scope_id" }));
+    }
     if (upErr) return json({ message: upErr.message }, 500);
 
-    if (!clearSubtree) return json({ ok: true, cleared: 0 });
+    if (!clearSubtree) {
+      const policy_epoch = await bumpQuotaEpoch(db).catch(() => null);
+      return json({ ok: true, cleared: 0, policy_epoch });
+    }
 
     // Identify descendant scope rows to delete.
     let cleared = 0;
@@ -214,7 +332,8 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
         // Wipe every non-global override.
         const { error } = await db.from("ai_feature_flags").delete().neq("scope_type", "global");
         if (error) return json({ message: error.message }, 500);
-        return json({ ok: true, cleared: -1 });
+        const policy_epoch = await bumpQuotaEpoch(db).catch(() => null);
+        return json({ ok: true, cleared: -1, policy_epoch });
       }
 
       // Collect ids of the subtree.
@@ -269,7 +388,8 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
         await purge("student", studentIds);
       }
 
-      return json({ ok: true, cleared });
+      const policy_epoch = await bumpQuotaEpoch(db).catch(() => null);
+      return json({ ok: true, cleared, policy_epoch });
     } catch (e) {
       return json({ message: e instanceof Error ? e.message : String(e) }, 500);
     }
@@ -296,7 +416,8 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
       const { error } = await db.from("ai_quota_policies").delete().eq("scope_type", scope_type).eq("scope_id", scope_id);
       results.policy = error ? { ok: false, message: error.message } : { ok: true };
     }
-    return json({ deleted: true, ...results });
+    const policy_epoch = await bumpQuotaEpoch(db).catch(() => null);
+    return json({ deleted: true, policy_epoch, ...results });
   }
 
   // GET /ai-tutor/admin/health
@@ -408,8 +529,8 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
 
     try {
       const [flagsRes, policiesRes, orgsRes, schoolsRes, classesRes, sectionsRes, studentsRes] = await Promise.all([
-        db.from("ai_feature_flags").select("*"),
-        db.from("ai_quota_policies").select("*"),
+        db.from("ai_feature_flags").select("*").order("updated_at", { ascending: true }),
+        db.from("ai_quota_policies").select("*").order("updated_at", { ascending: true }),
         db.from("organizations").select("id, name"),
         db.from("schools").select("id, name, org_id"),
         db.from("classes").select("id, class_name, school_id"),
@@ -472,10 +593,8 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
         return false;
       };
 
-      const flagsBy = new Map<string, Row>();
-      for (const f of (flagsRes.data || []) as Row[]) flagsBy.set(`${f.scope_type}#${f.scope_id ?? "null"}`, f);
-      const policiesBy = new Map<string, Row>();
-      for (const p of (policiesRes.data || []) as Row[]) policiesBy.set(`${p.scope_type}#${p.scope_id ?? "null"}`, p);
+      const flagsBy = latestByScope((flagsRes.data || []) as ScopeRow[]);
+      const policiesBy = latestByScope((policiesRes.data || []) as ScopeRow[]);
 
       const keys = new Set<string>([...flagsBy.keys(), ...policiesBy.keys()]);
       const rows: Array<Record<string, unknown>> = [];
@@ -497,6 +616,18 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
           daily_tokens: p?.daily_tokens ?? null,
           weekly_tokens: p?.weekly_tokens ?? null,
           monthly_tokens: p?.monthly_tokens ?? null,
+          daily_requests_mode: p ? getAllocationMode(p, "daily_requests") : "inherit",
+          weekly_requests_mode: p ? getAllocationMode(p, "weekly_requests") : "inherit",
+          monthly_requests_mode: p ? getAllocationMode(p, "monthly_requests") : "inherit",
+          daily_tokens_mode: p ? getAllocationMode(p, "daily_tokens") : "inherit",
+          weekly_tokens_mode: p ? getAllocationMode(p, "weekly_tokens") : "inherit",
+          monthly_tokens_mode: p ? getAllocationMode(p, "monthly_tokens") : "inherit",
+          daily_requests_percent_bps: p?.daily_requests_percent_bps ?? null,
+          weekly_requests_percent_bps: p?.weekly_requests_percent_bps ?? null,
+          monthly_requests_percent_bps: p?.monthly_requests_percent_bps ?? null,
+          daily_tokens_percent_bps: p?.daily_tokens_percent_bps ?? null,
+          weekly_tokens_percent_bps: p?.weekly_tokens_percent_bps ?? null,
+          monthly_tokens_percent_bps: p?.monthly_tokens_percent_bps ?? null,
           max_input_tokens: p?.max_input_tokens ?? null,
           max_output_tokens: p?.max_output_tokens ?? null,
           updated_at: (p?.updated_at || f?.updated_at) ?? null,
@@ -534,8 +665,8 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
     try {
       type Row = { id: number; [k: string]: unknown };
       const [flagsRes, policiesRes, orgsRes, schoolsRes, classesRes, sectionsRes, studentsRes] = await Promise.all([
-        db.from("ai_feature_flags").select("*"),
-        db.from("ai_quota_policies").select("*"),
+        db.from("ai_feature_flags").select("*").order("updated_at", { ascending: true }),
+        db.from("ai_quota_policies").select("*").order("updated_at", { ascending: true }),
         db.from("organizations").select("id, name"),
         db.from("schools").select("id, name, org_id"),
         db.from("classes").select("id, class_name, school_id"),
@@ -556,10 +687,8 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
       }]));
 
       const flagKey = (t: string, sid: number | null) => `${t}#${sid ?? "null"}`;
-      const flagsBy = new Map<string, Row>();
-      for (const f of (flagsRes.data || []) as Row[]) flagsBy.set(flagKey(String(f.scope_type), (f.scope_id ?? null) as number | null), f);
-      const policiesBy = new Map<string, Row>();
-      for (const p of (policiesRes.data || []) as Row[]) policiesBy.set(flagKey(String(p.scope_type), (p.scope_id ?? null) as number | null), p);
+      const flagsBy = latestByScope((flagsRes.data || []) as ScopeRow[]);
+      const policiesBy = latestByScope((policiesRes.data || []) as ScopeRow[]);
 
       const ownFlag = (t: string, sid: number | null) => {
         const f = flagsBy.get(flagKey(t, sid));
@@ -567,17 +696,7 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
       };
       const ownPolicy = (t: string, sid: number | null) => {
         const p = policiesBy.get(flagKey(t, sid));
-        if (!p) return null;
-        return {
-          daily_requests: p.daily_requests ?? null,
-          weekly_requests: p.weekly_requests ?? null,
-          monthly_requests: p.monthly_requests ?? null,
-          daily_tokens: p.daily_tokens ?? null,
-          weekly_tokens: p.weekly_tokens ?? null,
-          monthly_tokens: p.monthly_tokens ?? null,
-          max_input_tokens: p.max_input_tokens ?? null,
-          max_output_tokens: p.max_output_tokens ?? null,
-        };
+        return policyPayloadView(p || null);
       };
 
       // Build ancestor chain for a node, top-down (global first → current node last).
@@ -875,10 +994,19 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
         const root = chainEntries[0];
         for (const F of ALL_FIELDS) {
           const ownVal = root.own_policy?.[F];
-          if (ownVal !== null && ownVal !== undefined) {
-            current[F] = { value: Number(ownVal), source: "manual", from_type: "global", from_name: root.name };
+          if (NON_DISTRIBUTABLE.includes(F)) {
+            if (ownVal !== null && ownVal !== undefined) {
+              current[F] = { value: Number(ownVal), source: "manual", from_type: "global", from_name: root.name };
+            } else {
+              current[F] = { value: null, source: "none", from_type: "none", from_name: "no limit" };
+            }
           } else {
-            current[F] = { value: null, source: "none", from_type: "none", from_name: "no limit" };
+            const explicit = resolveExplicitAllocation(root.own_policy, F as DistributableField, null);
+            if (explicit) {
+              current[F] = { value: explicit.value, source: "manual", from_type: "global", from_name: root.name };
+            } else {
+              current[F] = { value: null, source: "none", from_type: "none", from_name: "no limit" };
+            }
           }
         }
 
@@ -889,19 +1017,22 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
 
           for (const F of ALL_FIELDS) {
             const ownVal = node.own_policy?.[F];
-            if (ownVal !== null && ownVal !== undefined) {
-              next[F] = { value: Number(ownVal), source: "manual", from_type: node.type, from_name: node.name };
-              continue;
-            }
-            // No own value: cascade or auto-distribute.
             if (NON_DISTRIBUTABLE.includes(F)) {
-              // Per-request caps cascade as-is.
+              if (ownVal !== null && ownVal !== undefined) {
+                next[F] = { value: Number(ownVal), source: "manual", from_type: node.type, from_name: node.name };
+                continue;
+              }
               next[F] = { ...current[F] };
               if (next[F].source === "manual") next[F].source = "inherited";
               continue;
             }
-            // Distributable: divide parent pool by sibling student-counts.
             const parentPool = current[F].value;
+            const myStudents = studentCountFor(node.type, node.id);
+            const explicit = resolveExplicitAllocation(node.own_policy, F as DistributableField, parentPool);
+            if (explicit) {
+              next[F] = { value: myStudents > 0 ? explicit.value : 0, source: "manual", from_type: node.type, from_name: node.name };
+              continue;
+            }
             if (parentPool === null) {
               next[F] = { value: null, source: "none", from_type: "none", from_name: "no limit" };
               continue;
@@ -909,19 +1040,19 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
             const sibs = siblingsOfChainNode(parent.type, parent.id);
             let manualSum = 0;
             let nonManualStudents = 0;
-            const myStudents = studentCountFor(node.type, node.id);
-            let nodeIsManual = false; // already handled above; here it's auto
             for (const sib of sibs) {
+              const sibStudents = studentCountFor(sib.type, sib.id);
               const sibPolicy = policiesBy.get(flagKey(sib.type, sib.id));
-              const sibManual = sibPolicy ? (sibPolicy[F] as number | null | undefined) : null;
-              if (sibManual !== null && sibManual !== undefined) {
-                manualSum += Number(sibManual);
+              const sibExplicit = resolveExplicitAllocation(sibPolicy || null, F as DistributableField, parentPool);
+              if (sibExplicit && sibStudents > 0) {
+                manualSum += sibExplicit.value ?? 0;
               } else {
-                nonManualStudents += studentCountFor(sib.type, sib.id);
+                nonManualStudents += sibStudents;
               }
             }
             const remaining = Math.max(0, parentPool - manualSum);
-            const share = nonManualStudents > 0
+            // Disabled scopes (0 enabled students) get 0 share.
+            const share = (nonManualStudents > 0 && myStudents > 0)
               ? Math.floor(remaining * myStudents / nonManualStudents)
               : 0;
             next[F] = {
@@ -986,9 +1117,10 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
         nonManualStudentsByField[F] = 0;
         for (const c of allChildSiblings) {
           const sibPol = policiesBy.get(flagKey(c.type, c.id));
-          const ownVal = sibPol ? (sibPol[F] as number | null | undefined) : null;
-          if (ownVal !== null && ownVal !== undefined) manualByField[F] += Number(ownVal);
-          else nonManualStudentsByField[F] += childStudentCounts[`${c.type}#${c.id}`] ?? 0;
+          const explicit = resolveExplicitAllocation(sibPol || null, F as DistributableField, effPolicy[F].value);
+          const sibStudents = childStudentCounts[`${c.type}#${c.id}`] ?? 0;
+          if (explicit && sibStudents > 0) manualByField[F] += explicit.value ?? 0;
+          else nonManualStudentsByField[F] += sibStudents;
         }
       }
 
@@ -998,23 +1130,31 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
         const allocation: FieldMap = {};
         for (const F of ALL_FIELDS) {
           const ownVal = c.own_policy?.[F];
-          if (ownVal !== null && ownVal !== undefined) {
-            allocation[F] = { value: Number(ownVal), source: "manual", from_type: c.type, from_name: c.name };
-            continue;
-          }
           if (NON_DISTRIBUTABLE.includes(F)) {
+            if (ownVal !== null && ownVal !== undefined) {
+              allocation[F] = { value: Number(ownVal), source: "manual", from_type: c.type, from_name: c.name };
+              continue;
+            }
             allocation[F] = { ...effPolicy[F] };
             if (allocation[F].source === "manual") allocation[F].source = "inherited";
             continue;
           }
           const parentPool = effPolicy[F].value;
+          const explicit = resolveExplicitAllocation(c.own_policy, F as DistributableField, parentPool);
+          if (explicit) {
+            allocation[F] = { value: my > 0 ? explicit.value : 0, source: "manual", from_type: c.type, from_name: c.name };
+            continue;
+          }
           if (parentPool === null) {
             allocation[F] = { value: null, source: "none", from_type: "none", from_name: "no limit" };
             continue;
           }
           const remaining = Math.max(0, parentPool - manualByField[F]);
           const nonMan = nonManualStudentsByField[F];
-          const share = nonMan > 0 ? Math.floor(remaining * my / nonMan) : 0;
+          // Disabled scopes (0 enabled students) get 0 share.
+          const share = (nonMan > 0 && my > 0)
+            ? Math.floor(remaining * my / nonMan)
+            : 0;
           allocation[F] = {
             value: share,
             source: "auto",
@@ -1043,9 +1183,11 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
       for (const F of DISTRIBUTABLE) {
         const pp = effPolicy[F].value;
         const remaining = pp === null ? null : Math.max(0, pp - manualByField[F]);
-        const perStudent = (remaining !== null && nonManualStudentsByField[F] > 0)
-          ? Math.floor(remaining / nonManualStudentsByField[F])
-          : null;
+        const perStudent = remaining === null
+          ? null
+          : (nonManualStudentsByField[F] > 0
+              ? Math.floor(remaining / nonManualStudentsByField[F])
+              : 0);
         distribution[F] = {
           parent_pool: pp,
           manual_sum: manualByField[F],
@@ -1057,6 +1199,7 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
 
       return json({
         is_root: isRoot,
+        context_effective_flag: effFlag ? { ...effFlag, from_type: effFlagFrom.type, from_name: effFlagFrom.name } : null,
         node: isRoot ? null : {
           type: currentNode.type,
           id: currentNode.id,
@@ -1077,6 +1220,174 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
       console.error("[ai-tutor hierarchy]", err);
       return json({ message: "Server error" }, 500);
     }
+  }
+
+  // GET /ai-tutor/admin/provider-status
+  // Returns current LLM provider key info (OpenRouter /auth/key) so the
+  // SuperAdmin UI can show "what plan/key is active right now".
+  if (path === "/ai-tutor/admin/provider-status" && req.method === "GET") {
+    if (role !== "super_admin") return json({ message: "Forbidden" }, 403);
+
+    const orKey   = Deno.env.get("OPENROUTER_API_KEY") || null;
+    const oaKey   = Deno.env.get("OPENAI_API_KEY") || null;
+    const orModel = Deno.env.get("OPENROUTER_MODEL") || "openai/gpt-4o-mini";
+
+    const out: Record<string, unknown> = {
+      provider: orKey ? "openrouter" : (oaKey ? "openai" : "none"),
+      chat_model: orModel,
+      has_embeddings: !!oaKey, // OpenRouter has no /embeddings endpoint
+      retrieval_mode: oaKey ? "vector" : "fulltext",
+    };
+
+    if (orKey) {
+      try {
+        const r = await fetch("https://openrouter.ai/api/v1/auth/key", {
+          headers: { Authorization: `Bearer ${orKey}` },
+        });
+        if (r.ok) {
+          const j = await r.json();
+          const d = j?.data || {};
+          out.key = {
+            label: d.label ?? null,
+            usage_usd: typeof d.usage === "number" ? d.usage : null,
+            limit_usd: typeof d.limit === "number" ? d.limit : null,
+            remaining_usd:
+              typeof d.limit === "number" && typeof d.usage === "number"
+                ? Math.max(0, d.limit - d.usage)
+                : null,
+            is_free_tier: !!d.is_free_tier,
+            rate_limit: d.rate_limit ?? null,
+          };
+        } else {
+          out.key = { error: `auth/key ${r.status}` };
+        }
+      } catch (e) {
+        out.key = { error: (e as Error).message };
+      }
+    }
+
+    return json(out);
+  }
+
+  // POST /ai-tutor/admin/sync-provider-quota
+  // Pulls live limits from the provider (OpenRouter /auth/key) and rewrites
+  // the GLOBAL ai_quota_policies row to match. Also clears today's counters
+  // so previous "limit reached" states are cleared instantly.
+  // Body (all optional, all override the computed values):
+  //   { daily_requests, weekly_requests, monthly_requests,
+  //     daily_tokens, weekly_tokens, monthly_tokens,
+  //     max_input_tokens, max_output_tokens,
+  //     reset_counters?: boolean (default true) }
+  if (path === "/ai-tutor/admin/sync-provider-quota" && req.method === "POST") {
+    if (role !== "super_admin") return json({ message: "Forbidden" }, 403);
+
+    const body = await req.json().catch(() => ({}));
+    const numOrNull = (v: unknown) => v === null || v === undefined || v === "" ? null : Number(v);
+
+    // Sensible per-student defaults. With the strictest-cap-wins quota model
+    // (see lib/aiQuota.ts), these numbers apply PER STUDENT, not as a pool.
+    let daily_requests:    number | null = 200;
+    let weekly_requests:   number | null = 1000;
+    let monthly_requests:  number | null = 3000;
+    let daily_tokens:      number | null = 200_000;
+    let weekly_tokens:     number | null = 1_000_000;
+    let monthly_tokens:    number | null = 3_000_000;
+    let max_input_tokens:  number | null = 4000;
+    let max_output_tokens: number | null = 1200;
+
+    // Try to refine from OpenRouter live data.
+    const orKey = Deno.env.get("OPENROUTER_API_KEY") || null;
+    let provider_snapshot: Record<string, unknown> | null = null;
+    if (orKey) {
+      try {
+        const r = await fetch("https://openrouter.ai/api/v1/auth/key", {
+          headers: { Authorization: `Bearer ${orKey}` },
+        });
+        if (r.ok) {
+          const j = await r.json();
+          const d = j?.data || {};
+          provider_snapshot = d;
+          // Skip rate-limit-based throttling: even a small rate limit (e.g.
+          // 10 req/10s) yields huge daily totals, but distributing it across
+          // hundreds of students would dilute caps to nothing. Keep the
+          // generous defaults — getEffectiveQuota() handles per-student fairness.
+
+          // If credit budget is known, project token caps from remaining USD.
+          const remaining = typeof d.limit === "number" && typeof d.usage === "number"
+            ? Math.max(0, d.limit - d.usage)
+            : null;
+          if (remaining !== null && remaining > 0) {
+            // Per-student token budget. Assume the trial credit should last
+            // ~30 days for ~50 students at avg cost 0.0005 USD/1k tokens.
+            // tokens/student = remaining / (50 * 0.0005) * 1000
+            const perStudentTokens = Math.floor((remaining / (50 * 0.0005)) * 1000);
+            monthly_tokens = Math.max(50_000, perStudentTokens);
+            weekly_tokens  = Math.max(20_000, Math.floor(perStudentTokens / 4));
+            daily_tokens   = Math.max(10_000, Math.floor(perStudentTokens / 28));
+          }
+        }
+      } catch (_e) {
+        // Ignore — defaults still apply.
+      }
+    }
+
+    // Body overrides win.
+    if (body.daily_requests    !== undefined) daily_requests    = numOrNull(body.daily_requests);
+    if (body.weekly_requests   !== undefined) weekly_requests   = numOrNull(body.weekly_requests);
+    if (body.monthly_requests  !== undefined) monthly_requests  = numOrNull(body.monthly_requests);
+    if (body.daily_tokens      !== undefined) daily_tokens      = numOrNull(body.daily_tokens);
+    if (body.weekly_tokens     !== undefined) weekly_tokens     = numOrNull(body.weekly_tokens);
+    if (body.monthly_tokens    !== undefined) monthly_tokens    = numOrNull(body.monthly_tokens);
+    if (body.max_input_tokens  !== undefined) max_input_tokens  = numOrNull(body.max_input_tokens);
+    if (body.max_output_tokens !== undefined) max_output_tokens = numOrNull(body.max_output_tokens);
+
+    const row = {
+      scope_type: "global" as const,
+      scope_id: null as number | null,
+      daily_requests, weekly_requests, monthly_requests,
+      daily_tokens,   weekly_tokens,   monthly_tokens,
+      max_input_tokens, max_output_tokens,
+      daily_requests_mode: "fixed",
+      weekly_requests_mode: "fixed",
+      monthly_requests_mode: "fixed",
+      daily_tokens_mode: "fixed",
+      weekly_tokens_mode: "fixed",
+      monthly_tokens_mode: "fixed",
+      daily_requests_percent_bps: null,
+      weekly_requests_percent_bps: null,
+      monthly_requests_percent_bps: null,
+      daily_tokens_percent_bps: null,
+      weekly_tokens_percent_bps: null,
+      monthly_tokens_percent_bps: null,
+      updated_by_role: role, updated_by_id: userId, updated_at: new Date().toISOString(),
+    };
+    await db.from("ai_quota_policies").delete().eq("scope_type", "global").is("scope_id", null);
+    const { data: policy, error: polErr } = await db
+      .from("ai_quota_policies")
+      .insert(row)
+      .select()
+      .single();
+    if (polErr) return json({ message: polErr.message }, 500);
+
+    const resetCounters = body.reset_counters === undefined ? true : Boolean(body.reset_counters);
+    const policy_epoch = resetCounters ? await bumpQuotaEpoch(db).catch(() => null) : null;
+
+    return json({
+      policy,
+      counters_cleared: 0,
+      policy_epoch,
+      provider: provider_snapshot,
+      message: resetCounters ? "Global quota synced and counters version bumped." : "Global quota synced.",
+    });
+  }
+
+  // POST /ai-tutor/admin/reset-counters
+  // Wipes ai_quota_counters globally — useful when an admin manually bumps
+  // a limit and wants the "limit reached" state to clear instantly.
+  if (path === "/ai-tutor/admin/reset-counters" && req.method === "POST") {
+    if (role !== "super_admin") return json({ message: "Forbidden" }, 403);
+    const policy_epoch = await bumpQuotaEpoch(db).catch(() => null);
+    return json({ counters_cleared: 0, policy_epoch });
   }
 
   return json({ message: "Not found" }, 404);

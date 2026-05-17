@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, FlatList, Pressable, StyleSheet, Alert, ActivityIndicator, RefreshControl } from 'react-native';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { View, Text, FlatList, Pressable, StyleSheet, Alert, ActivityIndicator, RefreshControl, Animated, StatusBar, Easing } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,6 +7,33 @@ import { useFocusEffect } from '@react-navigation/native';
 import api from '../../services/api';
 import { C } from '../../config/theme';
 import { useAuth } from '../../context/AuthContext';
+
+const CHILD_ACCENTS = [
+  {
+    gradient: ['#1D4ED8', '#2563EB'],
+    tint: '#DBEAFE',
+    glow: 'rgba(37,99,235,0.14)',
+    icon: 'rgba(37,99,235,0.1)',
+  },
+  {
+    gradient: ['#0F766E', '#14B8A6'],
+    tint: '#CCFBF1',
+    glow: 'rgba(20,184,166,0.14)',
+    icon: 'rgba(20,184,166,0.12)',
+  },
+  {
+    gradient: ['#B45309', '#F59E0B'],
+    tint: '#FEF3C7',
+    glow: 'rgba(245,158,11,0.16)',
+    icon: 'rgba(245,158,11,0.12)',
+  },
+  {
+    gradient: ['#7C3AED', '#A855F7'],
+    tint: '#EDE9FE',
+    glow: 'rgba(168,85,247,0.14)',
+    icon: 'rgba(168,85,247,0.12)',
+  },
+];
 
 export default function ParentDashboardScreen({ navigation }) {
   const { logout } = useAuth();
@@ -27,6 +54,7 @@ export default function ParentDashboardScreen({ navigation }) {
   const todayIso = new Date().toISOString().slice(0, 10);
   const topInset = Math.max(insets.top, 0);
   const heroMarginTop = topInset + 6;
+  const entrance = useRef(new Animated.Value(0)).current;
 
   const summarizeChildren = useCallback(async (list) => {
     if (!Array.isArray(list) || list.length === 0) {
@@ -123,6 +151,15 @@ export default function ParentDashboardScreen({ navigation }) {
     }, [loadChatUnread, loadDashboard]),
   );
 
+  useEffect(() => {
+    Animated.timing(entrance, {
+      toValue: loading ? 0 : 1,
+      duration: 550,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [entrance, loading, children.length]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -151,26 +188,196 @@ export default function ParentDashboardScreen({ navigation }) {
     });
   };
 
+  const handleChildProfilePressed = (child) => {
+    const selectionToken = Date.now();
+    navigation.navigate('ChildStudentPortal', {
+      child,
+      selectionToken,
+      screen: 'HomeTab',
+      params: {
+        screen: 'StudentProfile',
+        params: { child, selectionToken },
+      },
+    });
+  };
+
   const initials = (child) => {
     const first = (child.first_name || '?')[0].toUpperCase();
     const last = (child.last_name || '?')[0].toUpperCase();
     return `${first}${last}`;
   };
 
+  const familyMessage = useMemo(() => {
+    if (!overview.totalChildren) {
+      return {
+        title: 'Build your family dashboard',
+        body: 'Once children are linked, attendance, alerts, and leave activity will appear here automatically.',
+        tone: 'calm',
+        icon: 'sparkles-outline',
+      };
+    }
+
+    if (overview.pendingLeaves > 0) {
+      return {
+        title: `${overview.pendingLeaves} leave action${overview.pendingLeaves === 1 ? '' : 's'} waiting`,
+        body: 'Review leave activity first so no request is missed across your children.',
+        tone: 'warn',
+        icon: 'time-outline',
+      };
+    }
+
+    if (overview.unreadNotifications > 0) {
+      return {
+        title: `${overview.unreadNotifications} unread school update${overview.unreadNotifications === 1 ? '' : 's'}`,
+        body: 'Messages and notices are stacking up. Open the message center to catch up quickly.',
+        tone: 'info',
+        icon: 'notifications-outline',
+      };
+    }
+
+    if (overview.markedToday < overview.totalChildren) {
+      return {
+        title: 'Attendance is still coming in',
+        body: `${overview.markedToday} of ${overview.totalChildren} children have been marked so far today.`,
+        tone: 'calm',
+        icon: 'pulse-outline',
+      };
+    }
+
+    return {
+      title: 'Family dashboard looks clear',
+      body: `${overview.presentToday} ${overview.presentToday === 1 ? 'child is' : 'children are'} present today and there are no urgent actions right now.`,
+      tone: 'success',
+      icon: 'checkmark-circle-outline',
+    };
+  }, [overview]);
+
+  const attentionCards = useMemo(() => ([
+    {
+      key: 'alerts',
+      label: 'School Alerts',
+      value: String(overview.unreadNotifications),
+      note: overview.unreadNotifications > 0 ? 'Need review' : 'All caught up',
+      icon: 'notifications-outline',
+      accent: '#2563EB',
+      bg: '#EFF6FF',
+      border: '#DBEAFE',
+    },
+    {
+      key: 'leaves',
+      label: 'Leave Actions',
+      value: String(overview.pendingLeaves),
+      note: overview.pendingLeaves > 0 ? 'Pending items' : 'Nothing pending',
+      icon: 'document-text-outline',
+      accent: '#D97706',
+      bg: '#FFFBEB',
+      border: '#FDE68A',
+    },
+  ]), [overview.pendingLeaves, overview.unreadNotifications]);
+
+  const heroAnimatedStyle = {
+    opacity: entrance,
+    transform: [
+      {
+        translateY: entrance.interpolate({
+          inputRange: [0, 1],
+          outputRange: [22, 0],
+        }),
+      },
+    ],
+  };
+
+  const renderChildCard = ({ item, index }) => {
+    const accent = CHILD_ACCENTS[index % CHILD_ACCENTS.length];
+    const cardOpacity = entrance.interpolate({
+      inputRange: [0, 0.5, 1],
+      outputRange: [0, 0.2, 1],
+    });
+    const cardTranslate = entrance.interpolate({
+      inputRange: [0, 1],
+      outputRange: [24 + index * 5, 0],
+    });
+
+    return (
+      <Animated.View style={{ opacity: cardOpacity, transform: [{ translateY: cardTranslate }] }}>
+        <Pressable
+          style={({ pressed }) => [styles.childCard, { shadowColor: accent.glow }, pressed && styles.childCardPressed]}
+          onPress={() => handleChildPressed(item)}
+        >
+          <LinearGradient
+            colors={accent.gradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.childAccentBar}
+          />
+          <View style={[styles.childAmbientOrb, { backgroundColor: accent.glow }]} pointerEvents="none" />
+
+          <View style={styles.childTopRow}>
+            <View style={styles.childIdentityRow}>
+              <View style={[styles.childAvatar, { backgroundColor: accent.icon }] }>
+                <Text style={styles.childAvatarText}>{initials(item)}</Text>
+              </View>
+              <View style={styles.childIdentityText}>
+                <Text style={styles.childName}>{item.first_name} {item.last_name}</Text>
+                <Text style={styles.childClassLine}>{item.class_name} • Sec {item.section_name}</Text>
+              </View>
+            </View>
+            <View style={[styles.childPortalPill, { backgroundColor: accent.tint }] }>
+              <Ionicons name="grid-outline" size={13} color={accent.gradient[0]} />
+              <Text style={[styles.childPortalPillText, { color: accent.gradient[0] }]}>Portal</Text>
+            </View>
+          </View>
+
+          <View style={styles.childInfoRow}>
+            <View style={styles.childInfoChip}>
+              <Ionicons name="person-circle-outline" size={14} color={C.textMed} />
+              <Text style={styles.childInfoChipText}>Age {item.age ?? '—'}</Text>
+            </View>
+            <Pressable
+              onPress={(event) => {
+                event?.stopPropagation?.();
+                handleChildProfilePressed(item);
+              }}
+              style={({ pressed }) => [styles.childInfoChip, styles.childInfoChipAction, pressed && styles.childInfoChipActionPressed]}
+            >
+              <Ionicons name="school-outline" size={14} color="#1D4ED8" />
+              <Text style={[styles.childInfoChipText, styles.childInfoChipActionText]}>Student profile</Text>
+              <Ionicons name="arrow-forward" size={12} color="#1D4ED8" />
+            </Pressable>
+          </View>
+
+          <View style={styles.childFooterRow}>
+            <View style={styles.childMessageWrap}>
+              <Text style={styles.childMessageTitle}>Open child dashboard</Text>
+              <Text style={styles.childMessageText}>Attendance, classwork, homework, leaves, notifications, and AI tools stay exactly as they are.</Text>
+            </View>
+            <View style={[styles.childArrowWrap, { backgroundColor: accent.tint }] }>
+              <Ionicons name="arrow-forward" size={18} color={accent.gradient[0]} />
+            </View>
+          </View>
+        </Pressable>
+      </Animated.View>
+    );
+  };
+
   return (
     <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor={C.brandDeep} translucent={false} />
+      <View style={styles.bgOrbTop} pointerEvents="none" />
+      <View style={styles.bgOrbBottom} pointerEvents="none" />
+
       {loading ? (
         <ActivityIndicator color={C.primary} size="large" style={{ marginTop: 40 }} />
       ) : (
         <FlatList
           data={children}
           keyExtractor={(item) => String(item.student_id)}
-          contentContainerStyle={{ paddingHorizontal: 14, paddingTop: 12, paddingBottom: 24 }}
+          contentContainerStyle={styles.listContent}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListHeaderComponent={
-            <View style={styles.summaryWrap}>
+            <Animated.View style={[styles.summaryWrap, heroAnimatedStyle]}>
               <LinearGradient
-                colors={['#1E3A8A', '#2563EB']}
+                colors={C.brandGradient}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={[
@@ -182,20 +389,40 @@ export default function ParentDashboardScreen({ navigation }) {
                 ]}
               >
                 <View style={styles.heroDeco} pointerEvents="none" />
-                <Text style={styles.heroEyebrow}>Parent Dashboard</Text>
-                <Text style={styles.heroTitle}>Quick Overview</Text>
-                <Text style={styles.heroSub}>See today's key updates before opening each child profile.</Text>
+                <View style={styles.heroDecoSecondary} pointerEvents="none" />
 
-                <Pressable
-                  onPress={() => Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Sign Out', style: 'destructive', onPress: logout },
-                  ])}
-                  style={({ pressed }) => [styles.heroSignOutBtn, pressed && { opacity: 0.82 }]}
-                >
-                  <Ionicons name="log-out-outline" size={14} color="#DBEAFE" />
-                  <Text style={styles.heroSignOutText}>Sign Out</Text>
-                </Pressable>
+                <View style={styles.heroTopRow}>
+                  <View style={styles.heroHeadingWrap}>
+                    <Text style={styles.heroEyebrow}>Family Command Center</Text>
+                    <Text style={styles.heroTitle}>Parent Portal</Text>
+                    <Text style={styles.heroSub}>A calmer view of attendance, school alerts, leave activity, and messages across every child.</Text>
+                  </View>
+
+                  <Pressable
+                    onPress={() => Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Sign Out', style: 'destructive', onPress: logout },
+                    ])}
+                    style={({ pressed }) => [styles.heroSignOutBtn, pressed && { opacity: 0.82 }]}
+                  >
+                    <Ionicons name="log-out-outline" size={14} color="#DBEAFE" />
+                    <Text style={styles.heroSignOutText}>Sign Out</Text>
+                  </Pressable>
+                </View>
+
+                <View style={styles.heroInsightCard}>
+                  <View style={[
+                    styles.heroInsightIconWrap,
+                    familyMessage.tone === 'warn' && styles.heroInsightWarn,
+                    familyMessage.tone === 'success' && styles.heroInsightSuccess,
+                  ]}>
+                    <Ionicons name={familyMessage.icon} size={18} color="#fff" />
+                  </View>
+                  <View style={styles.heroInsightTextWrap}>
+                    <Text style={styles.heroInsightTitle}>{familyMessage.title}</Text>
+                    <Text style={styles.heroInsightBody}>{familyMessage.body}</Text>
+                  </View>
+                </View>
 
                 <View style={styles.summaryRow}>
                   <View style={styles.summaryItem}>
@@ -217,66 +444,72 @@ export default function ParentDashboardScreen({ navigation }) {
                 </View>
               </LinearGradient>
 
-              <View style={styles.pendingRow}>
-                <View style={styles.pendingLeft}>
-                  <View style={styles.pendingIconWrap}>
-                    <Ionicons name="time-outline" size={16} color="#1E40AF" />
-                  </View>
-                  <Text style={styles.pendingText}>Pending leave actions: {overview.pendingLeaves}</Text>
-                </View>
-                {overviewLoading ? <ActivityIndicator size="small" color={C.primary} /> : null}
-              </View>
-              {/* Quick-access shortcut row */}
-              <View style={styles.quickRow}>
-                <Pressable
-                  style={({ pressed }) => [styles.quickCard, pressed && { opacity: 0.82 }]}
-                  onPress={() => navigation.navigate('ChatList')}
-                >
-                  <View style={[styles.quickIcon, { backgroundColor: '#2563EB' }]}>
-                    <Ionicons name="chatbubbles-outline" size={20} color="#fff" />
-                  </View>
-                  <Text style={styles.quickLabel}>Messages</Text>
-                  {chatUnread > 0 ? (
-                    <View style={styles.quickBadge}>
-                      <Text style={styles.quickBadgeText}>{chatUnread > 99 ? '99+' : chatUnread}</Text>
+              <View style={styles.dashboardBody}>
+                <View style={styles.attentionGrid}>
+                  {attentionCards.map((card) => (
+                    <View key={card.key} style={[styles.attentionCard, { backgroundColor: card.bg, borderColor: card.border }]}>
+                      <View style={[styles.attentionIconWrap, { backgroundColor: `${card.accent}18` }] }>
+                        <Ionicons name={card.icon} size={18} color={card.accent} />
+                      </View>
+                      <Text style={styles.attentionLabel}>{card.label}</Text>
+                      <Text style={styles.attentionValue}>{card.value}</Text>
+                      <Text style={styles.attentionNote}>{card.note}</Text>
                     </View>
-                  ) : null}
-                  <Ionicons name="chevron-forward" size={16} color={C.textLight} />
-                </Pressable>
-              </View>
+                  ))}
+                </View>
 
-              <Text style={styles.childrenHeading}>Children</Text>
-            </View>
+                <View style={styles.quickRow}>
+                  <Pressable
+                    style={({ pressed }) => [styles.quickCard, pressed && { opacity: 0.82 }]}
+                    onPress={() => navigation.navigate('ChatList')}
+                  >
+                    <View style={[styles.quickIcon, { backgroundColor: '#2563EB' }] }>
+                      <Ionicons name="chatbubbles-outline" size={20} color="#fff" />
+                    </View>
+                    <View style={styles.quickTextWrap}>
+                      <Text style={styles.quickLabel}>Messages</Text>
+                      <Text style={styles.quickSubLabel}>Open parent conversations</Text>
+                    </View>
+                    {chatUnread > 0 ? (
+                      <View style={styles.quickBadge}>
+                        <Text style={styles.quickBadgeText}>{chatUnread > 99 ? '99+' : chatUnread}</Text>
+                      </View>
+                    ) : null}
+                    <Ionicons name="chevron-forward" size={16} color={C.textLight} />
+                  </Pressable>
+
+                  <Pressable
+                    style={({ pressed }) => [styles.quickCard, pressed && { opacity: 0.82 }]}
+                    onPress={onRefresh}
+                  >
+                    <View style={[styles.quickIcon, { backgroundColor: '#0F766E' }] }>
+                      <Ionicons name="refresh-outline" size={20} color="#fff" />
+                    </View>
+                    <View style={styles.quickTextWrap}>
+                      <Text style={styles.quickLabel}>Refresh</Text>
+                      <Text style={styles.quickSubLabel}>Reload family summary</Text>
+                    </View>
+                    {overviewLoading || refreshing ? <ActivityIndicator size="small" color={C.primary} /> : <Ionicons name="sparkles-outline" size={16} color={C.textLight} />}
+                  </Pressable>
+                </View>
+
+                <View style={styles.sectionHeaderRow}>
+                  <Text style={styles.childrenHeading}>Your Children</Text>
+                  <Text style={styles.childrenCaption}>Tap any card to open the same child portal experience you already use.</Text>
+                </View>
+              </View>
+            </Animated.View>
           }
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Text style={styles.emptyIcon}>👶</Text>
+              <LinearGradient colors={['#DBEAFE', '#EFF6FF']} style={styles.emptyIconCircle}>
+                <Ionicons name="people-outline" size={28} color="#1D4ED8" />
+              </LinearGradient>
               <Text style={styles.emptyTitle}>No children linked yet</Text>
               <Text style={styles.emptyTxt}>Please ask your school admin to link your children to this account.</Text>
             </View>
           }
-          renderItem={({ item }) => (
-            <Pressable
-              style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]}
-              onPress={() => handleChildPressed(item)}
-            >
-              <View style={styles.iconBox}>
-                <Ionicons name="person-outline" size={24} color="#2563EB" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.name}>
-                  {item.first_name} {item.last_name}
-                </Text>
-                <Text style={styles.subtitle}>
-                  {item.class_name} • Sec {item.section_name}
-                </Text>
-                <Text style={styles.meta}>Age {item.age}</Text>
-              </View>
-              <View style={styles.arrowWrap}>
-                <Ionicons name="chevron-forward" size={18} color={C.textLight} />
-              </View>
-            </Pressable>
-          )}
+          renderItem={renderChildCard}
         />
       )}
 
@@ -286,24 +519,55 @@ export default function ParentDashboardScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
+  bgOrbTop: {
+    position: 'absolute',
+    width: 280,
+    height: 280,
+    borderRadius: 140,
+    backgroundColor: 'rgba(37,99,235,0.08)',
+    top: -120,
+    right: -90,
+  },
+  bgOrbBottom: {
+    position: 'absolute',
+    width: 240,
+    height: 240,
+    borderRadius: 120,
+    backgroundColor: 'rgba(20,184,166,0.06)',
+    bottom: 60,
+    left: -120,
+  },
+  listContent: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 34 },
   summaryWrap: { marginBottom: 8 },
+  dashboardBody: { marginTop: 2 },
   heroCard: {
-    borderRadius: 18,
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 16,
+    borderRadius: 24,
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 18,
     overflow: 'hidden',
-    marginBottom: 10,
+    marginBottom: 14,
   },
   heroDeco: {
     position: 'absolute',
-    width: 170,
-    height: 170,
-    borderRadius: 85,
+    width: 190,
+    height: 190,
+    borderRadius: 95,
     backgroundColor: 'rgba(255,255,255,0.08)',
-    right: -45,
-    top: -55,
+    right: -50,
+    top: -68,
   },
+  heroDecoSecondary: {
+    position: 'absolute',
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: 'rgba(96,165,250,0.12)',
+    left: -48,
+    bottom: -56,
+  },
+  heroTopRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  heroHeadingWrap: { flex: 1 },
   heroEyebrow: {
     color: '#93C5FD',
     fontSize: 10,
@@ -313,18 +577,17 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     color: '#fff',
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '800',
     marginTop: 2,
   },
   heroSub: {
     color: '#DBEAFE',
     fontSize: 12,
-    marginTop: 4,
+    marginTop: 5,
+    lineHeight: 18,
   },
   heroSignOutBtn: {
-    marginTop: 10,
-    alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -342,54 +605,85 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     textTransform: 'uppercase',
   },
+  heroInsightCard: {
+    marginTop: 16,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(191,219,254,0.24)',
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  heroInsightIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: 'rgba(59,130,246,0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroInsightWarn: { backgroundColor: 'rgba(217,119,6,0.8)' },
+  heroInsightSuccess: { backgroundColor: 'rgba(22,163,74,0.8)' },
+  heroInsightTextWrap: { flex: 1 },
+  heroInsightTitle: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  heroInsightBody: { color: '#DBEAFE', fontSize: 12, lineHeight: 18, marginTop: 4 },
   summaryRow: {
-    marginTop: 14,
-    paddingTop: 14,
+    marginTop: 18,
+    paddingTop: 16,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.2)',
     flexDirection: 'row',
   },
   summaryItem: { flex: 1, alignItems: 'center' },
-  summaryNum: { color: '#fff', fontSize: 18, fontWeight: '800' },
+  summaryNum: { color: '#fff', fontSize: 20, fontWeight: '800' },
   summaryItemLabel: { color: '#BFDBFE', fontSize: 10, marginTop: 2, fontWeight: '700', textTransform: 'uppercase' },
-  pendingRow: {
-    marginTop: 0,
-    marginBottom: 12,
-    backgroundColor: '#EFF6FF',
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: '#DBEAFE',
+  attentionGrid: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 14,
   },
-  pendingLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  pendingIconWrap: {
-    width: 26,
-    height: 26,
-    borderRadius: 8,
-    backgroundColor: '#DBEAFE',
+  attentionCard: {
+    flex: 1,
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+  },
+  attentionIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pendingText: { color: '#1E3A8A', fontSize: 13, fontWeight: '700' },
-  childrenHeading: { fontSize: 12, color: C.textMed, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 2 },
-  quickRow: { marginBottom: 12 },
+  attentionLabel: { color: C.textMed, fontSize: 11, fontWeight: '700', marginTop: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
+  attentionValue: { color: C.textDark, fontSize: 22, fontWeight: '800', marginTop: 4 },
+  attentionNote: { color: C.textMed, fontSize: 12, marginTop: 2 },
+  sectionHeaderRow: { marginBottom: 10 },
+  childrenHeading: { fontSize: 12, color: C.textMed, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8 },
+  childrenCaption: { fontSize: 12, color: C.textMed, marginTop: 4, lineHeight: 18 },
+  quickRow: { marginBottom: 14, gap: 10 },
   quickCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: C.card,
-    borderRadius: 12,
+    borderRadius: 18,
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderWidth: 1,
     borderColor: C.border,
     gap: 12,
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
   },
-  quickIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  quickLabel: { flex: 1, fontSize: 15, fontWeight: '600', color: C.textDark },
+  quickIcon: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  quickTextWrap: { flex: 1 },
+  quickLabel: { fontSize: 15, fontWeight: '700', color: C.textDark },
+  quickSubLabel: { fontSize: 11, color: C.textMed, marginTop: 2 },
   quickBadge: {
     minWidth: 22,
     height: 22,
@@ -401,39 +695,94 @@ const styles = StyleSheet.create({
   },
   quickBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   empty: { alignItems: 'center', marginTop: 60, paddingHorizontal: 32 },
-  emptyIcon: { fontSize: 48, marginBottom: 12 },
+  emptyIconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
   emptyTitle: { fontSize: 18, fontWeight: '700', color: C.textDark, marginBottom: 4 },
   emptyTxt: { fontSize: 14, color: C.textMed, textAlign: 'center', lineHeight: 20 },
-  card: {
+  childCard: {
     backgroundColor: C.card,
-    borderRadius: 14,
+    borderRadius: 22,
     marginVertical: 6,
-    padding: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
+  },
+  childCardPressed: { opacity: 0.9, transform: [{ scale: 0.995 }] },
+  childAccentBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    height: 6,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+  },
+  childAmbientOrb: {
+    position: 'absolute',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    right: -34,
+    top: -18,
+  },
+  childTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 },
+  childIdentityRow: { flexDirection: 'row', flex: 1, gap: 12 },
+  childAvatar: { width: 54, height: 54, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  childAvatarText: { color: C.textDark, fontSize: 18, fontWeight: '800' },
+  childIdentityText: { flex: 1 },
+  childName: { fontSize: 17, fontWeight: '800', color: C.textDark },
+  childClassLine: { fontSize: 12, color: C.textMed, marginTop: 3 },
+  childPortalPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  childPortalPillText: { fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 },
+  childInfoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
+  childInfoChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  childInfoChipText: { fontSize: 11, color: C.textMed, fontWeight: '700' },
+  childInfoChipAction: { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' },
+  childInfoChipActionPressed: { opacity: 0.88 },
+  childInfoChipActionText: { color: '#1D4ED8' },
+  childFooterRow: {
+    marginTop: 16,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: '#EEF2F7',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
   },
-  iconBox: {
-    width: 50,
-    height: 50,
+  childMessageWrap: { flex: 1 },
+  childMessageTitle: { fontSize: 13, fontWeight: '700', color: C.textDark },
+  childMessageText: { fontSize: 11, color: C.textMed, lineHeight: 17, marginTop: 3 },
+  childArrowWrap: {
+    width: 40,
+    height: 40,
     borderRadius: 14,
-    backgroundColor: '#EFF6FF',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  name: { fontSize: 15, fontWeight: '700', color: C.textDark },
-  subtitle: { fontSize: 12, color: C.textMed, marginTop: 1 },
-  meta: { fontSize: 11, color: C.textLight, marginTop: 2 },
-  arrowWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#F8FAFC',
     justifyContent: 'center',
     alignItems: 'center',
   },

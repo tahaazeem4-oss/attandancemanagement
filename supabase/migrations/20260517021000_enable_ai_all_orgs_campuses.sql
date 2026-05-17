@@ -10,7 +10,7 @@ INSERT INTO ai_feature_flags (scope_type, scope_id, is_enabled, reason, updated_
 SELECT 'organization', id, TRUE, 'AI Enabled for Organization', 'super_admin', 0, NOW()
 FROM organizations
 ON CONFLICT (scope_type, scope_id) DO UPDATE
-SET is_enabled = TRUE, 
+SET is_enabled = TRUE,
     reason = 'AI Enabled for Organization',
     updated_at = NOW();
 

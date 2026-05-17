@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
 import AppHeader from '../../components/AppHeader';
+import ScreenIntroCard from '../../components/ScreenIntroCard';
 
 // ── Shared helpers ────────────────────────────────────────────
 function ConfirmModal({ visible, title, message, confirmLabel = 'Delete', onConfirm, onCancel, loading }) {
@@ -412,6 +413,12 @@ export default function SuperAdminOrganizationsScreen({ navigation }) {
       <StatusBar barStyle="dark-content" />
 
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+        <ScreenIntroCard
+          title="Organization Setup"
+          description="Organizations sit above campuses. Create or edit them here before assigning campuses, campus admins, and higher-level policy controls."
+          icon="business-outline"
+          tone="blue"
+        />
         <View style={styles.topBar}>
           <Text style={styles.subtitle}>{orgs.length} organization{orgs.length !== 1 ? 's' : ''}</Text>
           <Pressable style={styles.addOrgBtn} onPress={() => setOrgModal({ open: true, org: null })}>

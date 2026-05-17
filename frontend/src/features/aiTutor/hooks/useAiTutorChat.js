@@ -23,12 +23,17 @@ export default function useAiTutorChat({ studentId } = {}) {
     setMessages(data?.messages || []);
   }, [studentId]);
 
-  const ask = useCallback(async ({ question, subjectId }) => {
+  const ask = useCallback(async ({ question, subjectId, documentId }) => {
     setError(null);
     setSending(true);
     setMessages((prev) => [...prev, { role: 'user', content: question, _local: true }]);
     try {
-      const { data } = await askQuestion({ question, subject_id: subjectId, session_id: sessionId }, studentId);
+      const { data } = await askQuestion({
+        question,
+        subject_id: subjectId,
+        document_id: documentId,
+        session_id: sessionId,
+      }, studentId);
       if (!sessionId && data?.session_id) setSessionId(data.session_id);
       setMessages((prev) => [
         ...prev,
