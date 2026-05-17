@@ -9,10 +9,9 @@ const jwt = require('jsonwebtoken');
 const protect = (req, res, next) => {
   const authHeader = req.headers.authorization;
 
-  // Also accept token from query param (used for direct file links, e.g. PDF streaming)
   const rawToken = (authHeader && authHeader.startsWith('Bearer '))
     ? authHeader.split(' ')[1]
-    : req.query._token || null;
+    : null;
 
   if (!rawToken) {
     return res.status(401).json({ message: 'No token provided' });

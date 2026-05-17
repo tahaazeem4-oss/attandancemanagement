@@ -1,6 +1,17 @@
 const bcrypt = require('bcryptjs');
 const db     = require('../config/db');
 
+async function isValidClassSectionForSchool(classId, sectionId, schoolId) {
+  const [rows] = await db.query(
+    `SELECT s.id
+     FROM sections s
+     JOIN classes c ON c.id = s.class_id
+     WHERE c.id = ? AND s.id = ? AND c.school_id = ?`,
+    [classId, sectionId, schoolId]
+  );
+  return rows.length > 0;
+}
+
 // ── Logo URL helpers ─────────────────────────────────────────
 // Store only the relative path in DB so the URL survives IP changes.
 function normalizeLogo(logoUrl) {
@@ -247,8 +258,13 @@ exports.addSchoolTeacher = async (req, res) => {
     const newId = r[0].id;
     if (Array.isArray(assignments)) {
       for (const { class_id, section_id } of assignments) {
-        if (class_id && section_id)
+        if (class_id && section_id) {
+          const isValid = await isValidClassSectionForSchool(class_id, section_id, req.params.schoolId);
+          if (!isValid) {
+            return res.status(400).json({ message: 'Invalid class or section for this school' });
+          }
           await db.query('INSERT INTO teacher_classes (teacher_id, class_id, section_id) VALUES (?,?,?) ON CONFLICT DO NOTHING', [newId, class_id, section_id]);
+        }
       }
     }
     res.status(201).json({ message: 'Teacher added', id: newId });
@@ -273,8 +289,13 @@ exports.updateSchoolTeacher = async (req, res) => {
     if (Array.isArray(assignments)) {
       await db.query('DELETE FROM teacher_classes WHERE teacher_id = ?', [req.params.teacherId]);
       for (const { class_id, section_id } of assignments) {
-        if (class_id && section_id)
+        if (class_id && section_id) {
+          const isValid = await isValidClassSectionForSchool(class_id, section_id, req.params.schoolId);
+          if (!isValid) {
+            return res.status(400).json({ message: 'Invalid class or section for this school' });
+          }
           await db.query('INSERT INTO teacher_classes (teacher_id, class_id, section_id) VALUES (?,?,?) ON CONFLICT DO NOTHING', [req.params.teacherId, class_id, section_id]);
+        }
       }
     }
     res.json({ message: 'Teacher updated' });
@@ -354,6 +375,10 @@ exports.addSchoolStudent = async (req, res) => {
   if (!first_name || !last_name || !age || !class_id || !section_id)
     return res.status(400).json({ message: 'first_name, last_name, age, class_id and section_id are required' });
   try {
+    const isValid = await isValidClassSectionForSchool(class_id, section_id, req.params.schoolId);
+    if (!isValid) {
+      return res.status(400).json({ message: 'Invalid class or section for this school' });
+    }
     const [r] = await db.query(
       'INSERT INTO students (school_id, first_name, last_name, age, class_id, section_id, roll_no) VALUES (?,?,?,?,?,?,?) RETURNING id',
       [req.params.schoolId, first_name, last_name, parseInt(age), class_id, section_id, roll_no || null]
@@ -368,6 +393,10 @@ exports.updateSchoolStudent = async (req, res) => {
   if (!first_name || !last_name || !age || !class_id || !section_id)
     return res.status(400).json({ message: 'first_name, last_name, age, class_id and section_id are required' });
   try {
+    const isValid = await isValidClassSectionForSchool(class_id, section_id, req.params.schoolId);
+    if (!isValid) {
+      return res.status(400).json({ message: 'Invalid class or section for this school' });
+    }
     await db.query(
       'UPDATE students SET first_name=?, last_name=?, age=?, class_id=?, section_id=?, roll_no=? WHERE id=? AND school_id=?',
       [first_name, last_name, parseInt(age), class_id, section_id, roll_no || null, req.params.studentId, req.params.schoolId]
@@ -394,6 +423,9 @@ exports.resetStudentPassword = async (req, res) => {
   if (!new_password || new_password.length < 6)
     return res.status(400).json({ message: 'Password must be at least 6 characters' });
   try {
+    const [students] = await db.query('SELECT id FROM students WHERE id=? AND school_id=?', [req.params.studentId, req.params.schoolId]);
+    if (students.length === 0)
+      return res.status(404).json({ message: 'Student not found' });
     const hashed = await bcrypt.hash(new_password, 12);
     const [r, meta] = await db.query(
       'UPDATE student_accounts SET password=? WHERE student_id=?',

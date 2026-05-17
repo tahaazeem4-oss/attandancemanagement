@@ -14,10 +14,15 @@ exports.getAllClasses = async (req, res) => {
 
 // ── GET /api/classes/:classId/sections ───────────────────────
 exports.getSections = async (req, res) => {
+  const sid = req.user.school_id;
   try {
     const [rows] = await db.query(
-      'SELECT * FROM sections WHERE class_id = ? ORDER BY section_name',
-      [req.params.classId]
+      `SELECT s.*
+       FROM sections s
+       JOIN classes c ON c.id = s.class_id
+       WHERE s.class_id = ? AND c.school_id = ?
+       ORDER BY s.section_name`,
+      [req.params.classId, sid]
     );
     return res.json(rows);
   } catch (err) {

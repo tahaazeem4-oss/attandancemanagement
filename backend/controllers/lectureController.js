@@ -115,11 +115,12 @@ exports.getLectures = async (req, res) => {
         FROM   lectures l
         JOIN   classes  c   ON c.id = l.class_id
         LEFT JOIN sections sec ON sec.id = l.section_id
-        WHERE  l.class_id = $1
-          AND  (l.section_id = $2 OR l.section_id IS NULL)
+        WHERE  l.school_id = $1
+          AND  l.class_id = $2
+          AND  (l.section_id = $3 OR l.section_id IS NULL)
       `;
-      const params = [studentClass, studentSection];
-      let idx = 3;
+      const params = [school_id, studentClass, studentSection];
+      let idx = 4;
 
       if (month)  { q += ` AND TO_CHAR(l.date, 'YYYY-MM') = $${idx++}`; params.push(month); }
       else if (year) { q += ` AND EXTRACT(YEAR FROM l.date) = $${idx++}`; params.push(year); }
@@ -316,6 +317,14 @@ exports.checkDuplicate = async (req, res) => {
     const secId = section_id && section_id !== '' && section_id !== '0'
       ? Number(section_id) : null;
 
+    const [classes] = await db.query('SELECT id FROM classes WHERE id = $1 AND school_id = $2', [class_id, school_id]);
+    if (!classes.length) return res.status(400).json({ message: 'Invalid class for this school' });
+
+    if (secId) {
+      const [sections] = await db.query('SELECT id FROM sections WHERE id = $1 AND class_id = $2', [secId, class_id]);
+      if (!sections.length) return res.status(400).json({ message: 'Invalid section for this class' });
+    }
+
     let q = `SELECT id, lecture_name FROM lectures
              WHERE school_id = $1 AND LOWER(lecture_name) = LOWER($2) AND class_id = $3`;
     const params = [school_id, lecture_name, class_id];
@@ -330,17 +339,6 @@ exports.checkDuplicate = async (req, res) => {
     console.error('[checkDuplicate]', err);
     res.status(500).json({ message: 'Server error' });
   }
-    // Duplicate name check (unique per class/section, case-insensitive)
-    let dupQ = `SELECT id FROM lectures WHERE school_id = $1 AND LOWER(lecture_name) = LOWER($2) AND class_id = $3`;
-    const dupParams = [school_id, lecture_name, class_id];
-    if (secId) { dupQ += ' AND section_id = $4'; dupParams.push(secId); }
-    else       { dupQ += ' AND section_id IS NULL'; }
-    dupQ += ' LIMIT 1';
-    const [dupRows] = await db.query(dupQ, dupParams);
-    if (dupRows.length > 0) {
-      fs.unlinkSync(req.file.path);
-      return res.status(409).json({ message: 'A lecture with this name already exists for this class/section.' });
-    }
 };
 
 // ── GET /api/lectures/classes ─────────────────────────────────

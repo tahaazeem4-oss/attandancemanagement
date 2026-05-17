@@ -1,5 +1,6 @@
 node_modules/
 .env
+.wwebjs_auth/
 uploads/lectures/
 uploads/logos/
 *.log

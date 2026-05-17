@@ -1,6 +1,26 @@
 const db   = require('../config/db');
 const push = require('../services/pushService');
 
+async function getTeacherAssignments(teacherId, schoolId) {
+  const [rows] = await db.query(
+    `SELECT tc.class_id, tc.section_id
+     FROM teacher_classes tc
+     JOIN classes c ON c.id = tc.class_id
+     WHERE tc.teacher_id = ? AND c.school_id = ?`,
+    [teacherId, schoolId]
+  );
+  return rows;
+}
+
+function buildAssignmentWhere(assignments, studentAlias = 's') {
+  const conditions = assignments.map(() => `(${studentAlias}.class_id = ? AND ${studentAlias}.section_id = ?)`);
+  const params = assignments.flatMap((assignment) => [assignment.class_id, assignment.section_id]);
+  return {
+    clause: conditions.join(' OR '),
+    params,
+  };
+}
+
 // ── POST /api/teachers/attendance ─────────────────────────────
 // Teacher marks their own daily attendance
 exports.markAttendance = async (req, res) => {
@@ -70,13 +90,9 @@ exports.getAssignedClasses = async (req, res) => {
 exports.getClassLeaves = async (req, res) => {
   const teacherId = req.teacher.id;
   try {
-    const [assignments] = await db.query(
-      'SELECT class_id, section_id FROM teacher_classes WHERE teacher_id = ?',
-      [teacherId]
-    );
+    const assignments = await getTeacherAssignments(teacherId, req.teacher.school_id);
     if (assignments.length === 0) return res.json([]);
-    const conditions = assignments.map(() => '(s.class_id = ? AND s.section_id = ?)').join(' OR ');
-    const params = assignments.flatMap(a => [a.class_id, a.section_id]);
+    const assignmentScope = buildAssignmentWhere(assignments);
     const [rows] = await db.query(
       `SELECT la.id, la.group_id, la.student_id, la.date, la.reason,
               la.status, la.withdrawal_status, la.applied_at,
@@ -86,10 +102,10 @@ exports.getClassLeaves = async (req, res) => {
        JOIN   students  s   ON s.id   = la.student_id
        JOIN   classes   c   ON c.id   = s.class_id
        JOIN   sections  sec ON sec.id = s.section_id
-       WHERE  (${conditions})
+       WHERE  (${assignmentScope.clause})
          AND  la.status != 'cancelled'
        ORDER  BY la.applied_at DESC, la.date`,
-      params
+      assignmentScope.params
     );
 
     // Group by group_id
@@ -133,13 +149,20 @@ exports.getClassLeaves = async (req, res) => {
 exports.updateLeaveGroupStatus = async (req, res) => {
   const { group_id } = req.params;
   const { status }   = req.body;
+  const teacherId = req.teacher.id;
   if (!['approved', 'rejected'].includes(status))
     return res.status(400).json({ message: 'status must be approved or rejected' });
   try {
+    const assignments = await getTeacherAssignments(teacherId, req.teacher.school_id);
+    if (assignments.length === 0) {
+      return res.status(403).json({ message: 'No assigned classes found for this teacher' });
+    }
+    const assignmentScope = buildAssignmentWhere(assignments);
     const [rows] = await db.query(
-      `SELECT id, student_id, date FROM leave_applications
-       WHERE group_id=? AND status='pending'`,
-      [group_id]
+      `SELECT la.id, la.student_id, la.date FROM leave_applications la
+       JOIN students s ON s.id = la.student_id
+       WHERE la.group_id=? AND la.status='pending' AND (${assignmentScope.clause})`,
+      [group_id, ...assignmentScope.params]
     );
     if (rows.length === 0)
       return res.status(404).json({ message: 'Leave group not found or not pending' });
@@ -178,13 +201,20 @@ exports.updateLeaveGroupStatus = async (req, res) => {
 exports.handleWithdrawalRequest = async (req, res) => {
   const { group_id } = req.params;
   const { action }   = req.body; // 'approve' | 'reject'
+  const teacherId = req.teacher.id;
   if (!['approve', 'reject'].includes(action))
     return res.status(400).json({ message: 'action must be approve or reject' });
   try {
+    const assignments = await getTeacherAssignments(teacherId, req.teacher.school_id);
+    if (assignments.length === 0) {
+      return res.status(403).json({ message: 'No assigned classes found for this teacher' });
+    }
+    const assignmentScope = buildAssignmentWhere(assignments);
     const [rows] = await db.query(
-      `SELECT id, student_id, date, status FROM leave_applications
-       WHERE group_id=? AND withdrawal_status='pending'`,
-      [group_id]
+      `SELECT la.id, la.student_id, la.date, la.status FROM leave_applications la
+       JOIN students s ON s.id = la.student_id
+       WHERE la.group_id=? AND la.withdrawal_status='pending' AND (${assignmentScope.clause})`,
+      [group_id, ...assignmentScope.params]
     );
     if (rows.length === 0)
       return res.status(404).json({ message: 'No pending withdrawal request for this group' });
@@ -237,9 +267,24 @@ exports.handleWithdrawalRequest = async (req, res) => {
 // ── PUT /api/teachers/leaves/:id (legacy single-row) ─────────
 exports.updateLeaveStatus = async (req, res) => {
   const { status } = req.body;
+  const teacherId = req.teacher.id;
   if (!['approved', 'rejected'].includes(status))
     return res.status(400).json({ message: 'status must be approved or rejected' });
   try {
+    const assignments = await getTeacherAssignments(teacherId, req.teacher.school_id);
+    if (assignments.length === 0) {
+      return res.status(403).json({ message: 'No assigned classes found for this teacher' });
+    }
+    const assignmentScope = buildAssignmentWhere(assignments);
+    const [rows] = await db.query(
+      `SELECT la.id FROM leave_applications la
+       JOIN students s ON s.id = la.student_id
+       WHERE la.id = ? AND (${assignmentScope.clause})`,
+      [req.params.id, ...assignmentScope.params]
+    );
+    if (!rows.length) {
+      return res.status(404).json({ message: 'Leave not found' });
+    }
     await db.query('UPDATE leave_applications SET status = ? WHERE id = ?', [status, req.params.id]);
     res.json({ message: 'Leave status updated' });
   } catch (err) {

@@ -16,7 +16,14 @@
       "assets/**/*"
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.attendanceapp.management",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Used to scan documents for uploads.",
+        "NSPhotoLibraryUsageDescription": "Used to attach files from your photo library.",
+        "UIBackgroundModes": ["remote-notification"]
+      }
     },
     "android": {
       "adaptiveIcon": {

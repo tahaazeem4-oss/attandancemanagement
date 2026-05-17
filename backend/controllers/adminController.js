@@ -2,6 +2,17 @@ const bcrypt = require('bcryptjs');
 const db     = require('../config/db');
 const push   = require('../services/pushService');
 
+async function isValidClassSectionForSchool(classId, sectionId, schoolId) {
+  const [rows] = await db.query(
+    `SELECT s.id
+     FROM sections s
+     JOIN classes c ON c.id = s.class_id
+     WHERE c.id = ? AND s.id = ? AND c.school_id = ?`,
+    [classId, sectionId, schoolId]
+  );
+  return rows.length > 0;
+}
+
 // ── Stats overview ────────────────────────────────────────────
 exports.getStats = async (req, res) => {
   const sid = req.user.school_id;
@@ -59,8 +70,13 @@ exports.addTeacher = async (req, res) => {
     const newId = r[0].id;
     if (Array.isArray(assignments)) {
       for (const { class_id, section_id } of assignments) {
-        if (class_id && section_id)
+        if (class_id && section_id) {
+          const isValid = await isValidClassSectionForSchool(class_id, section_id, sid);
+          if (!isValid) {
+            return res.status(400).json({ message: 'Invalid class or section for this school' });
+          }
           await db.query('INSERT INTO teacher_classes (teacher_id, class_id, section_id) VALUES (?,?,?) ON CONFLICT DO NOTHING', [newId, class_id, section_id]);
+        }
       }
     }
     res.status(201).json({ message: 'Teacher added', id: newId });
@@ -69,18 +85,25 @@ exports.addTeacher = async (req, res) => {
 
 exports.updateTeacher = async (req, res) => {
   const { first_name, last_name, email, phone, assignments } = req.body;
+  const sid = req.user.school_id;
   try {
     const [ex] = await db.query('SELECT id FROM teachers WHERE email = ? AND id != ?', [email, req.params.id]);
     if (ex.length > 0) return res.status(409).json({ message: 'Email already in use' });
-    await db.query(
-      'UPDATE teachers SET first_name=?, last_name=?, email=?, phone=? WHERE id=?',
-      [first_name, last_name, email, phone || null, req.params.id]
+    const [updated] = await db.query(
+      'UPDATE teachers SET first_name=?, last_name=?, email=?, phone=? WHERE id=? AND school_id=? RETURNING id',
+      [first_name, last_name, email, phone || null, req.params.id, sid]
     );
+    if (updated.length === 0) return res.status(404).json({ message: 'Teacher not found' });
     if (Array.isArray(assignments)) {
       await db.query('DELETE FROM teacher_classes WHERE teacher_id = ?', [req.params.id]);
       for (const { class_id, section_id } of assignments) {
-        if (class_id && section_id)
+        if (class_id && section_id) {
+          const isValid = await isValidClassSectionForSchool(class_id, section_id, sid);
+          if (!isValid) {
+            return res.status(400).json({ message: 'Invalid class or section for this school' });
+          }
           await db.query('INSERT INTO teacher_classes (teacher_id, class_id, section_id) VALUES (?,?,?) ON CONFLICT DO NOTHING', [req.params.id, class_id, section_id]);
+        }
       }
     }
     res.json({ message: 'Teacher updated' });
@@ -97,11 +120,13 @@ exports.deleteTeacher = async (req, res) => {
 
 exports.resetTeacherPassword = async (req, res) => {
   const { new_password } = req.body;
+  const sid = req.user.school_id;
   if (!new_password || new_password.length < 6)
     return res.status(400).json({ message: 'Password must be at least 6 characters' });
   try {
     const hashed = await bcrypt.hash(new_password, 12);
-    await db.query('UPDATE teachers SET password = ? WHERE id = ?', [hashed, req.params.id]);
+    const [updated] = await db.query('UPDATE teachers SET password = ? WHERE id = ? AND school_id = ? RETURNING id', [hashed, req.params.id, sid]);
+    if (updated.length === 0) return res.status(404).json({ message: 'Teacher not found' });
     res.json({ message: 'Password reset successfully' });
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
 };
@@ -132,6 +157,10 @@ exports.addStudent = async (req, res) => {
   if (!first_name || !last_name || !age || !class_id || !section_id)
     return res.status(400).json({ message: 'All fields required' });
   try {
+    const isValid = await isValidClassSectionForSchool(class_id, section_id, sid);
+    if (!isValid) {
+      return res.status(400).json({ message: 'Invalid class or section for this school' });
+    }
     const [r] = await db.query(
       'INSERT INTO students (school_id, first_name, last_name, age, class_id, section_id, roll_no) VALUES (?,?,?,?,?,?,?) RETURNING id',
       [sid, first_name, last_name, age, class_id, section_id, roll_no || null]
@@ -142,11 +171,17 @@ exports.addStudent = async (req, res) => {
 
 exports.updateStudent = async (req, res) => {
   const { first_name, last_name, age, class_id, section_id, roll_no } = req.body;
+  const sid = req.user.school_id;
   try {
-    await db.query(
-      'UPDATE students SET first_name=?,last_name=?,age=?,class_id=?,section_id=?,roll_no=? WHERE id=?',
-      [first_name, last_name, age, class_id, section_id, roll_no || null, req.params.id]
+    const isValid = await isValidClassSectionForSchool(class_id, section_id, sid);
+    if (!isValid) {
+      return res.status(400).json({ message: 'Invalid class or section for this school' });
+    }
+    const [updated] = await db.query(
+      'UPDATE students SET first_name=?,last_name=?,age=?,class_id=?,section_id=?,roll_no=? WHERE id=? AND school_id=? RETURNING id',
+      [first_name, last_name, age, class_id, section_id, roll_no || null, req.params.id, sid]
     );
+    if (updated.length === 0) return res.status(404).json({ message: 'Student not found' });
     res.json({ message: 'Student updated' });
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
 };
@@ -161,9 +196,13 @@ exports.deleteStudent = async (req, res) => {
 
 exports.resetStudentPassword = async (req, res) => {
   const { new_password } = req.body;
+  const sid = req.user.school_id;
   if (!new_password || new_password.length < 6)
     return res.status(400).json({ message: 'Password must be at least 6 characters' });
   try {
+    const [students] = await db.query('SELECT id FROM students WHERE id = ? AND school_id = ?', [req.params.id, sid]);
+    if (students.length === 0)
+      return res.status(404).json({ message: 'Student not found' });
     const hashed = await bcrypt.hash(new_password, 12);
     const [r, meta] = await db.query(
       'UPDATE student_accounts SET password = ? WHERE student_id = ?',
@@ -199,15 +238,19 @@ exports.addClass = async (req, res) => {
 
 exports.updateClass = async (req, res) => {
   const { class_name } = req.body;
+  const sid = req.user.school_id;
   try {
-    await db.query('UPDATE classes SET class_name=? WHERE id=?', [class_name, req.params.id]);
+    const [updated] = await db.query('UPDATE classes SET class_name=? WHERE id=? AND school_id=? RETURNING id', [class_name, req.params.id, sid]);
+    if (updated.length === 0) return res.status(404).json({ message: 'Class not found' });
     res.json({ message: 'Class updated' });
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
 };
 
 exports.deleteClass = async (req, res) => {
+  const sid = req.user.school_id;
   try {
-    await db.query('DELETE FROM classes WHERE id=?', [req.params.id]);
+    const [deleted] = await db.query('DELETE FROM classes WHERE id=? AND school_id=? RETURNING id', [req.params.id, sid]);
+    if (deleted.length === 0) return res.status(404).json({ message: 'Class not found' });
     res.json({ message: 'Class deleted' });
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
 };
@@ -215,8 +258,11 @@ exports.deleteClass = async (req, res) => {
 exports.addSection = async (req, res) => {
   const { section_name } = req.body;
   const { classId } = req.params;
+  const sid = req.user.school_id;
   if (!section_name) return res.status(400).json({ message: 'section_name required' });
   try {
+    const [classes] = await db.query('SELECT id FROM classes WHERE id = ? AND school_id = ?', [classId, sid]);
+    if (classes.length === 0) return res.status(404).json({ message: 'Class not found' });
     const [r] = await db.query(
       'INSERT INTO sections (class_id, section_name) VALUES (?,?) RETURNING id',
       [classId, section_name]
@@ -226,8 +272,16 @@ exports.addSection = async (req, res) => {
 };
 
 exports.deleteSection = async (req, res) => {
+  const sid = req.user.school_id;
   try {
-    await db.query('DELETE FROM sections WHERE id=?', [req.params.id]);
+    const [deleted] = await db.query(
+      `DELETE FROM sections s
+       USING classes c
+       WHERE s.id = ? AND c.id = s.class_id AND c.school_id = ?
+       RETURNING s.id`,
+      [req.params.id, sid]
+    );
+    if (deleted.length === 0) return res.status(404).json({ message: 'Section not found' });
     res.json({ message: 'Section deleted' });
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
 };
@@ -254,9 +308,14 @@ exports.listAssignments = async (req, res) => {
 
 exports.addAssignment = async (req, res) => {
   const { teacher_id, class_id, section_id } = req.body;
+  const sid = req.user.school_id;
   if (!teacher_id || !class_id || !section_id)
     return res.status(400).json({ message: 'teacher_id, class_id, section_id required' });
   try {
+    const [teachers] = await db.query('SELECT id FROM teachers WHERE id = ? AND school_id = ?', [teacher_id, sid]);
+    if (teachers.length === 0) return res.status(400).json({ message: 'Invalid teacher for this school' });
+    const isValid = await isValidClassSectionForSchool(class_id, section_id, sid);
+    if (!isValid) return res.status(400).json({ message: 'Invalid class or section for this school' });
     const [r] = await db.query(
       'INSERT INTO teacher_classes (teacher_id, class_id, section_id) VALUES (?,?,?) RETURNING id',
       [teacher_id, class_id, section_id]
@@ -270,8 +329,16 @@ exports.addAssignment = async (req, res) => {
 };
 
 exports.deleteAssignment = async (req, res) => {
+  const sid = req.user.school_id;
   try {
-    await db.query('DELETE FROM teacher_classes WHERE id=?', [req.params.id]);
+    const [deleted] = await db.query(
+      `DELETE FROM teacher_classes tc
+       USING teachers t
+       WHERE tc.id = ? AND t.id = tc.teacher_id AND t.school_id = ?
+       RETURNING tc.id`,
+      [req.params.id, sid]
+    );
+    if (deleted.length === 0) return res.status(404).json({ message: 'Assignment not found' });
     res.json({ message: 'Assignment removed' });
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
 };
@@ -330,6 +397,7 @@ exports.listLeaves = async (req, res) => {
 exports.updateLeaveGroupStatus = async (req, res) => {
   const { status } = req.body;
   const { group_id } = req.params;
+  const sid = req.user.school_id;
   if (!['approved', 'rejected'].includes(status))
     return res.status(400).json({ message: 'status must be approved or rejected' });
   try {
@@ -337,16 +405,20 @@ exports.updateLeaveGroupStatus = async (req, res) => {
     const [leaves] = await db.query(
       `SELECT la.id, la.student_id, la.date
        FROM leave_applications la
-       WHERE la.group_id = ? AND la.status = 'pending'`,
-      [group_id]
+       JOIN students s ON s.id = la.student_id
+       WHERE la.group_id = ? AND la.status = 'pending' AND s.school_id = ?`,
+      [group_id, sid]
     );
     if (leaves.length === 0)
       return res.status(404).json({ message: 'No pending leaves found for this group' });
 
     // Update all to new status
     await db.query(
-      `UPDATE leave_applications SET status=? WHERE group_id=? AND status='pending'`,
-      [status, group_id]
+      `UPDATE leave_applications la
+       SET status=?
+       FROM students s
+       WHERE la.group_id=? AND la.status='pending' AND s.id = la.student_id AND s.school_id = ?`,
+      [status, group_id, sid]
     );
 
     // Auto-mark attendance as 'leave' when approved
@@ -380,24 +452,34 @@ exports.updateLeaveGroupStatus = async (req, res) => {
 // ── PUT /admin/leaves/:id/status  (approve / reject single leave by id) ─
 exports.updateLeaveStatus = async (req, res) => {
   const { status } = req.body;
+  const sid = req.user.school_id;
   if (!['approved', 'rejected'].includes(status))
     return res.status(400).json({ message: 'status must be approved or rejected' });
   try {
     // Find the leave and its group to apply group-wide update
     const [found] = await db.query(
-      'SELECT group_id, student_id, date FROM leave_applications WHERE id=?',
-      [req.params.id]
+      `SELECT la.group_id, la.student_id, la.date
+       FROM leave_applications la
+       JOIN students s ON s.id = la.student_id
+       WHERE la.id=? AND s.school_id=?`,
+      [req.params.id, sid]
     );
     if (!found.length) return res.status(404).json({ message: 'Leave not found' });
 
     const group_id = found[0].group_id;
     const [leaves] = await db.query(
-      `SELECT id, student_id, date FROM leave_applications WHERE group_id=? AND status='pending'`,
-      [group_id]
+      `SELECT la.id, la.student_id, la.date
+       FROM leave_applications la
+       JOIN students s ON s.id = la.student_id
+       WHERE la.group_id=? AND la.status='pending' AND s.school_id=?`,
+      [group_id, sid]
     );
     await db.query(
-      `UPDATE leave_applications SET status=? WHERE group_id=? AND status='pending'`,
-      [status, group_id]
+      `UPDATE leave_applications la
+       SET status=?
+       FROM students s
+       WHERE la.group_id=? AND la.status='pending' AND s.id = la.student_id AND s.school_id = ?`,
+      [status, group_id, sid]
     );
     if (status === 'approved') {
       for (const leave of leaves) {
@@ -417,14 +499,16 @@ exports.updateLeaveStatus = async (req, res) => {
 exports.handleWithdrawalRequest = async (req, res) => {
   const { action } = req.body;
   const { group_id } = req.params;
+  const sid = req.user.school_id;
   if (!['approve', 'reject'].includes(action))
     return res.status(400).json({ message: 'action must be approve or reject' });
   try {
     // Find the leave in this group
     const [leaves] = await db.query(
       `SELECT la.id, la.student_id, la.date FROM leave_applications
-       WHERE la.group_id = ? AND la.withdrawal_status = 'pending'`,
-      [group_id]
+       JOIN students s ON s.id = la.student_id
+       WHERE la.group_id = ? AND la.withdrawal_status = 'pending' AND s.school_id = ?`,
+      [group_id, sid]
     );
     if (leaves.length === 0)
       return res.status(404).json({ message: 'No pending withdrawal found for this group' });
@@ -432,16 +516,22 @@ exports.handleWithdrawalRequest = async (req, res) => {
     // Update withdrawal status
     const newWithdrawalStatus = action === 'approve' ? 'approved' : 'rejected';
     await db.query(
-      `UPDATE leave_applications SET withdrawal_status = ? WHERE group_id = ? AND withdrawal_status = 'pending'`,
-      [newWithdrawalStatus, group_id]
+      `UPDATE leave_applications la
+       SET withdrawal_status = ?
+       FROM students s
+       WHERE la.group_id = ? AND la.withdrawal_status = 'pending' AND s.id = la.student_id AND s.school_id = ?`,
+      [newWithdrawalStatus, group_id, sid]
     );
 
     // If approved, cancel the leave and unlock attendance
     if (action === 'approve') {
       for (const leave of leaves) {
         await db.query(
-          `UPDATE leave_applications SET status = 'cancelled' WHERE group_id = ?`,
-          [group_id]
+          `UPDATE leave_applications la
+           SET status = 'cancelled'
+           FROM students s
+           WHERE la.group_id = ? AND s.id = la.student_id AND s.school_id = ?`,
+          [group_id, sid]
         );
         await db.query(
           `DELETE FROM student_attendance WHERE student_id = ? AND date = ? AND status = 'leave'`,

@@ -41,6 +41,17 @@ exports.addStudent = async (req, res) => {
   }
 
   try {
+    const [classRows] = await db.query(
+      `SELECT c.id
+       FROM classes c
+       JOIN sections s ON s.class_id = c.id
+       WHERE c.id = ? AND s.id = ? AND c.school_id = ?`,
+      [class_id, section_id, sid]
+    );
+    if (!classRows.length) {
+      return res.status(400).json({ message: 'Invalid class or section for this school' });
+    }
+
     const [result] = await db.query(
       'INSERT INTO students (school_id, first_name, last_name, age, class_id, section_id, roll_no) VALUES (?,?,?,?,?,?,?) RETURNING id',
       [sid, first_name, last_name, age, class_id, section_id, roll_no || null]
@@ -56,12 +67,27 @@ exports.addStudent = async (req, res) => {
 exports.updateStudent = async (req, res) => {
   const { first_name, last_name, age, class_id, section_id, roll_no } = req.body;
   const { id } = req.params;
+  const sid = req.user.school_id;
 
   try {
-    await db.query(
-      'UPDATE students SET first_name=?, last_name=?, age=?, class_id=?, section_id=?, roll_no=? WHERE id=?',
-      [first_name, last_name, age, class_id, section_id, roll_no || null, id]
+    const [classRows] = await db.query(
+      `SELECT c.id
+       FROM classes c
+       JOIN sections s ON s.class_id = c.id
+       WHERE c.id = ? AND s.id = ? AND c.school_id = ?`,
+      [class_id, section_id, sid]
     );
+    if (!classRows.length) {
+      return res.status(400).json({ message: 'Invalid class or section for this school' });
+    }
+
+    const [rows] = await db.query(
+      'UPDATE students SET first_name=?, last_name=?, age=?, class_id=?, section_id=?, roll_no=? WHERE id=? AND school_id=? RETURNING id',
+      [first_name, last_name, age, class_id, section_id, roll_no || null, id, sid]
+    );
+    if (!rows.length) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
     return res.json({ message: 'Student updated' });
   } catch (err) {
     console.error(err);
@@ -71,8 +97,12 @@ exports.updateStudent = async (req, res) => {
 
 // ── DELETE /api/students/:id ──────────────────────────────────
 exports.deleteStudent = async (req, res) => {
+  const sid = req.user.school_id;
   try {
-    await db.query('DELETE FROM students WHERE id = ?', [req.params.id]);
+    const [rows] = await db.query('DELETE FROM students WHERE id = ? AND school_id = ? RETURNING id', [req.params.id, sid]);
+    if (!rows.length) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
     return res.json({ message: 'Student deleted' });
   } catch (err) {
     console.error(err);

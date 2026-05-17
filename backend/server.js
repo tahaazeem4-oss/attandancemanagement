@@ -30,13 +30,63 @@ const path                = require('path');
 
 const app  = express();
 const PORT = process.env.PORT || 5000;
+const DEFAULT_JWT_SECRET = 'your_super_secret_jwt_key_change_this_in_production';
+
+const allowedOrigins = String(process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  if (!allowedOrigins.length && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) return true;
+  return false;
+}
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (isAllowedOrigin(origin)) return callback(null, true);
+    return callback(new Error('Not allowed by CORS'));
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Authorization', 'Content-Type', 'X-User-Token', 'apikey'],
+  credentials: false,
+  maxAge: 86400,
+};
+
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET === DEFAULT_JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+  const message = 'JWT_SECRET is missing, using a placeholder, or too short. Set a strong 32+ character secret before deployment.';
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(message);
+  }
+  console.warn(`[security] ${message}`);
+}
 
 // ── Middleware ────────────────────────────────────────────────
-app.use(cors());
-app.use(express.json());
+app.disable('x-powered-by');
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+app.use(express.json({ limit: '1mb' }));
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
 
-// ── Static: uploaded school logos ────────────────────────────
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// ── Static: uploaded school logos only ───────────────────────
+app.use(
+  '/uploads/logos',
+  express.static(path.join(__dirname, 'uploads', 'logos'), {
+    index: false,
+    fallthrough: false,
+    maxAge: '7d',
+    setHeaders(res) {
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+    },
+  })
+);
 
 // ── Routes ────────────────────────────────────────────────────
 // Each module handles its own sub-path under /api/.

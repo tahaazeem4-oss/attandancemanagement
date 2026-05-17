@@ -2,6 +2,8 @@ const bcrypt  = require('bcryptjs');
 const jwt     = require('jsonwebtoken');
 const db      = require('../config/db');
 
+const DEFAULT_JWT_EXPIRES_IN = '7d';
+
 // ── signToken ─────────────────────────────────────────────────
 // Creates a signed JWT containing the user's identity fields.
 // Expiry defaults to 7 days (JWT_EXPIRES_IN env var can override).
@@ -10,7 +12,7 @@ const db      = require('../config/db');
 // re-query the database; it reads directly from the token payload.
 const signToken = (payload) =>
   jwt.sign(payload, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN || '365d'
+    expiresIn: process.env.JWT_EXPIRES_IN || DEFAULT_JWT_EXPIRES_IN
   });
 
 // ── getSchool ─────────────────────────────────────────────────

@@ -296,6 +296,17 @@ exports.exportAttendance = async (req, res) => {
   if (!class_id || !section_id)
     return res.status(400).json({ message: 'class_id and section_id are required' });
 
+  const [scopeRows] = await db.query(
+    `SELECT c.class_name, sec.section_name
+     FROM classes c
+     JOIN sections sec ON sec.id = ? AND sec.class_id = c.id
+     WHERE c.id = ? AND c.school_id = ?`,
+    [section_id, class_id, sid]
+  );
+  if (!scopeRows.length) {
+    return res.status(400).json({ message: 'Invalid class or section for this school' });
+  }
+
   // Resolve date range
   const fromDate = from || date || new Date().toISOString().slice(0, 10);
   const toDate   = to   || from || date || new Date().toISOString().slice(0, 10);
@@ -313,12 +324,7 @@ exports.exportAttendance = async (req, res) => {
     return res.status(400).json({ message: 'Date range cannot exceed 31 days' });
 
   try {
-    // Get class/section names
-    const [clsRows] = await db.query(
-      `SELECT c.class_name, sec.section_name FROM classes c JOIN sections sec ON sec.id=? WHERE c.id=?`,
-      [section_id, class_id]
-    );
-    const cls = clsRows[0] || {};
+    const cls = scopeRows[0] || {};
 
     // Get all students
     const [students] = await db.query(

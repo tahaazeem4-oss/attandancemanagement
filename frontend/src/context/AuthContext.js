@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 import * as SecureStore from 'expo-secure-store';
 import { Platform, Alert } from 'react-native';
 import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import api, { setUnauthorizedHandler } from '../services/api';
 
 // expo-secure-store has no web implementation — fall back to localStorage
@@ -39,7 +40,15 @@ async function registerPushToken() {
 
     if (finalStatus !== 'granted') return;
 
-    const tokenData = await Notifications.getExpoPushTokenAsync();
+    // projectId is required by Expo SDK 50+ for getExpoPushTokenAsync to work
+    // in production/EAS builds. Read it from app.json extra.eas.projectId.
+    const projectId =
+      Constants.expoConfig?.extra?.eas?.projectId ??
+      Constants.manifest?.extra?.eas?.projectId;
+
+    const tokenData = await Notifications.getExpoPushTokenAsync(
+      projectId ? { projectId } : {}
+    );
     const token     = tokenData.data;
 
     if (token) {

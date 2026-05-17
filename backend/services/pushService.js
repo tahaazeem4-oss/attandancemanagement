@@ -113,15 +113,23 @@ async function send(tokens, title, body, data = {}) {
     body,
     data,
     priority: 'high',
+    channelId: 'default', // Android 8+ requires a channel ID
   }));
 
   try {
     const chunks = expo.chunkPushNotifications(messages);
     for (const chunk of chunks) {
-      // Fire and forget — don't await to avoid holding up the API response
-      expo.sendPushNotificationsAsync(chunk).catch(e =>
-        console.warn('[pushService] chunk send error:', e.message)
-      );
+      try {
+        const tickets = await expo.sendPushNotificationsAsync(chunk);
+        // Log any per-message errors returned by Expo's service
+        for (const ticket of tickets) {
+          if (ticket.status === 'error') {
+            console.warn('[pushService] ticket error:', ticket.message, ticket.details);
+          }
+        }
+      } catch (e) {
+        console.warn('[pushService] chunk send error:', e.message);
+      }
     }
   } catch (err) {
     console.warn('[pushService] send error:', err.message);

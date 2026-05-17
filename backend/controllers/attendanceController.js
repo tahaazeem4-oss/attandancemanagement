@@ -7,12 +7,29 @@ const push = require('../services/pushService');
 exports.markAttendance = async (req, res) => {
   const { date, records } = req.body;
   const teacherId = req.teacher.id;
+  const schoolId  = req.user?.school_id;
 
   if (!date || !Array.isArray(records) || records.length === 0) {
     return res.status(400).json({ message: 'date and records[] are required' });
   }
+  if (!schoolId) {
+    return res.status(403).json({ message: 'Access denied' });
+  }
 
   try {
+    // Validate every student_id belongs to the caller's school.
+    const ids = [...new Set(records.map(r => Number(r.student_id)).filter(Boolean))];
+    if (ids.length === 0) {
+      return res.status(400).json({ message: 'records[] must contain valid student_id values' });
+    }
+    const [allowed] = await db.query(
+      'SELECT id FROM students WHERE school_id = ? AND id = ANY(?)',
+      [schoolId, ids]
+    );
+    if (allowed.length !== ids.length) {
+      return res.status(403).json({ message: 'One or more students do not belong to your school' });
+    }
+
     let locked = 0;
     const savedIds = [];
     for (const r of records) {

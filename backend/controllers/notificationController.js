@@ -165,6 +165,14 @@ exports.getStudentsForPicker = async (req, res) => {
     const { class_id, section_id } = req.query;
     if (!class_id) return res.status(400).json({ message: 'class_id is required' });
 
+    const [classes] = await db.query('SELECT id FROM classes WHERE id=$1 AND school_id=$2', [class_id, school_id]);
+    if (!classes.length) return res.status(400).json({ message: 'Invalid class for this school' });
+
+    if (section_id) {
+      const [sections] = await db.query('SELECT id FROM sections WHERE id=$1 AND class_id=$2', [section_id, class_id]);
+      if (!sections.length) return res.status(400).json({ message: 'Invalid section for this class' });
+    }
+
     let q, params;
     if (section_id) {
       q = `SELECT s.id, s.first_name, s.last_name, s.roll_no
@@ -271,8 +279,28 @@ exports.getUnreadCount = async (req, res) => {
 // POST /api/notifications/:id/read
 exports.markRead = async (req, res) => {
   try {
-    const { student_id } = req.user;
+    const { student_id, school_id } = req.user;
     const notif_id = Number(req.params.id);
+
+    const [stu] = await db.query(
+      'SELECT class_id, section_id FROM students WHERE id=$1 AND school_id=$2',
+      [student_id, school_id]
+    );
+    if (!stu.length) return res.status(404).json({ message: 'Student not found' });
+
+    const { class_id, section_id } = stu[0];
+    const [visible] = await db.query(
+      `SELECT id FROM notifications
+       WHERE id = $1 AND school_id = $2
+         AND (
+           target_type = 'school'
+           OR (target_type = 'class' AND class_id = $3)
+           OR (target_type = 'section' AND section_id = $4)
+           OR (target_type = 'student' AND student_id = $5)
+         )`,
+      [notif_id, school_id, class_id, section_id, student_id]
+    );
+    if (!visible.length) return res.status(404).json({ message: 'Notification not found' });
 
     // Upsert: ignore conflict
     await db.query(
@@ -341,12 +369,21 @@ exports.getStaffUnreadCount = async (req, res) => {
 // POST /api/notifications/inbox/:id/read
 exports.markStaffRead = async (req, res) => {
   try {
-    const { id: user_id, role } = req.user;
+    const { id: user_id, role, school_id } = req.user;
+    const notificationId = Number(req.params.id);
+
+    const [visible] = await db.query(
+      `SELECT id FROM notifications
+       WHERE id = $1 AND school_id = $2 AND target_type = 'school'`,
+      [notificationId, school_id]
+    );
+    if (!visible.length) return res.status(404).json({ message: 'Notification not found' });
+
     await db.query(
       `INSERT INTO staff_notification_reads (notification_id, user_id, user_role)
        VALUES ($1, $2, $3)
        ON CONFLICT (notification_id, user_id, user_role) DO NOTHING`,
-      [Number(req.params.id), user_id, role]
+      [notificationId, user_id, role]
     );
     res.json({ message: 'Marked as read' });
   } catch (err) {

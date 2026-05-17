@@ -21,8 +21,8 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (_req, file, cb) => {
-  const allowedMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/svg+xml'];
-  const allowedExts  = ['.jpg', '.jpeg', '.png', '.webp', '.svg'];
+  const allowedMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+  const allowedExts  = ['.jpg', '.jpeg', '.png', '.webp'];
   const ext  = path.extname(file.originalname).toLowerCase();
   const mime = file.mimetype?.toLowerCase() || '';
   if (allowedMimes.includes(mime) || allowedExts.includes(ext)) cb(null, true);

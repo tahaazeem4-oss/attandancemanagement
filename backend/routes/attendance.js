@@ -2,9 +2,12 @@ const express  = require('express');
 const router   = express.Router();
 const ctrl     = require('../controllers/attendanceController');
 const protect  = require('../middleware/auth');
+const { requireRole } = require('../middleware/auth');
 
-router.post('/mark',           protect, ctrl.markAttendance);
-router.get('/report',          protect, ctrl.getReport);
-router.post('/send-whatsapp',  protect, ctrl.sendWhatsApp);
+const staffAccess = [protect, requireRole('teacher', 'admin', 'super_admin', 'org_admin', 'orgadmin')];
+
+router.post('/mark',           ...staffAccess, ctrl.markAttendance);
+router.get('/report',          ...staffAccess, ctrl.getReport);
+router.post('/send-whatsapp',  ...staffAccess, ctrl.sendWhatsApp);
 
 module.exports = router;
