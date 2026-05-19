@@ -5,11 +5,14 @@ import {
   verifyToken,
   sendPush,
   tokensForStudents,
+  tokensForParents,
   tokensForClassStudents,
+  tokensForClassParents,
   tokensForClassTeachers,
   tokensForSchoolAdmins,
   tokensForSchoolStudents,
   tokensForSchoolTeachers,
+  tokensForSchoolParents,
 } from "../_shared.ts";
 
 export async function handleNotifications(
@@ -416,30 +419,36 @@ export async function handleNotifications(
       // Push (non-blocking)
       const pushData = { type: "notification", sender: senderName };
       if (target_type === "student" && student_id) {
-        tokensForStudents(db, [student_id]).then((tokens) =>
-          sendPush(tokens, title.trim(), message.trim(), pushData)
+        Promise.all([
+          tokensForStudents(db, [student_id]),
+          tokensForParents(db, [student_id]),
+        ]).then(([stuTokens, parentTokens]) =>
+          sendPush([...new Set([...stuTokens, ...parentTokens])], title.trim(), message.trim(), pushData)
         );
       } else if (target_type === "section" && class_id && section_id) {
         Promise.all([
           tokensForClassStudents(db, resolvedSchoolId, class_id, section_id),
           tokensForClassTeachers(db, class_id, section_id),
-        ]).then(([s, t]) =>
-          sendPush([...new Set([...s, ...t])], title.trim(), message.trim(), pushData)
+          tokensForClassParents(db, resolvedSchoolId, class_id, section_id),
+        ]).then(([s, t, p]) =>
+          sendPush([...new Set([...s, ...t, ...p])], title.trim(), message.trim(), pushData)
         );
       } else if (target_type === "class" && class_id) {
         Promise.all([
           tokensForClassStudents(db, resolvedSchoolId, class_id, null),
           tokensForSchoolAdmins(db, resolvedSchoolId),
-        ]).then(([s, a]) =>
-          sendPush([...new Set([...s, ...a])], title.trim(), message.trim(), pushData)
+          tokensForClassParents(db, resolvedSchoolId, class_id, null),
+        ]).then(([s, a, p]) =>
+          sendPush([...new Set([...s, ...a, ...p])], title.trim(), message.trim(), pushData)
         );
       } else if (target_type === "school") {
         Promise.all([
           tokensForSchoolStudents(db, resolvedSchoolId),
           tokensForSchoolAdmins(db, resolvedSchoolId),
           tokensForSchoolTeachers(db, resolvedSchoolId),
-        ]).then(([s, a, t]) =>
-          sendPush([...new Set([...s, ...a, ...t])], title.trim(), message.trim(), pushData)
+          tokensForSchoolParents(db, resolvedSchoolId),
+        ]).then(([s, a, t, p]) =>
+          sendPush([...new Set([...s, ...a, ...t, ...p])], title.trim(), message.trim(), pushData)
         );
       }
 

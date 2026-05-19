@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "816091473238",
+    "project_id": "edtrack-6ce89",
+    "storage_bucket": "edtrack-6ce89.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:816091473238:android:4dd28407d187bff5a4e2f7",
+        "android_client_info": {
+          "package_name": "com.attendanceapp.management"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCQLSyX8EgWEVo7AC7vfLOdfs4MLhoJoRo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

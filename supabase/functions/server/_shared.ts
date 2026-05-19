@@ -123,9 +123,13 @@ export async function sendPush(
   body: string,
   data: Record<string, unknown> = {},
 ): Promise<void> {
-  if (!tokens.length) return;
+  if (!tokens.length) {
+    console.log("[sendPush] No tokens to send to — skipping");
+    return;
+  }
+  console.log(`[sendPush] Sending "${title}" to ${tokens.length} token(s):`, tokens);
   try {
-    await fetch("https://exp.host/--/api/v2/push/send", {
+    const res = await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -133,11 +137,21 @@ export async function sendPush(
         "Accept-Encoding": "gzip, deflate",
       },
       body: JSON.stringify(
-        tokens.map((to) => ({ to, title, body, data, sound: "default" })),
+        tokens.map((to) => ({
+          to,
+          title,
+          body,
+          data,
+          sound: "default",
+          channelId: "default",
+          priority: "high",
+        })),
       ),
     });
-  } catch {
-    // Never fail the main request because push failed
+    const json = await res.json().catch(() => null);
+    console.log(`[sendPush] Expo response (${res.status}):`, JSON.stringify(json));
+  } catch (err) {
+    console.error("[sendPush] fetch error:", err);
   }
 }
 
@@ -221,6 +235,50 @@ export async function tokensForSchoolTeachers(
     .eq("user_role", "teacher")
     .eq("teachers.school_id", schoolId);
   return (data || []).map((r: { token: string }) => r.token).filter(Boolean);
+}
+
+// Returns push tokens for all parents linked to the given student IDs.
+export async function tokensForParents(
+  db: ReturnType<typeof getDb>,
+  studentIds: number[],
+): Promise<string[]> {
+  if (!studentIds.length) return [];
+  const { data: ps } = await db
+    .from("parent_student")
+    .select("parent_id")
+    .in("student_id", studentIds);
+  const parentIds = [...new Set((ps || []).map((r: { parent_id: number }) => r.parent_id))];
+  if (!parentIds.length) return [];
+  const { data } = await db
+    .from("push_tokens")
+    .select("token")
+    .eq("user_role", "parent")
+    .in("user_id", parentIds);
+  return (data || []).map((r: { token: string }) => r.token).filter(Boolean);
+}
+
+// Returns push tokens for parents of all students in a given class (and optionally section).
+export async function tokensForClassParents(
+  db: ReturnType<typeof getDb>,
+  schoolId: number,
+  classId: number,
+  sectionId: number | null,
+): Promise<string[]> {
+  let q = db.from("students").select("id").eq("school_id", schoolId).eq("class_id", classId);
+  if (sectionId) q = q.eq("section_id", sectionId);
+  const { data: students } = await q;
+  const studentIds = (students || []).map((s: { id: number }) => s.id);
+  return tokensForParents(db, studentIds);
+}
+
+// Returns push tokens for all parents in an entire school.
+export async function tokensForSchoolParents(
+  db: ReturnType<typeof getDb>,
+  schoolId: number,
+): Promise<string[]> {
+  const { data: students } = await db.from("students").select("id").eq("school_id", schoolId);
+  const studentIds = (students || []).map((s: { id: number }) => s.id);
+  return tokensForParents(db, studentIds);
 }
 
 export type TeacherRole = "class_teacher" | "floor_incharge" | "subject_teacher";

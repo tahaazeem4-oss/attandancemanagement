@@ -52,9 +52,13 @@ async function registerPushToken() {
     const token     = tokenData.data;
 
     if (token) {
+      console.log('[Push] Registering token:', token);
       await api.post('/push-token', { token });
+      console.log('[Push] Token saved successfully');
     }
-  } catch { /* silently ignore — never block login */ }
+  } catch (err) {
+    console.warn('[Push] registerPushToken failed:', err?.message || err);
+  }
 }
 
 export function AuthProvider({ children }) {
@@ -147,6 +151,7 @@ export function AuthProvider({ children }) {
       await storage.removeItem('school');
       setSchool(null);
     }
+    registerPushToken(); // save parent's device token so they receive push notifications
     return data;
   };
 
@@ -173,6 +178,7 @@ export function AuthProvider({ children }) {
       await storage.removeItem('school');
       setSchool(null);
     }
+    registerPushToken(); // save parent's device token so they receive push notifications
     return data;
   };
 

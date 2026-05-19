@@ -5,6 +5,7 @@ import {
   verifyToken,
   sendPush,
   tokensForClassStudents,
+  tokensForClassParents,
   SUPABASE_URL,
 } from "../_shared.ts";
 
@@ -236,9 +237,15 @@ export async function handleLectures(
         throw dbError;
       }
 
-      // Push to students (non-blocking)
+      // Push to students and parents (non-blocking)
+      const pushTitle = type === "homework" ? "New Homework Uploaded" : "New Lecture Uploaded";
+      const pushBody = `${subject_name}: ${lecture_name}`;
+      const pushData = { type: "lecture" };
       tokensForClassStudents(db, schoolId, class_id, section_id).then((tokens) =>
-        sendPush(tokens, "New Lecture", `${subject_name}: ${lecture_name}`, { type: "lecture" })
+        sendPush(tokens, pushTitle, pushBody, pushData)
+      );
+      tokensForClassParents(db, schoolId, class_id, section_id).then((tokens) =>
+        sendPush(tokens, pushTitle, `${pushBody} (${type === "homework" ? "Homework" : "Lecture"})`, pushData)
       );
 
       return json({ ...lecture, file_url: storagePath ? publicUrl(storagePath) : null }, 201);

@@ -9,6 +9,9 @@ import * as Notifications from 'expo-notifications';
 // Navigation ref — lets us navigate from outside of React tree (e.g. notification tap).
 export const navigationRef = React.createRef();
 
+// Pending navigation action queued before the navigator was ready (cold-start tap).
+let _pendingNotifNavigation = null;
+
 // ── Notification display handler ──────────────────────────────
 // Runs when a notification is received while the app is foregrounded.
 // shouldShowAlert:true → banner appears like WhatsApp/Gmail.
@@ -44,23 +47,30 @@ async function ensureAndroidChannel() {
 // The screen names match the navigators in routeConfig / AppNavigator.
 function navigateForNotification(data, role) {
   const nav = navigationRef.current;
-  if (!nav) return;
+  if (!nav || !nav.isReady()) {
+    // Navigator not ready yet (cold start) — queue and retry once ready
+    _pendingNotifNavigation = { data, role };
+    return;
+  }
 
   const type = data?.type;
 
   try {
     if (type === 'lecture') {
-      // All roles have a lectures list accessible from their home stack
       if (role === 'student') {
-        nav.navigate('StudentLectureList');
+        nav.navigate('StudentClasswork');
+      } else if (role === 'parent') {
+        nav.navigate('ParentDashboard');
       } else {
         nav.navigate('LectureList');
       }
     } else if (type === 'attendance') {
       if (role === 'student') {
-        nav.navigate('StudentAttendance');
+        nav.navigate('StudentHistory');
+      } else if (role === 'parent') {
+        nav.navigate('ParentDashboard');
       } else {
-        nav.navigate('AttendanceReport');
+        nav.navigate('Report');
       }
     } else if (
       type === 'leave_request' ||
@@ -71,14 +81,18 @@ function navigateForNotification(data, role) {
       if (role === 'student') {
         nav.navigate('StudentLeaves');
       } else if (role === 'teacher') {
-        nav.navigate('ClassLeaves');
+        nav.navigate('TeacherLeaves');
+      } else if (role === 'parent') {
+        nav.navigate('ParentDashboard');
       } else {
-        nav.navigate('LeaveManagement');
+        nav.navigate('AdminLeaves');
       }
     } else {
       // Fallback: open the notification inbox for the current role
       if (role === 'student') {
         nav.navigate('StudentNotifications');
+      } else if (role === 'parent') {
+        nav.navigate('ParentDashboard');
       } else {
         nav.navigate('StaffNotifications');
       }
@@ -98,6 +112,14 @@ function Root() {
 
     // Ensure the Android channel is created at startup
     ensureAndroidChannel();
+
+    // Check if the app was opened by tapping a notification while killed (cold start).
+    Notifications.getLastNotificationResponseAsync().then(response => {
+      if (response) {
+        const data = response?.notification?.request?.content?.data;
+        navigateForNotification(data, user?.role);
+      }
+    });
 
     // Fired when a notification arrives while the app is in the foreground.
     // The handler above already shows the banner; this listener is a hook for
@@ -128,7 +150,17 @@ function Root() {
     );
   }
   return (
-    <NavigationContainer ref={navigationRef}>
+    <NavigationContainer
+        ref={navigationRef}
+        onReady={() => {
+          // If a notification tap arrived before the navigator was ready, handle it now.
+          if (_pendingNotifNavigation) {
+            const { data, role } = _pendingNotifNavigation;
+            _pendingNotifNavigation = null;
+            navigateForNotification(data, role);
+          }
+        }}
+      >
       <AppNavigator />
     </NavigationContainer>
   );

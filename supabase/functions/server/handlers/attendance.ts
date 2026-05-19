@@ -5,6 +5,7 @@ import {
   verifyToken,
   sendPush,
   tokensForStudents,
+  tokensForParents,
   resolveTeacherRole,
 } from "../_shared.ts";
 
@@ -67,11 +68,15 @@ export async function handleAttendance(
 
       // Push notifications (non-blocking)
       if (savedIds.length) {
+        const pushTitle = "Attendance Marked";
+        const pushBody = `Your child's attendance has been recorded for ${date}.`;
+        const pushData = { type: "attendance", date };
         tokensForStudents(db, savedIds).then((tokens) =>
-          sendPush(tokens, "Attendance Marked", `Your attendance has been recorded for ${date}.`, {
-            type: "attendance",
-            date,
-          })
+          sendPush(tokens, "Attendance Marked", `Your attendance has been recorded for ${date}.`, pushData)
+        );
+        // Notify parents of the same students
+        tokensForParents(db, savedIds).then((tokens) =>
+          sendPush(tokens, pushTitle, pushBody, pushData)
         );
       }
 
