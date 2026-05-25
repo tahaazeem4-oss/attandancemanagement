@@ -87,7 +87,7 @@ export default function StudentProfileScreen({ route }) {
     : profile?.primary_teacher_name || 'Not assigned yet';
   const teacherCount = profile?.teacher_names?.length ?? (profile?.primary_teacher_name ? 1 : null) ?? '—';
   const stats = useMemo(() => ([
-    { key: 'roll', label: 'Roll No', value: displayProfile.roll_no || '—' },
+    { key: 'roll', label: 'Student ID', value: displayProfile.roll_no || '—' },
     { key: 'age', label: 'Age', value: displayProfile.age ?? '—' },
     { key: 'teachers', label: 'Teachers', value: teacherCount },
   ]), [displayProfile.age, displayProfile.roll_no, teacherCount]);
@@ -117,7 +117,7 @@ export default function StudentProfileScreen({ route }) {
         <View style={styles.heroOrb} pointerEvents="none" />
         <Text style={styles.heroEyebrow}>{isParentViewing ? 'Parent Student Profile' : 'Student Profile'}</Text>
         <Text style={styles.heroTitle}>{displayProfile.first_name} {displayProfile.last_name}</Text>
-        <Text style={styles.heroMeta}>{profile?.class_name || displayProfile.class_name || 'Class'} • Sec {profile?.section_name || displayProfile.section_name || '—'} • #{displayProfile.roll_no || '—'}</Text>
+        <Text style={styles.heroMeta}>{profile?.class_name || displayProfile.class_name || 'Class'} • Sec {profile?.section_name || displayProfile.section_name || '—'} • ID: {displayProfile.roll_no || '—'}</Text>
 
         <View style={styles.heroBadgeRow}>
           <View style={styles.heroBadge}>
@@ -170,11 +170,10 @@ export default function StudentProfileScreen({ route }) {
           <Text style={styles.sectionSub}>Core academic and campus information.</Text>
         </View>
 
-        <DetailRow icon="id-card-outline" label="Student ID" value={String(displayProfile.student_id || displayProfile.id || '—')} subtle />
+        <DetailRow icon="id-card-outline" label="Student ID" value={String(displayProfile.roll_no || '—')} subtle />
         <DetailRow icon="person-outline" label="Full Name" value={`${displayProfile.first_name || ''} ${displayProfile.last_name || ''}`.trim()} />
         <DetailRow icon="library-outline" label="Class" value={profile?.class_name || displayProfile.class_name} />
         <DetailRow icon="albums-outline" label="Section" value={profile?.section_name || displayProfile.section_name} subtle />
-        <DetailRow icon="ribbon-outline" label="Roll Number" value={String(displayProfile.roll_no || '—')} subtle />
         <DetailRow icon="people-circle-outline" label="Assigned Teacher" value={teacherNames} />
         <DetailRow icon="business-outline" label="School / Campus" value={campusName} subtle />
         <DetailRow icon="call-outline" label="Campus Phone" value={profile?.school_phone || 'Not available yet'} subtle />

@@ -45,6 +45,7 @@ export default function HomeScreen({ navigation }) {
   const [todayStatus,      setTodayStatus]      = useState(null);
   const [loadingStatus,    setLoadingStatus]    = useState(true);
   const [marking,          setMarking]          = useState(false);
+  const [selectedStatus,   setSelectedStatus]   = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [assignments,      setAssignments]      = useState(null);
   const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
@@ -122,6 +123,7 @@ export default function HomeScreen({ navigation }) {
       await api.post('/teachers/attendance', { status });
       setTodayStatus({ status });
     } catch (err) {
+      setSelectedStatus(null);
       Alert.alert('Error', err?.response?.data?.message || 'Could not mark attendance');
     } finally { setMarking(false); }
   };
@@ -136,9 +138,30 @@ export default function HomeScreen({ navigation }) {
     return () => anim.stop();
   }, [todayStatus]);
 
-  const statusColor = { present: '#059669', absent: '#DC2626', leave: '#D97706' };
-  const statusBg    = { present: '#DCFCE7', absent: '#FEE2E2', leave: '#FEF9C3' };
-  const statusIcon  = { present: '✅', absent: '❌', leave: '🟡' };
+  const STATUS_COLOR  = { present: '#10B981', absent: '#EF4444', leave: '#F59E0B' };
+  const STATUS_DARK   = { present: '#059669', absent: '#DC2626', leave: '#D97706' };
+  const STATUS_BG     = { present: '#ECFDF5', absent: '#FEF2F2', leave: '#FFFBEB' };
+  const STATUS_BORDER = { present: '#6EE7B7', absent: '#FCA5A5', leave: '#FCD34D' };
+  const STATUS_ICON   = { present: 'checkmark-circle', absent: 'close-circle', leave: 'calendar' };
+  const STATUS_LABEL  = { present: 'Present', absent: 'Absent', leave: 'Leave' };
+
+  // Animated scale refs for each chip
+  const chipScale = {
+    present: useRef(new Animated.Value(1)).current,
+    absent:  useRef(new Animated.Value(1)).current,
+    leave:   useRef(new Animated.Value(1)).current,
+  };
+
+  const handleMarkAttendance = (s) => {
+    if (marking) return;
+    setSelectedStatus(s);
+    Animated.sequence([
+      Animated.spring(chipScale[s], { toValue: 0.86, useNativeDriver: true, speed: 80, bounciness: 0 }),
+      Animated.spring(chipScale[s], { toValue: 1.08, useNativeDriver: true, speed: 80, bounciness: 14 }),
+      Animated.spring(chipScale[s], { toValue: 1,    useNativeDriver: true, speed: 50, bounciness: 4 }),
+    ]).start();
+    markOwnAttendance(s);
+  };
 
   const schoolName = school?.name || 'EduTrack';
   const schoolSub  = school?.tagline || 'Attendance Management System';
@@ -208,8 +231,8 @@ export default function HomeScreen({ navigation }) {
 
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.roleLabel}>Teacher Command Center</Text>
-            <Text style={styles.heroTitle}>Teacher Portal</Text>
+            <Text style={styles.roleLabel}>Teacher Portal</Text>
+            <Text style={styles.heroTitle}>{teacher?.first_name} {teacher?.last_name}</Text>
             <Text style={styles.heroSub}>Handle attendance, messages, and learning tasks from one place.</Text>
           </View>
 
@@ -239,40 +262,53 @@ export default function HomeScreen({ navigation }) {
           {loadingStatus ? (
             <ActivityIndicator color={C.primary} />
           ) : todayStatus ? (
-            <Animated.View style={{ transform: [{ scale: pulse }] }}>
-              <View style={[styles.markedBadge, { backgroundColor: statusBg[todayStatus.status] }]}>
-                <Text style={styles.markedIcon}>{statusIcon[todayStatus.status]}</Text>
-                <View>
-                  <Text style={[styles.markedStatus, { color: statusColor[todayStatus.status] }]}>
-                    {todayStatus.status.toUpperCase()}
-                  </Text>
-                  <Text style={styles.markedSub}>Marked for today ✓</Text>
-                </View>
+            /* ── Already marked ── */
+            <Animated.View style={[styles.markedBadge, { backgroundColor: STATUS_BG[todayStatus.status], borderColor: STATUS_BORDER[todayStatus.status], shadowColor: STATUS_COLOR[todayStatus.status], shadowOpacity: 0.22, shadowRadius: 16, shadowOffset: { width: 0, height: 4 }, elevation: 5, transform: [{ scale: pulse }] }]}>
+              <View style={[styles.markedIconWrap, { backgroundColor: STATUS_COLOR[todayStatus.status] }]}>
+                <Ionicons name={STATUS_ICON[todayStatus.status]} size={22} color="#fff" />
               </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.markedStatus, { color: STATUS_DARK[todayStatus.status] }]}>
+                  {STATUS_LABEL[todayStatus.status]}
+                </Text>
+                <Text style={styles.markedSub}>Your attendance is marked for today</Text>
+              </View>
+              <Ionicons name="checkmark-done" size={18} color={STATUS_COLOR[todayStatus.status]} />
             </Animated.View>
           ) : (
+            /* ── Not yet marked ── */
             <>
-              <Text style={styles.attPrompt}>Mark your attendance for today</Text>
+              <View style={styles.attPromptRow}>
+                <Ionicons name="finger-print-outline" size={16} color={C.textMed} />
+                <Text style={styles.attPrompt}>Mark your attendance for today</Text>
+              </View>
               <View style={styles.attBtns}>
-                {[
-                  { s: 'present', label: 'Present', icon: '✅', col: '#059669', bg: '#DCFCE7' },
-                  { s: 'absent',  label: 'Absent',  icon: '❌', col: '#DC2626', bg: '#FEE2E2' },
-                  { s: 'leave',   label: 'Leave',   icon: '🟡', col: '#D97706', bg: '#FEF9C3' },
-                ].map(({ s, label, icon, col, bg }) => (
-                  <Pressable
-                    key={s}
-                    disabled={marking}
-                    onPress={() => markOwnAttendance(s)}
-                    style={({ pressed }) => [styles.attBtn, { backgroundColor: bg, borderColor: col, opacity: pressed ? 0.8 : 1 }]}
-                  >
-                    {marking
-                      ? <ActivityIndicator color={col} size="small" />
-                      : <>
-                          <Text style={styles.attBtnIcon}>{icon}</Text>
-                          <Text style={[styles.attBtnLabel, { color: col }]}>{label}</Text>
-                        </>}
-                  </Pressable>
-                ))}
+                {(['present', 'absent', 'leave']).map((s) => {
+                  const isSelected = selectedStatus === s;
+                  return (
+                    <Animated.View key={s} style={[styles.attBtnWrap, { transform: [{ scale: chipScale[s] }] }]}>
+                      <Pressable
+                        disabled={marking}
+                        onPress={() => handleMarkAttendance(s)}
+                        style={[
+                          styles.attBtn,
+                          isSelected
+                            ? { backgroundColor: STATUS_COLOR[s], borderColor: STATUS_DARK[s], shadowColor: STATUS_COLOR[s], shadowOpacity: 0.28 }
+                            : { backgroundColor: '#FFFFFF', borderColor: C.border, shadowColor: 'transparent', shadowOpacity: 0 },
+                        ]}
+                      >
+                        {(marking && isSelected)
+                          ? <ActivityIndicator color="#fff" size="small" />
+                          : <>
+                              <View style={[styles.attBtnIconWrap, { backgroundColor: isSelected ? 'rgba(255,255,255,0.22)' : STATUS_BG[s] }]}>
+                                <Ionicons name={STATUS_ICON[s]} size={20} color={isSelected ? '#fff' : STATUS_COLOR[s]} />
+                              </View>
+                              <Text style={[styles.attBtnLabel, { color: isSelected ? '#fff' : C.textMed }]}>{STATUS_LABEL[s]}</Text>
+                            </>}
+                      </Pressable>
+                    </Animated.View>
+                  );
+                })}
               </View>
             </>
           )}
@@ -372,20 +408,31 @@ const styles = StyleSheet.create({
     shadowColor: '#94A3B8', shadowOpacity: 0.10, shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 }, elevation: 3,
   },
-  attPrompt: { color: C.textMed, fontSize: 13, marginBottom: 14, fontWeight: '500' },
+  attPromptRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 14 },
+  attPrompt: { color: C.textMed, fontSize: 13, fontWeight: '600' },
   attBtns: { flexDirection: 'row', gap: 8 },
+  attBtnWrap: { flex: 1 },
   attBtn: {
-    flex: 1, borderRadius: 14, paddingVertical: 14,
+    borderRadius: 14, paddingVertical: 14,
     alignItems: 'center', borderWidth: 1.5,
+    shadowOpacity: 0.15, shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 }, elevation: 3,
   },
-  attBtnIcon:  { fontSize: 18, marginBottom: 4 },
-  attBtnLabel: { fontSize: 12, fontWeight: '700' },
+  attBtnIconWrap: {
+    width: 40, height: 40, borderRadius: 12,
+    justifyContent: 'center', alignItems: 'center',
+    marginBottom: 8,
+  },
+  attBtnLabel: { fontSize: 12, fontWeight: '800' },
   markedBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    borderRadius: 14, padding: 16,
+    borderRadius: 14, padding: 16, borderWidth: 1.5,
   },
-  markedIcon:   { fontSize: 28 },
-  markedStatus: { fontSize: 18, fontWeight: '800' },
-  markedSub:    { fontSize: 12, color: C.textMed, marginTop: 2 },
+  markedIconWrap: {
+    width: 44, height: 44, borderRadius: 13,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  markedStatus: { fontSize: 16, fontWeight: '800' },
+  markedSub:    { fontSize: 11, color: C.textMed, marginTop: 2 },
 
 });

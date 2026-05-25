@@ -488,7 +488,7 @@ export default function StudentsManagerScreen({ navigation, mode }) {
                 <Text style={styles.name}>{item.first_name} {item.last_name}</Text>
                 <Text style={styles.sub}>
                   {item.class_name}{item.section_name ? ` - Sec ${item.section_name}` : ''}
-                  {item.roll_no ? `  -  #${item.roll_no}` : ''}
+                  {item.roll_no ? `  -  ID: ${item.roll_no}` : ''}
                 </Text>
                 {!isOrg && !isSuper && item.has_parent && <Text style={styles.accountBadge}>Parent linked</Text>}
                 {(item.campus_name || item.school_name) ? <View style={styles.badge}><Text style={styles.badgeTxt}>{item.campus_name || item.school_name}</Text></View> : null}
@@ -525,7 +525,7 @@ export default function StudentsManagerScreen({ navigation, mode }) {
                   <TextInput style={styles.input} keyboardType="numeric" value={form.age} onChangeText={v => F('age', v)} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Roll No</Text>
+                  <Text style={styles.label}>Student ID</Text>
                   <TextInput style={styles.input} value={form.roll_no} onChangeText={v => F('roll_no', v)} />
                 </View>
               </View>

@@ -364,7 +364,7 @@ export default function SendNotificationScreen({ navigation, route }) {
                           setStudentName(s ? `${s.first_name} ${s.last_name}` : '');
                         }}
                         placeholder="— Select Student —"
-                        items={[{ label: '— Select Student —', value: '' }, ...students.map(s => ({ label: `${s.roll_no ? `#${s.roll_no}  ` : ''}${s.first_name} ${s.last_name}`, value: String(s.id) }))]}
+                        items={[{ label: '— Select Student —', value: '' }, ...students.map(s => ({ label: `${s.roll_no ? `ID:${s.roll_no}  ` : ''}${s.first_name} ${s.last_name}`, value: String(s.id) }))]}
                       />
                     )
                 }

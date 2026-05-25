@@ -304,7 +304,7 @@ export default function StudentHomeScreen({ navigation, route }) {
               <View style={styles.headerCopy}>
                 <Text style={styles.roleLabel}>{isParentViewing ? 'Child Portal' : 'Student Portal'}</Text>
                 <Text style={styles.name}>{displayUser?.first_name} {displayUser?.last_name}</Text>
-                <Text style={styles.meta}>{displayUser?.class_name} · Sec {displayUser?.section_name} · #{displayUser?.roll_no}</Text>
+                <Text style={styles.meta}>{displayUser?.class_name} · Sec {displayUser?.section_name} · ID: {displayUser?.roll_no}</Text>
               </View>
               {isParentViewing ? (
                 <View style={styles.liveBadge}>

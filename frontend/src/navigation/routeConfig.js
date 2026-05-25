@@ -54,6 +54,7 @@ import StudentLeaveScreen from '../screens/student/StudentLeaveScreen';
 import StudentLecturesScreen from '../screens/student/StudentLecturesScreen';
 import StudentLectureDetailScreen from '../screens/student/StudentLectureDetailScreen';
 import StudentNotificationsScreen from '../screens/student/StudentNotificationsScreen';
+import ProfileScreen from '../screens/ProfileScreen';
 
 import {
   StudentAiTutorHomeScreen,
@@ -185,6 +186,7 @@ export function buildParentChildScreens(activeChild) {
 export function getParentStackScreens(parentStudentPortalTabsComponent, parentDashboardScreenComponent) {
   return [
     { name: 'ParentDashboard', component: parentDashboardScreenComponent },
+    { name: 'ParentProfile', component: ProfileScreen, options: { headerShown: false } },
     { name: 'ChildStudentPortal', component: parentStudentPortalTabsComponent },
     { name: 'ChatList', component: ChatListScreen },
     { name: 'Chat', component: ChatScreen, options: { headerShown: false } },

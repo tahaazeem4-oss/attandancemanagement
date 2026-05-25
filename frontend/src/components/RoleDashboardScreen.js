@@ -37,8 +37,8 @@ export default function RoleDashboardScreen({
   const statusInset = StatusBar.currentHeight ?? 0;
   const topInset = Math.max(insets.top, statusInset, 0);
   const headerTopMargin = topInset + 12;
-  const heroEyebrow = superBadgeText || 'Management Command Center';
-  const heroTitle = headerLabel || 'Management Portal';
+  const heroEyebrow = headerLabel || superBadgeText || 'Management Portal';
+  const heroTitle = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || headerLabel || 'Management Portal';
   const heroSubtitle = subtitle || 'Manage people, classes, and activity from one place.';
 
   return (

@@ -81,7 +81,7 @@ export async function handleAdmin(
     try {
       const { data: teachers } = await db
         .from("teachers")
-        .select("id, first_name, last_name, email, phone, created_at")
+        .select("id, first_name, last_name, email, phone, teacher_role, created_at")
         .eq("school_id", schoolId)
         .order("last_name");
 
@@ -127,8 +127,8 @@ export async function handleAdmin(
     try {
       const body = await req.json();
       const { first_name, last_name, email, password, phone, assignments } = body;
-      if (!first_name || !last_name || !email || !password)
-        return json({ message: "Missing required fields" }, 400);
+      if (!first_name || !last_name || !email || !password || !phone)
+        return json({ message: "first_name, last_name, email, password and phone are required" }, 400);
 
       const normalizedAssignments = Array.isArray(assignments) ? assignments : [];
       const requestedRole = body.teacher_role;
@@ -147,13 +147,13 @@ export async function handleAdmin(
           last_name,
           email: email.trim().toLowerCase(),
           password: hashed,
-          phone: phone || null,
+          phone: phone.trim(),
           teacher_role: teacherRole,
         })
         .select()
         .single();
       if (error) {
-        if (error.code === "23505") return json({ message: "Email already exists" }, 409);
+        if (error.code === "23505") return json({ message: "Email or phone already exists" }, 409);
         throw error;
       }
 
@@ -311,21 +311,26 @@ export async function handleAdmin(
   if (path === "/admin/students" && method === "POST") {
     try {
       const body = await req.json();
-      // Enforce roll_no uniqueness within school+class+section
-      if (body.roll_no && body.class_id && body.section_id) {
-        const { data: dup } = await db
-          .from("students")
-          .select("id")
-          .eq("school_id", schoolId)
-          .eq("class_id", body.class_id)
-          .eq("section_id", body.section_id)
-          .eq("roll_no", body.roll_no);
-        if (dup?.length)
-          return json({ message: `Roll number ${body.roll_no} is already taken in this class/section.` }, 409);
+      // Enforce student ID uniqueness across the whole organization
+      if (body.roll_no) {
+        const { data: schoolRow } = await db.from("schools").select("org_id").eq("id", schoolId).single();
+        const orgId = (schoolRow as any)?.org_id;
+        let orgSchoolIds: number[] = [schoolId];
+        if (orgId) {
+          const { data: peers } = await db.from("schools").select("id").eq("org_id", orgId);
+          orgSchoolIds = (peers || []).map((s: any) => Number(s.id));
+        }
+        const { data: dup } = await db.from("students").select("id")
+          .in("school_id", orgSchoolIds)
+          .eq("roll_no", String(body.roll_no).trim())
+          .maybeSingle();
+        if (dup)
+          return json({ message: `Student ID "${body.roll_no}" is already in use in this organization.` }, 409);
       }
+      const { school_id: _s, ...studentBody } = body;
       const { data, error } = await db
         .from("students")
-        .insert({ school_id: schoolId, ...body, roll_no: body.roll_no || null })
+        .insert({ school_id: schoolId, ...studentBody, roll_no: body.roll_no || null })
         .select()
         .single();
       if (error) throw error;
@@ -342,22 +347,27 @@ export async function handleAdmin(
     const id = parseInt(studentMatch[1]);
     try {
       const body = await req.json();
-      // Enforce roll_no uniqueness (exclude self)
-      if (body.roll_no && body.class_id && body.section_id) {
-        const { data: dup } = await db
-          .from("students")
-          .select("id")
-          .eq("school_id", schoolId)
-          .eq("class_id", body.class_id)
-          .eq("section_id", body.section_id)
-          .eq("roll_no", body.roll_no)
-          .neq("id", id);
-        if (dup?.length)
-          return json({ message: `Roll number ${body.roll_no} is already taken in this class/section.` }, 409);
+      // Enforce student ID uniqueness across the whole organization (exclude self)
+      if (body.roll_no) {
+        const { data: schoolRow } = await db.from("schools").select("org_id").eq("id", schoolId).single();
+        const orgId = (schoolRow as any)?.org_id;
+        let orgSchoolIds: number[] = [schoolId];
+        if (orgId) {
+          const { data: peers } = await db.from("schools").select("id").eq("org_id", orgId);
+          orgSchoolIds = (peers || []).map((s: any) => Number(s.id));
+        }
+        const { data: dup } = await db.from("students").select("id")
+          .in("school_id", orgSchoolIds)
+          .eq("roll_no", String(body.roll_no).trim())
+          .neq("id", id)
+          .maybeSingle();
+        if (dup)
+          return json({ message: `Student ID "${body.roll_no}" is already in use in this organization.` }, 409);
       }
+      const { school_id: _s, ...studentBody } = body;
       await db
         .from("students")
-        .update({ ...body, roll_no: body.roll_no || null })
+        .update({ ...studentBody, roll_no: body.roll_no || null })
         .eq("id", id)
         .eq("school_id", schoolId);
       return json({ message: "Student updated" });

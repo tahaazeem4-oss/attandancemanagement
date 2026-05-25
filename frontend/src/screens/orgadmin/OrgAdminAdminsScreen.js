@@ -8,11 +8,12 @@ import api from '../../services/api';
 import { C } from '../../config/theme';
 import AppHeader from '../../components/AppHeader';
 import ImportExportBar from '../../components/ImportExportBar';
+import { toLocalPhone } from '../../lib/phoneUtils';
 import PickerField from '../../components/PickerField';
 import { showDestructiveConfirm } from '../../lib/confirmDialog';
 import { buildImportExportScope } from '../../lib/importExportScope';
 
-const EMPTY_FORM = { first_name: '', last_name: '', email: '', password: '', school_id: '' };
+const EMPTY_FORM = { first_name: '', last_name: '', email: '', password: '', school_id: '', phone: '' };
 
 export default function OrgAdminAdminsScreen({ navigation }) {
   const [admins, setAdmins] = useState([]);
@@ -63,15 +64,17 @@ export default function OrgAdminAdminsScreen({ navigation }) {
   const openAdd = () => { setEditing(null); setForm(EMPTY_FORM); setShowCreatePw(false); setShowResetPw(false); setModalVisible(true); };
   const openEdit = (item) => {
     setEditing(item);
-    setForm({ first_name: item.first_name || '', last_name: item.last_name || '', email: item.email || '', password: '', school_id: String(item.school_id) || '' });
+    setForm({ first_name: item.first_name || '', last_name: item.last_name || '', email: item.email || '', password: '', school_id: String(item.school_id) || '', phone: toLocalPhone(item.phone) });
     setShowCreatePw(false);
     setShowResetPw(false);
     setModalVisible(true);
   };
 
   const handleSave = async () => {
-    if (!form.first_name || !form.last_name || !form.email)
-      return Alert.alert('Validation', 'First name, last name and email are required.');
+    if (!form.first_name || !form.last_name || !form.email || !form.phone)
+      return Alert.alert('Validation', 'First name, last name, email and phone are required.');
+    if (!/^03[0-9]{9}$/.test(form.phone.trim()))
+      return Alert.alert('Validation', 'Phone must be in format 03XXXXXXXXX (11 digits, starts with 03, no spaces or dashes).');
     if (!editing && !form.password)
       return Alert.alert('Validation', 'Password is required for new admins.');
     if (!editing && !form.school_id)
@@ -79,9 +82,9 @@ export default function OrgAdminAdminsScreen({ navigation }) {
     setSaving(true);
     try {
       if (editing) {
-        await api.put(`/org-admin/admins/${editing.id}`, { first_name: form.first_name, last_name: form.last_name, email: form.email });
+        await api.put(`/org-admin/admins/${editing.id}`, { first_name: form.first_name, last_name: form.last_name, email: form.email, phone: form.phone.trim() });
       } else {
-        await api.post('/org-admin/admins', { ...form, school_id: parseInt(form.school_id) });
+        await api.post('/org-admin/admins', { ...form, school_id: parseInt(form.school_id), phone: form.phone.trim() });
       }
       setModalVisible(false);
       load();
@@ -126,6 +129,7 @@ export default function OrgAdminAdminsScreen({ navigation }) {
       <View style={{ flex: 1 }}>
         <Text style={styles.name}>{item.first_name} {item.last_name}</Text>
         <Text style={styles.email}>{item.email}</Text>
+        {item.phone ? <Text style={styles.phone}>{toLocalPhone(item.phone)}</Text> : null}
         {item.campus_name ? <View style={styles.badge}><Text style={styles.badgeTxt}>{item.campus_name}</Text></View> : null}
       </View>
       <View style={styles.actionBtns}>
@@ -187,6 +191,8 @@ export default function OrgAdminAdminsScreen({ navigation }) {
               <TextInput style={styles.input} value={form.last_name} onChangeText={v => setForm(f => ({ ...f, last_name: v }))} />
               <Text style={styles.label}>Email *</Text>
               <TextInput style={styles.input} value={form.email} onChangeText={v => setForm(f => ({ ...f, email: v }))} autoCapitalize="none" keyboardType="email-address" />
+              <Text style={styles.label}>Phone * (03XXXXXXXXX)</Text>
+              <TextInput style={styles.input} value={form.phone} onChangeText={v => setForm(f => ({ ...f, phone: v }))} keyboardType="phone-pad" placeholder="03XXXXXXXXX" maxLength={11} />
               {!editing && <>
                 <Text style={styles.label}>Password *</Text>
                 <View style={styles.passwordWrap}>
@@ -247,6 +253,7 @@ const styles = StyleSheet.create({
   avatarTxt: { fontWeight: '700', color: '#7C3AED', fontSize: 16 },
   name: { fontSize: 14, fontWeight: '700', color: C.textDark },
   email: { fontSize: 12, color: '#64748B', marginTop: 2 },
+  phone: { fontSize: 12, color: '#64748B', marginTop: 1 },
   sub: { fontSize: 12, color: '#64748B', marginBottom: 8 },
   badge: { marginTop: 5, alignSelf: 'flex-start', backgroundColor: '#F1F5F9', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   badgeTxt: { fontSize: 11, color: '#475569', fontWeight: '600' },

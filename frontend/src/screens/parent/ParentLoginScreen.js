@@ -4,6 +4,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { C, S } from '../../config/theme';
 
+const PHONE_REGEX = /^03[0-9]{9}$/;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function normalizeIdentifier(val) {
+  const v = val.trim();
+  if (PHONE_REGEX.test(v)) {
+    return '+92' + v.slice(1);
+  }
+  return v.toLowerCase();
+}
+
 export default function ParentLoginScreen({ navigation }) {
   const { parentLogin } = useAuth();
   const [email, setEmail] = useState('');
@@ -13,8 +24,13 @@ export default function ParentLoginScreen({ navigation }) {
   const [error, setError] = useState('');
 
   const handleLogin = async () => {
-    if (!email || !password) {
-      setError('Email and password are required');
+    const v = email.trim().replace(/[\s\-]/g, '');
+    if (!email.trim() || !password) {
+      setError('Email or phone, and password are required');
+      return;
+    }
+    if (!PHONE_REGEX.test(email.trim()) && !EMAIL_REGEX.test(email.trim())) {
+      setError('Enter a valid email, or phone in format 03XXXXXXXXX (11 digits, no spaces)');
       return;
     }
 
@@ -22,8 +38,7 @@ export default function ParentLoginScreen({ navigation }) {
     setError('');
 
     try {
-      await parentLogin(email, password);
-      // AuthContext sets user → AppNavigator automatically shows ParentTabs
+      await parentLogin(normalizeIdentifier(email), password);
     } catch (err) {
       const msg = err?.response?.data?.message || 'Login failed';
       setError(msg);
@@ -44,12 +59,13 @@ export default function ParentLoginScreen({ navigation }) {
 
         {!!error && <Text style={styles.error}>{error}</Text>}
 
-        <Text style={S.label}>Email</Text>
+        <Text style={S.label}>Email or Phone Number</Text>
         <TextInput
           style={S.input}
-          placeholder="your@email.com"
-          keyboardType="email-address"
+          placeholder="email@example.com  or  03XXXXXXXXX"
+          keyboardType="default"
           autoCapitalize="none"
+          autoCorrect={false}
           value={email}
           onChangeText={setEmail}
           editable={!loading}

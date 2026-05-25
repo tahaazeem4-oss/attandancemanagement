@@ -36,7 +36,7 @@ const CHILD_ACCENTS = [
 ];
 
 export default function ParentDashboardScreen({ navigation }) {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const insets = useSafeAreaInsets();
   const [children, setChildren] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -393,21 +393,30 @@ export default function ParentDashboardScreen({ navigation }) {
 
                 <View style={styles.heroTopRow}>
                   <View style={styles.heroHeadingWrap}>
-                    <Text style={styles.heroEyebrow}>Family Command Center</Text>
-                    <Text style={styles.heroTitle}>Parent Portal</Text>
+                    <Text style={styles.heroEyebrow}>Parent Portal</Text>
+                    <Text style={styles.heroTitle}>{user?.first_name} {user?.last_name}</Text>
                     <Text style={styles.heroSub}>A calmer view of attendance, school alerts, leave activity, and messages across every child.</Text>
                   </View>
 
-                  <Pressable
-                    onPress={() => Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-                      { text: 'Cancel', style: 'cancel' },
-                      { text: 'Sign Out', style: 'destructive', onPress: logout },
-                    ])}
-                    style={({ pressed }) => [styles.heroSignOutBtn, pressed && { opacity: 0.82 }]}
-                  >
-                    <Ionicons name="log-out-outline" size={14} color="#DBEAFE" />
-                    <Text style={styles.heroSignOutText}>Sign Out</Text>
-                  </Pressable>
+                  <View style={styles.heroActionBtns}>
+                    <Pressable
+                      onPress={() => navigation.navigate('ParentProfile')}
+                      style={({ pressed }) => [styles.heroSignOutBtn, pressed && { opacity: 0.82 }]}
+                    >
+                      <Ionicons name="person-circle-outline" size={14} color="#DBEAFE" />
+                      <Text style={styles.heroSignOutText}>Profile</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Sign Out', style: 'destructive', onPress: logout },
+                      ])}
+                      style={({ pressed }) => [styles.heroSignOutBtn, pressed && { opacity: 0.82 }]}
+                    >
+                      <Ionicons name="log-out-outline" size={14} color="#DBEAFE" />
+                      <Text style={styles.heroSignOutText}>Sign Out</Text>
+                    </Pressable>
+                  </View>
                 </View>
 
                 <View style={styles.heroInsightCard}>
@@ -567,6 +576,7 @@ const styles = StyleSheet.create({
     bottom: -56,
   },
   heroTopRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  heroActionBtns: { flexDirection: 'column', gap: 6 },
   heroHeadingWrap: { flex: 1 },
   heroEyebrow: {
     color: '#93C5FD',

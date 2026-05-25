@@ -182,6 +182,12 @@ export default function ParentsManagerScreen({ navigation, mode }) {
     setModal(true);
   };
 
+  const normalizePhoneForForm = phone => {
+    if (!phone) return '';
+    const m = phone.match(/^\+92(\d{10})$/);
+    return m ? '0' + m[1] : phone;
+  };
+
   const openEdit = p => {
     setEditing(p);
     setForm({
@@ -189,7 +195,7 @@ export default function ParentsManagerScreen({ navigation, mode }) {
       password: '',
       first_name: p.first_name || '',
       last_name: p.last_name || '',
-      phone: p.phone || '',
+      phone: normalizePhoneForForm(p.phone),
       school_id: String(p.school_id || filterCampus || ''),
     });
     if (isOrg) {
@@ -204,6 +210,13 @@ export default function ParentsManagerScreen({ navigation, mode }) {
 
   const handleSave = async () => {
     if (!form.email) return Alert.alert('Validation', 'Email is required.');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+      return Alert.alert('Validation', 'Please enter a valid email address (e.g. parent@example.com).');
+    }
+    if (!form.phone) return Alert.alert('Validation', 'Phone is required.');
+    if (!/^03[0-9]{9}$/.test(form.phone.trim()) && !/^\+92[0-9]{10}$/.test(form.phone.trim())) {
+      return Alert.alert('Validation', 'Phone must be 03XXXXXXXXX or +92XXXXXXXXXX format.');
+    }
     if (!editing && !form.password) return Alert.alert('Validation', 'Password is required for new parents.');
     if (isOrg && !selectedCampuses.length) return Alert.alert('Validation', 'Please select at least one campus.');
     if (isSuper && !selectedCampuses.length) return Alert.alert('Validation', 'Please select at least one campus.');
@@ -399,7 +412,7 @@ export default function ParentsManagerScreen({ navigation, mode }) {
     try {
       const req = isSuper
         ? api.get(`/super-admin/schools/${childCampusId}/students`, { params: { class_id: selClass.id, section_id: sec.id } })
-        : api.get('/students', { params: { class_id: selClass.id, section_id: sec.id } });
+        : api.get('/admin/students', { params: { class_id: selClass.id, section_id: sec.id } });
       const { data } = await req;
       setStudents(Array.isArray(data) ? data : data.students || []);
     } catch {
@@ -531,6 +544,17 @@ export default function ParentsManagerScreen({ navigation, mode }) {
         ) : null
       ) : null}
       {!isOrg && !isSuper ? (
+        <ImportExportBar
+          templatePath="/import-export/parents/template"
+          templateFilename="parents_template.xlsx"
+          importPath="/import-export/parents/import"
+          importFields={{}}
+          exportPath="/import-export/parents/export"
+          exportFilename="parents_export.xlsx"
+          onImportDone={load}
+        />
+      ) : null}
+      {!isOrg && !isSuper ? (
         <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
           <Pressable style={styles.linkExistingBtn} onPress={() => { setLinkEmail(''); setLinkModal(true); }}>
             <Ionicons name="link-outline" size={16} color={C.primary} />
@@ -560,7 +584,7 @@ export default function ParentsManagerScreen({ navigation, mode }) {
               <View style={{ flex: 1 }}>
                 <Text style={styles.name}>{item.first_name || ''} {item.last_name || ''}</Text>
                 <Text style={styles.sub}>{item.email}</Text>
-                {item.phone ? <Text style={styles.sub}>{item.phone}</Text> : null}
+                {item.phone ? <Text style={styles.sub}>{normalizePhoneForForm(item.phone)}</Text> : null}
                 {(item.campus_names || []).length > 0 && (
                   <View style={styles.badgeRow}>
                     {item.campus_names.map((n, i) => (
@@ -627,8 +651,8 @@ export default function ParentsManagerScreen({ navigation, mode }) {
                 </View>
               </View>
 
-              <Text style={styles.label}>Phone</Text>
-              <TextInput style={styles.input} value={form.phone} onChangeText={v => F('phone', v)} keyboardType="phone-pad" />
+              <Text style={styles.label}>Phone * (03XXXXXXXXX)</Text>
+              <TextInput style={styles.input} value={form.phone} onChangeText={v => F('phone', v)} keyboardType="phone-pad" placeholder="03XXXXXXXXX" maxLength={11} />
 
               {isOrg && (
                 <>
@@ -766,7 +790,7 @@ export default function ParentsManagerScreen({ navigation, mode }) {
                           <View style={styles.childAvatar}><Text style={styles.avatarText}>{(s.first_name || '?')[0].toUpperCase()}</Text></View>
                           <View style={{ flex: 1 }}>
                             <Text style={styles.name}>{s.first_name} {s.last_name}</Text>
-                            <Text style={styles.sub}>{s.roll_no ? `Roll: ${s.roll_no}` : `ID: ${s.id}`}</Text>
+                            <Text style={styles.sub}>{s.roll_no ? `ID: ${s.roll_no}` : `DB ID: ${s.id}`}</Text>
                           </View>
                           {linked ? (
                             <View style={styles.linkedBadge}><Text style={styles.linkedBadgeTxt}>Linked</Text></View>

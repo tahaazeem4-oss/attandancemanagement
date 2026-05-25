@@ -196,7 +196,7 @@ export async function handleSuperAdmin(
     try {
       const { data } = await db
         .from("admins")
-        .select("id, first_name, last_name, email")
+        .select("id, first_name, last_name, email, phone")
         .eq("school_id", schoolId);
       return json(data || []);
     } catch (err) {
@@ -209,15 +209,22 @@ export async function handleSuperAdmin(
   if (schoolAdminsMatch && method === "POST") {
     const schoolId = parseInt(schoolAdminsMatch[1]);
     try {
-      const { first_name, last_name, email, password } = await req.json();
+      const { first_name, last_name, email, password, phone } = await req.json();
+      if (!first_name || !last_name || !email || !password || !phone)
+        return json({ message: "first_name, last_name, email, password and phone are required" }, 400);
+      const normalizedPhone = phone.trim();
+      if (!/^03[0-9]{9}$/.test(normalizedPhone))
+        return json({ message: "Phone must be in format 03XXXXXXXXX (11 digits)" }, 400);
+      const { data: phoneDup } = await db.from("admins").select("id").eq("phone", normalizedPhone).maybeSingle();
+      if (phoneDup) return json({ message: "Phone number already in use" }, 409);
       const hashed = await hashPassword(password);
       const { data, error } = await db
         .from("admins")
-        .insert({ school_id: schoolId, first_name, last_name, email: email.trim().toLowerCase(), password: hashed })
+        .insert({ school_id: schoolId, first_name, last_name, email: email.trim().toLowerCase(), password: hashed, phone: normalizedPhone })
         .select()
         .single();
       if (error) {
-        if (error.code === "23505") return json({ message: "Email already exists" }, 409);
+        if (error.code === "23505") return json({ message: "Email or phone already exists" }, 409);
         throw error;
       }
       return json({ message: "Admin created", id: data.id }, 201);
@@ -232,8 +239,15 @@ export async function handleSuperAdmin(
   if (adminMatch && method === "PUT") {
     const adminId = parseInt(adminMatch[2]);
     try {
-      const { first_name, last_name, email } = await req.json();
-      await db.from("admins").update({ first_name, last_name, email: email?.trim().toLowerCase() }).eq("id", adminId);
+      const { first_name, last_name, email, phone } = await req.json();
+      const updates: Record<string, unknown> = { first_name, last_name, email: email?.trim().toLowerCase() };
+      if (phone !== undefined) {
+        const normalizedPhone = phone.trim();
+        if (normalizedPhone && !/^03[0-9]{9}$/.test(normalizedPhone))
+          return json({ message: "Phone must be in format 03XXXXXXXXX (11 digits)" }, 400);
+        updates.phone = normalizedPhone || null;
+      }
+      await db.from("admins").update(updates).eq("id", adminId);
       return json({ message: "Admin updated" });
     } catch (err) {
       console.error("[super-admin/admins PUT]", err);
@@ -326,6 +340,8 @@ export async function handleSuperAdmin(
     try {
       const body = await req.json();
       const { first_name, last_name, email, password, phone, assignments } = body;
+      if (!first_name || !last_name || !email || !password || !phone)
+        return json({ message: "first_name, last_name, email, password and phone are required" }, 400);
       const normalizedAssignments = Array.isArray(assignments) ? assignments : [];
       const teacherRole = ["class_teacher", "floor_incharge", "subject_teacher"].includes(body.teacher_role)
         ? body.teacher_role
@@ -342,13 +358,13 @@ export async function handleSuperAdmin(
           last_name,
           email: email.trim().toLowerCase(),
           password: hashed,
-          phone: phone || null,
+          phone: phone.trim(),
           teacher_role: teacherRole,
         })
         .select()
         .single();
       if (error) {
-        if (error.code === "23505") return json({ message: "Email already exists" }, 409);
+        if (error.code === "23505") return json({ message: "Email or phone already exists" }, 409);
         throw error;
       }
       if (normalizedAssignments.length) {
@@ -502,9 +518,10 @@ export async function handleSuperAdmin(
         if (exists) return json({ message: `Email already exists as a ${exists}` }, 409);
       }
 
+      const { school_id: _s, ...studentBody } = body;
       const { data, error } = await db
         .from("students")
-        .insert({ school_id: schoolId, ...body })
+        .insert({ school_id: schoolId, ...studentBody })
         .select()
         .single();
       if (error) throw error;
@@ -541,7 +558,8 @@ export async function handleSuperAdmin(
             return json({ message: `Roll number ${body.roll_no} is already taken in this class/section.` }, 409);
         }
       }
-      await db.from("students").update({ ...body, roll_no: body.roll_no || null }).eq("id", id);
+      const { school_id: _s, ...studentBody } = body;
+      await db.from("students").update({ ...studentBody, roll_no: body.roll_no || null }).eq("id", id);
       return json({ message: "Student updated" });
     } catch (err) {
       console.error("[super-admin/schools/:id/students/:id PUT]", err);
@@ -631,7 +649,7 @@ export async function handleSuperAdmin(
     try {
       const { data } = await db
         .from("org_admins")
-        .select("id, first_name, last_name, email, created_at")
+        .select("id, first_name, last_name, email, phone, created_at")
         .eq("org_id", orgId)
         .order("last_name");
       return json(data || []);
@@ -645,9 +663,15 @@ export async function handleSuperAdmin(
   if (orgAdminsMatch && method === "POST") {
     const orgId = parseInt(orgAdminsMatch[1]);
     try {
-      const { first_name, last_name, email, password } = await req.json();
-      if (!first_name || !last_name || !email || !password)
-        return json({ message: "first_name, last_name, email and password are required" }, 400);
+      const { first_name, last_name, email, password, phone } = await req.json();
+      if (!first_name || !last_name || !email || !password || !phone)
+        return json({ message: "first_name, last_name, email, password and phone are required" }, 400);
+      const normalizedPhone = phone.trim();
+      if (!/^03[0-9]{9}$/.test(normalizedPhone))
+        return json({ message: "Phone must be in format 03XXXXXXXXX (11 digits)" }, 400);
+      // Check phone uniqueness (after normalization by DB trigger, stored as +92...)
+      const { data: phoneDup } = await db.from("org_admins").select("id").eq("phone", normalizedPhone).maybeSingle();
+      if (phoneDup) return json({ message: "Phone number already in use" }, 409);
       const hashed = await hashPassword(password);
       const { data, error } = await db
         .from("org_admins")
@@ -657,11 +681,12 @@ export async function handleSuperAdmin(
           last_name: last_name.trim(),
           email: email.trim().toLowerCase(),
           password: hashed,
+          phone: normalizedPhone,
         })
         .select()
         .single();
       if (error) {
-        if (error.code === "23505") return json({ message: "Email already exists" }, 409);
+        if (error.code === "23505") return json({ message: "Email or phone already exists" }, 409);
         throw error;
       }
       return json({ message: "Org admin created", id: data.id }, 201);
@@ -676,11 +701,16 @@ export async function handleSuperAdmin(
   if (orgAdminIdMatch && method === "PUT") {
     const adminId = parseInt(orgAdminIdMatch[2]);
     try {
-      const { first_name, last_name, email } = await req.json();
-      await db
-        .from("org_admins")
-        .update({ first_name, last_name, email: email?.trim().toLowerCase() })
-        .eq("id", adminId);
+      const { first_name, last_name, email, phone } = await req.json();
+      if (!first_name || !last_name || !email || !phone)
+        return json({ message: "first_name, last_name, email and phone are required" }, 400);
+      const normalizedPhone = phone.trim();
+      if (!/^03[0-9]{9}$/.test(normalizedPhone))
+        return json({ message: "Phone must be in format 03XXXXXXXXX (11 digits)" }, 400);
+      // Check uniqueness against another admin
+      const { data: phoneDup } = await db.from("org_admins").select("id").eq("phone", normalizedPhone).neq("id", adminId).maybeSingle();
+      if (phoneDup) return json({ message: "Phone number already in use" }, 409);
+      await db.from("org_admins").update({ first_name: first_name.trim(), last_name: last_name.trim(), email: email.trim().toLowerCase(), phone: normalizedPhone }).eq("id", adminId);
       return json({ message: "Org admin updated" });
     } catch (err) {
       console.error("[super-admin/organizations/:id/org-admins PUT]", err);

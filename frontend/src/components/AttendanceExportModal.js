@@ -150,7 +150,7 @@ export default function AttendanceExportModal({ visible, onClose, onExport, stud
                       <Text style={[styles.pickerRowText, active && { color: C.primary, fontWeight: '700' }]}>
                         {s.first_name} {s.last_name}
                       </Text>
-                      {s.roll_no ? <Text style={styles.pickerRoll}>Roll #{s.roll_no}</Text> : null}
+                      {s.roll_no ? <Text style={styles.pickerRoll}>ID: {s.roll_no}</Text> : null}
                     </View>
                     {active && <Ionicons name="checkmark-circle" size={20} color={C.primary} />}
                   </Pressable>

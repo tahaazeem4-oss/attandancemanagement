@@ -12,9 +12,11 @@ import { C } from '../config/theme';
 
 const ROLE_LABELS = {
   teacher:     'Teacher',
-  admin:       'Admin',
+  admin:       'School Admin',
+  org_admin:   'Org Admin',
   super_admin: 'Super Admin',
   student:     'Student',
+  parent:      'Parent',
 };
 
 export default function ProfileScreen() {
@@ -111,7 +113,7 @@ export default function ProfileScreen() {
           <View style={styles.infoRow}>
             <View style={styles.infoIcon}><Ionicons name="id-card-outline" size={16} color={C.primary} /></View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.infoLabel}>Roll Number</Text>
+              <Text style={styles.infoLabel}>Student ID</Text>
               <Text style={styles.infoValue}>{user.roll_no}</Text>
             </View>
           </View>

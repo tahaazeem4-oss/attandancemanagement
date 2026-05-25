@@ -237,6 +237,14 @@ export default function TeachersManagerScreen({ navigation, mode }) {
     setModal(true);
   };
 
+  // Convert DB-normalized +92XXXXXXXXXX back to 03XXXXXXXXX for the form
+  const normalizePhoneForForm = phone => {
+    if (!phone) return '';
+    // +923001234567 → 03001234567
+    const m = phone.match(/^\+92(\d{10})$/);
+    return m ? '0' + m[1] : phone;
+  };
+
   const openEdit = item => {
     setEditing(item);
     setForm({
@@ -244,7 +252,7 @@ export default function TeachersManagerScreen({ navigation, mode }) {
       last_name: item.last_name || '',
       email: item.email || '',
       password: '',
-      phone: item.phone || '',
+      phone: normalizePhoneForForm(item.phone),
       assignments: item.assignments || [],
       school_id: String(item.school_id || ''),
       teacher_role: item.teacher_role || deriveRoleFromAssignments(item.assignments || []),
@@ -256,8 +264,14 @@ export default function TeachersManagerScreen({ navigation, mode }) {
   };
 
   const handleSave = async () => {
-    if (!form.first_name || !form.last_name || !form.email) {
-      return Alert.alert('Validation', 'First name, last name and email are required.');
+    if (!form.first_name || !form.last_name || !form.email || !form.phone) {
+      return Alert.alert('Validation', 'First name, last name, email and phone are required.');
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+      return Alert.alert('Validation', 'Please enter a valid email address (e.g. teacher@school.com).');
+    }
+    if (!/^03[0-9]{9}$/.test(form.phone.trim()) && !/^\+92[0-9]{10}$/.test(form.phone.trim())) {
+      return Alert.alert('Validation', 'Phone must be 03XXXXXXXXX or +92XXXXXXXXXX format.');
     }
     if (!editing && !form.password) {
       return Alert.alert('Validation', 'Password is required for new teachers.');
@@ -471,7 +485,7 @@ export default function TeachersManagerScreen({ navigation, mode }) {
                   )}
                 </View>
                 <Text style={styles.sub}>{item.email}</Text>
-                {item.phone ? <Text style={styles.sub}>{item.phone}</Text> : null}
+                {item.phone ? <Text style={styles.sub}>{normalizePhoneForForm(item.phone)}</Text> : null}
                 {!!(item.campus_name || item.school_name) && <View style={styles.badge}><Text style={styles.badgeTxt}>{item.campus_name || item.school_name}</Text></View>}
               </View>
               <View style={styles.actionBtns}>
@@ -507,8 +521,8 @@ export default function TeachersManagerScreen({ navigation, mode }) {
               </View>
               <Text style={styles.label}>Email *</Text>
               <TextInput style={styles.input} keyboardType="email-address" autoCapitalize="none" value={form.email} onChangeText={v => F('email', v)} />
-              <Text style={styles.label}>Phone</Text>
-              <TextInput style={styles.input} keyboardType="phone-pad" value={form.phone} onChangeText={v => F('phone', v)} />
+              <Text style={styles.label}>Phone * (03XXXXXXXXX or +92XXXXXXXXXX)</Text>
+              <TextInput style={styles.input} keyboardType="phone-pad" placeholder="03XXXXXXXXX" maxLength={14} value={form.phone} onChangeText={v => F('phone', v)} />
 
               {!editing && (
                 <>

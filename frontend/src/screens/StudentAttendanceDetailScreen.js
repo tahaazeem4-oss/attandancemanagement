@@ -68,7 +68,7 @@ export default function StudentAttendanceDetailScreen({ route, navigation }) {
           <Text style={st.headerName}>{student.first_name} {student.last_name}</Text>
           <Text style={st.headerSub}>
             {class_name}  •  Section {section_name}
-            {student.roll_no ? `  •  Roll #${student.roll_no}` : ''}
+            {student.roll_no ? `  •  ID: ${student.roll_no}` : ''}
           </Text>
         </View>
         <Pressable onPress={handleNotify} style={st.notifyHeaderBtn}>

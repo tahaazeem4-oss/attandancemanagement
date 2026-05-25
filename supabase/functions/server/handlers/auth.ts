@@ -43,15 +43,33 @@ export async function handleAuth(
     try {
       const { email, password } = await req.json();
       if (!email || !password)
-        return json({ message: "Email and password are required" }, 400);
+        return json({ message: "Email or phone and password are required" }, 400);
 
-      const e = email.trim().toLowerCase();
+      const raw = email.trim();
+
+      // Detect phone vs email
+      // Phone patterns: starts with 0, +, or is 10-12 digits
+      const isPhone = /^(\+|00|0)[0-9\s\-]+$/.test(raw) || /^[0-9]{10,12}$/.test(raw.replace(/[\s\-]/g, ""));
+
+      // Normalize Pakistan phone to +92XXXXXXXXXX
+      const normalizePhone = (p: string): string => {
+        const d = p.replace(/[\s\-]/g, "");
+        if (d.startsWith("+92")) return d;
+        if (d.startsWith("0092")) return "+92" + d.slice(4);
+        if (d.startsWith("92") && d.length === 12) return "+" + d;
+        if (d.startsWith("0") && d.length === 11) return "+92" + d.slice(1);
+        if (d.length === 10) return "+92" + d; // 3001234567
+        return d;
+      };
+
+      const e = isPhone ? normalizePhone(raw) : raw.toLowerCase();
+      const col = isPhone ? "phone" : "email";
 
       // 1. Super Admin
       const { data: superAdmins } = await db
         .from("super_admins")
         .select("*")
-        .eq("email", e);
+        .eq(col, e);
       if (superAdmins?.length) {
         const sa = superAdmins[0];
         if (!(await comparePassword(password, sa.password)))
@@ -71,7 +89,7 @@ export async function handleAuth(
       const { data: admins } = await db
         .from("admins")
         .select("*")
-        .eq("email", e);
+        .eq(col, e);
       if (admins?.length) {
         const admin = admins[0];
         if (!(await comparePassword(password, admin.password)))
@@ -93,7 +111,7 @@ export async function handleAuth(
       const { data: teachers } = await db
         .from("teachers")
         .select("*")
-        .eq("email", e);
+        .eq(col, e);
       if (teachers?.length) {
         const t = teachers[0];
         if (!(await comparePassword(password, t.password)))
@@ -124,7 +142,7 @@ export async function handleAuth(
             sections:section_id(section_name)
           )
         `)
-        .eq("email", e);
+        .eq(col, e);
       if (studentAccounts?.length) {
         const a = studentAccounts[0] as {
           id: number;
@@ -185,7 +203,7 @@ export async function handleAuth(
         const { data: orgAdmins } = await db
           .from("org_admins")
           .select("*")
-          .eq("email", e);
+          .eq(col, e);
         if (orgAdmins?.length) {
           const oa = orgAdmins[0];
           if (!(await comparePassword(password, oa.password)))
@@ -195,6 +213,7 @@ export async function handleAuth(
             first_name: oa.first_name,
             last_name: oa.last_name,
             email: oa.email,
+            phone: oa.phone,
             role: "org_admin",
             org_id: oa.org_id,
           };
@@ -209,7 +228,7 @@ export async function handleAuth(
       const { data: parents } = await db
         .from("parents")
         .select("*")
-        .eq("email", e);
+        .eq(col, e);
       if (parents?.length) {
         const p = parents[0];
         if (!(await comparePassword(password, p.password)))
@@ -446,8 +465,10 @@ export async function handleAuth(
       };
       const tableMap: Record<string, string> = {
         super_admin: "super_admins",
+        org_admin: "org_admins",
         admin: "admins",
         teacher: "teachers",
+        parent: "parents",
       };
       const table = tableMap[role];
       if (!table) return json({ message: "Invalid role" }, 400);
@@ -458,7 +479,7 @@ export async function handleAuth(
         .eq("id", id);
       if (!rows?.length) return json({ message: "User not found" }, 404);
       if (!(await comparePassword(old_password, rows[0].password)))
-        return json({ message: "Incorrect current password" }, 401);
+        return json({ message: "Incorrect current password" }, 400);
 
       const hashed = await hashPassword(new_password);
       await db.from(table).update({ password: hashed }).eq("id", id);

@@ -11,6 +11,7 @@ import { C, S } from '../../config/theme';
 import AppHeader from '../../components/AppHeader';
 import ScreenIntroCard from '../../components/ScreenIntroCard';
 import PickerField from '../../components/PickerField';
+import { toLocalPhone } from '../../lib/phoneUtils';
 
 // ── CampusFormModal — add/edit a campus (with branding) ───────
 function CampusFormModal({ visible, campus, orgId, orgs = [], onClose, onSaved }) {
@@ -191,17 +192,20 @@ function ConfirmModal({ visible, title, message, confirmLabel = 'Delete', onConf
 
 // ── AddAdminModal ─────────────────────────────────────────────
 function AddAdminModal({ visible, campusId, onClose, onSaved }) {
-  const [form, setForm] = useState({ first_name: '', last_name: '', email: '', password: '' });
+  const [form, setForm] = useState({ first_name: '', last_name: '', email: '', password: '', phone: '' });
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState('');
 
-  useEffect(() => { setForm({ first_name: '', last_name: '', email: '', password: '' }); setShowPw(false); setError(''); }, [visible]);
+  useEffect(() => { setForm({ first_name: '', last_name: '', email: '', password: '', phone: '' }); setShowPw(false); setError(''); }, [visible]);
   const setF = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   const handleSave = async () => {
-    if (!form.first_name || !form.last_name || !form.email || !form.password) {
+    if (!form.first_name || !form.last_name || !form.email || !form.password || !form.phone) {
       setError('All fields are required.'); return;
+    }
+    if (!/^03[0-9]{9}$/.test(form.phone.trim())) {
+      setError('Phone must be in format 03XXXXXXXXX (11 digits, starts with 03).'); return;
     }
     setLoading(true);
     try {
@@ -234,6 +238,10 @@ function AddAdminModal({ visible, campusId, onClose, onSaved }) {
           <TextInput style={S.input} placeholder="admin@school.com" placeholderTextColor={C.textLight}
             keyboardType="email-address" autoCapitalize="none"
             value={form.email} onChangeText={v => setF('email', v)} />
+          <Text style={S.label}>Phone * (03XXXXXXXXX)</Text>
+          <TextInput style={S.input} placeholder="03XXXXXXXXX" placeholderTextColor={C.textLight}
+            keyboardType="phone-pad" maxLength={11}
+            value={form.phone} onChangeText={v => setF('phone', v)} />
           <Text style={S.label}>Password *</Text>
           <View style={modal.passwordWrap}>
             <TextInput style={[S.input, modal.passwordInput]} placeholder="Min 6 characters" placeholderTextColor={C.textLight}
@@ -256,7 +264,7 @@ function AddAdminModal({ visible, campusId, onClose, onSaved }) {
 
 // ── EditAdminModal ────────────────────────────────────────────
 function EditAdminModal({ visible, admin, campusId, onClose, onSaved }) {
-  const [form,        setForm]        = useState({ first_name: '', last_name: '', email: '' });
+  const [form,        setForm]        = useState({ first_name: '', last_name: '', email: '', phone: '' });
   const [newPassword, setNewPassword] = useState('');
   const [showResetPw, setShowResetPw] = useState(false);
   const [loading,     setLoading]     = useState(false);
@@ -264,7 +272,7 @@ function EditAdminModal({ visible, admin, campusId, onClose, onSaved }) {
   const [error,       setError]       = useState('');
 
   useEffect(() => {
-    if (admin) setForm({ first_name: admin.first_name, last_name: admin.last_name, email: admin.email });
+    if (admin) setForm({ first_name: admin.first_name, last_name: admin.last_name, email: admin.email, phone: toLocalPhone(admin.phone) });
     setNewPassword(''); setShowResetPw(false); setError('');
   }, [admin, visible]);
 
@@ -272,6 +280,9 @@ function EditAdminModal({ visible, admin, campusId, onClose, onSaved }) {
 
   const handleUpdate = async () => {
     if (!form.first_name || !form.last_name || !form.email) { setError('All fields are required.'); return; }
+    if (form.phone && !/^03[0-9]{9}$/.test(form.phone.trim())) {
+      setError('Phone must be in format 03XXXXXXXXX (11 digits, starts with 03).'); return;
+    }
     setLoading(true); setError('');
     try {
       await api.put(`/super-admin/schools/${campusId}/admins/${admin.id}`, form);
@@ -319,6 +330,10 @@ function EditAdminModal({ visible, admin, campusId, onClose, onSaved }) {
           <TextInput style={S.input} placeholderTextColor={C.textLight}
             keyboardType="email-address" autoCapitalize="none"
             value={form.email} onChangeText={v => setF('email', v)} />
+          <Text style={S.label}>Phone (03XXXXXXXXX)</Text>
+          <TextInput style={S.input} placeholder="03XXXXXXXXX" placeholderTextColor={C.textLight}
+            keyboardType="phone-pad" maxLength={11}
+            value={form.phone} onChangeText={v => setF('phone', v)} />
           <Pressable style={editModal.primaryBtn} onPress={handleUpdate} disabled={loading}>
             {loading ? <ActivityIndicator color="#fff" /> : <Text style={editModal.primaryBtnText}>Save Changes</Text>}
           </Pressable>
@@ -397,6 +412,7 @@ function CampusCard({ campus, admins, orgName, onEditCampus, onDeleteCampus, onA
                   <View style={{ flex: 1 }}>
                     <Text style={styles.adminName}>{adm.first_name} {adm.last_name}</Text>
                     <Text style={styles.adminEmail}>{adm.email}</Text>
+                    {!!adm.phone && <Text style={styles.adminPhone}>{toLocalPhone(adm.phone)}</Text>}
                   </View>
                 </View>
                 <View style={styles.adminActionRow}>
@@ -621,6 +637,7 @@ const styles = StyleSheet.create({
   adminAvatarText:   { color: C.primary, fontSize: 12, fontWeight: '800' },
   adminName:         { fontSize: 13, fontWeight: '600', color: C.textDark },
   adminEmail:        { fontSize: 11, color: C.textLight },
+  adminPhone:        { fontSize: 11, color: C.textLight, marginTop: 1 },
   adminActionRow:    { flexDirection: 'row', gap: 8 },
   adminEditBtnFull:  { flex: 1, paddingVertical: 6, borderRadius: 8, backgroundColor: C.card, alignItems: 'center', borderWidth: 1, borderColor: C.border },
   adminEditBtnFullText: { color: C.textMed, fontSize: 11, fontWeight: '600' },

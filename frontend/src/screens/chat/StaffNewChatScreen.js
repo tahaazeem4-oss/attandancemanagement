@@ -288,7 +288,7 @@ export default function StaffNewChatScreen({ navigation }) {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.studentName}>{item.first_name} {item.last_name}</Text>
-                {item.roll_no && <Text style={styles.rollNo}>Roll #: {item.roll_no}</Text>}
+                {item.roll_no && <Text style={styles.rollNo}>Student ID: {item.roll_no}</Text>}
               </View>
               {starting === item.id ? (
                 <ActivityIndicator color={C.primary} />

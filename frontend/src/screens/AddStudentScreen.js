@@ -115,7 +115,7 @@ export default function AddStudentScreen({ navigation }) {
             />
           </View>
           <View style={styles.half}>
-            <Text style={S.label}>Roll No. (opt)</Text>
+            <Text style={S.label}>Student ID (opt)</Text>
             <TextInput
               style={[S.input, { marginBottom: 14 }, focus === 'roll' && styles.inputFocus]}
               placeholder="e.g. 12"

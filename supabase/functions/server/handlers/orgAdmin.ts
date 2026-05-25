@@ -167,7 +167,7 @@ export async function handleOrgAdmin(
       const campusIds = campusId ? [parseInt(campusId)] : await getCampusIds();
       if (!campusIds.length) return json([]);
       const { data } = await db.from("admins")
-        .select("id, first_name, last_name, email, school_id, created_at")
+        .select("id, first_name, last_name, email, phone, school_id, created_at")
         .in("school_id", campusIds).order("last_name");
       const sMap = await buildSchoolMap(campusIds);
       return json((data || []).map((a: Record<string, unknown>) => ({ ...a, campus_name: sMap[a.school_id as number] || null })));
@@ -179,16 +179,19 @@ export async function handleOrgAdmin(
 
   if (path === "/org-admin/admins" && method === "POST") {
     try {
-      const { first_name, last_name, email, password, school_id } = await req.json();
-      if (!first_name || !last_name || !email || !password || !school_id)
-        return json({ message: "Missing required fields" }, 400);
+      const { first_name, last_name, email, password, school_id, phone } = await req.json();
+      if (!first_name || !last_name || !email || !password || !school_id || !phone)
+        return json({ message: "first_name, last_name, email, password, phone and campus are required" }, 400);
       if (!(await verifyCampus(school_id))) return json({ message: "Campus not in your org" }, 403);
+      // Check phone uniqueness
+      const { data: phoneDup } = await db.from("admins").select("id").eq("phone", phone.trim()).maybeSingle();
+      if (phoneDup) return json({ message: "Phone number already in use" }, 409);
       const hashed = await hashPassword(password);
       const { data, error } = await db.from("admins")
-        .insert({ school_id, first_name: first_name.trim(), last_name: last_name.trim(), email: email.trim().toLowerCase(), password: hashed })
+        .insert({ school_id, first_name: first_name.trim(), last_name: last_name.trim(), email: email.trim().toLowerCase(), password: hashed, phone: phone.trim() })
         .select().single();
       if (error) {
-        if (error.code === "23505") return json({ message: "Email already exists" }, 409);
+        if (error.code === "23505") return json({ message: "Email or phone already exists" }, 409);
         throw error;
       }
       return json({ message: "Admin created", id: data.id }, 201);
@@ -202,9 +205,11 @@ export async function handleOrgAdmin(
   if (adminMatch && method === "PUT") {
     const id = parseInt(adminMatch[1]);
     try {
-      const { first_name, last_name, email } = await req.json();
+      const { first_name, last_name, email, phone } = await req.json();
       const campusIds = await getCampusIds();
-      await db.from("admins").update({ first_name, last_name, email: email?.trim().toLowerCase() }).eq("id", id).in("school_id", campusIds);
+      const upd: Record<string, unknown> = { first_name, last_name, email: email?.trim().toLowerCase() };
+      if (phone) upd.phone = phone.trim();
+      await db.from("admins").update(upd).eq("id", id).in("school_id", campusIds);
       return json({ message: "Admin updated" });
     } catch (err) {
       console.error("[org-admin/admins PUT]", err);
@@ -450,6 +455,17 @@ export async function handleOrgAdmin(
       const body = await req.json();
       if (!body.school_id) return json({ message: "school_id required" }, 400);
       if (!(await verifyCampus(body.school_id))) return json({ message: "Campus not in your org" }, 403);
+      // Enforce student ID uniqueness across the whole organization
+      if (body.roll_no) {
+        const campusIds = await getCampusIds();
+        const orgSchoolIds = campusIds.length ? campusIds : [body.school_id];
+        const { data: dup } = await db.from("students").select("id")
+          .in("school_id", orgSchoolIds)
+          .eq("roll_no", String(body.roll_no).trim())
+          .maybeSingle();
+        if (dup)
+          return json({ message: `Student ID "${body.roll_no}" is already in use in this organization.` }, 409);
+      }
       const { data, error } = await db.from("students").insert({ ...body, roll_no: body.roll_no || null }).select().single();
       if (error) throw error;
       return json({ message: "Student created", id: data.id }, 201);
@@ -465,6 +481,16 @@ export async function handleOrgAdmin(
     try {
       const body = await req.json();
       const campusIds = await getCampusIds();
+      // Enforce student ID uniqueness across the whole organization (exclude self)
+      if (body.roll_no) {
+        const { data: dup } = await db.from("students").select("id")
+          .in("school_id", campusIds)
+          .eq("roll_no", String(body.roll_no).trim())
+          .neq("id", id)
+          .maybeSingle();
+        if (dup)
+          return json({ message: `Student ID "${body.roll_no}" is already in use in this organization.` }, 409);
+      }
       await db.from("students").update({ ...body, roll_no: body.roll_no || null }).eq("id", id).in("school_id", campusIds);
       return json({ message: "Student updated" });
     } catch (err) {
@@ -1279,7 +1305,8 @@ export async function handleOrgAdminImportExport(
         const { data: ex } = await db.from("teachers").select("id").eq("email", email).maybeSingle();
         if (ex) { errors.push(`Row ${rowNum}: email "${email}" already exists — skipped`); continue; }
         const hashed = await hashPassword(String(r.password));
-        await db.from("teachers").insert({ school_id: campusId, first_name: r.first_name, last_name: r.last_name, email, password: hashed, phone: r.phone || null });
+        const { error: insertErr } = await db.from("teachers").insert({ school_id: campusId, first_name: r.first_name, last_name: r.last_name, email, password: hashed, phone: r.phone || null, teacher_role: "subject_teacher" });
+        if (insertErr) { errors.push(`Row ${rowNum}: ${insertErr.message}`); continue; }
         created++;
       }
       return json({ message: `Import complete. Created: ${created}, Skipped: ${errors.length}`, created, errors });
@@ -1294,12 +1321,12 @@ export async function handleOrgAdminImportExport(
       const rows: Record<string, unknown>[] = [];
       for (const cls of (classes || []) as any[]) {
         for (const sec of (cls.sections || []) as any[]) {
-          rows.push({ first_name: "Student", last_name: "1", age: 10, roll_no: `${cls.class_name}${sec.section_name}-01`, campus_id: cls.school_id, campus_name: cls.schools?.name, class_id: cls.id, class_name: cls.class_name, section_id: sec.id, section_name: sec.section_name });
+          rows.push({ first_name: "Student", last_name: "1", age: 10, roll_no: `${cls.class_name}${sec.section_name}-01`, campus_name: cls.schools?.name, class_name: cls.class_name, section_name: sec.section_name });
           if (rows.length >= 3) break;
         }
         if (rows.length >= 3) break;
       }
-      if (!rows.length) rows.push({ first_name: "", last_name: "", age: "", roll_no: "", campus_id: "", class_id: "", section_id: "" });
+      if (!rows.length) rows.push({ first_name: "", last_name: "", age: "", roll_no: "", campus_name: "", class_name: "", section_name: "" });
       return xlsxResp(toXlsxOrg(rows, "Students"), "students_template.xlsx");
     } catch (err) { console.error("[org-admin/ie/students/template]", err); return json({ message: "Server error" }, 500); }
   }
@@ -1319,17 +1346,76 @@ export async function handleOrgAdminImportExport(
       if (!file) return json({ message: "No file uploaded" }, 400);
       const rows = parseUploadOrg(await file.arrayBuffer());
       const errors: string[] = []; let created = 0;
+      // Pre-fetch all campuses, classes, and sections for this org in 3 queries total
+      const scopedIds = await getScopedCampusIds();
+      const { data: campusRows } = scopedIds.length
+        ? await db.from("schools").select("id, name").in("id", scopedIds)
+        : { data: [] };
+      const campusByName = new Map<string, number>(); // name_lower → id
+      const verifiedCampusIds = new Set<number>(scopedIds.map(Number));
+      for (const c of (campusRows || []) as any[]) {
+        campusByName.set(String(c.name || "").trim().toLowerCase(), Number(c.id));
+      }
+
+      const { data: allClasses } = scopedIds.length
+        ? await db.from("classes").select("id, class_name, school_id, sections(id, section_name)").in("school_id", scopedIds)
+        : { data: [] };
+      const classByKey = new Map<string, number>(); // `${campusId}:${name_lower}` → classId
+      const classById = new Map<number, number>(); // classId → campusId
+      const sectionByKey = new Map<string, number>(); // `${classId}:${name_lower}` → sectionId
+      const sectionById = new Set<number>();
+      for (const cls of (allClasses || []) as any[]) {
+        classByKey.set(`${cls.school_id}:${String(cls.class_name || "").trim().toLowerCase()}`, Number(cls.id));
+        classById.set(Number(cls.id), Number(cls.school_id));
+        for (const sec of (cls.sections || []) as any[]) {
+          sectionByKey.set(`${cls.id}:${String(sec.section_name || "").trim().toLowerCase()}`, Number(sec.id));
+          sectionById.add(Number(sec.id));
+        }
+      }
+
+      // Validate all rows using in-memory maps (zero DB calls per row)
+      const validRows: Array<{ insert: Record<string, unknown>; rowNum: number }> = [];
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i]; const rowNum = i + 2;
-        if (!r.first_name || !r.last_name || !r.campus_id || !r.class_id || !r.section_id) {
-          errors.push(`Row ${rowNum}: first_name, last_name, campus_id, class_id, section_id are required`); continue;
+        if (!r.first_name || !r.last_name) {
+          errors.push(`Row ${rowNum}: first_name and last_name are required`); continue;
         }
-        const campusId = parseInt(String(r.campus_id));
-        if (!(await verifyCampus(campusId))) { errors.push(`Row ${rowNum}: campus_id ${campusId} not in your org`); continue; }
-        const { data: cls } = await db.from("classes").select("id").eq("id", r.class_id).eq("school_id", campusId).maybeSingle();
-        if (!cls) { errors.push(`Row ${rowNum}: class_id ${r.class_id} not found in campus`); continue; }
-        await db.from("students").insert({ school_id: campusId, first_name: r.first_name, last_name: r.last_name, age: r.age || null, roll_no: r.roll_no || null, class_id: r.class_id, section_id: r.section_id });
-        created++;
+        let campusId: number | null = r.campus_id ? parseInt(String(r.campus_id)) : null;
+        if (campusId && !verifiedCampusIds.has(campusId)) { errors.push(`Row ${rowNum}: campus not in your org`); continue; }
+        if (!campusId && r.campus_name) {
+          campusId = campusByName.get(String(r.campus_name).trim().toLowerCase()) ?? null;
+          if (!campusId) { errors.push(`Row ${rowNum}: campus "${r.campus_name}" not found`); continue; }
+        }
+        if (!campusId) { errors.push(`Row ${rowNum}: campus_name is required`); continue; }
+        let classId: number | null = r.class_id ? Number(r.class_id) : null;
+        if (classId && classById.get(classId) !== campusId) { errors.push(`Row ${rowNum}: class not found in campus`); continue; }
+        if (!classId && r.class_name) {
+          classId = classByKey.get(`${campusId}:${String(r.class_name).trim().toLowerCase()}`) ?? null;
+          if (!classId) { errors.push(`Row ${rowNum}: class "${r.class_name}" not found in campus`); continue; }
+        }
+        if (!classId) { errors.push(`Row ${rowNum}: class_name is required`); continue; }
+        let sectionId: number | null = r.section_id ? Number(r.section_id) : null;
+        if (sectionId && !sectionById.has(sectionId)) { errors.push(`Row ${rowNum}: section not found`); continue; }
+        if (!sectionId && r.section_name) {
+          sectionId = sectionByKey.get(`${classId}:${String(r.section_name).trim().toLowerCase()}`) ?? null;
+          if (!sectionId) { errors.push(`Row ${rowNum}: section "${r.section_name}" not found in class`); continue; }
+        }
+        if (!sectionId) { errors.push(`Row ${rowNum}: section_name is required`); continue; }
+        validRows.push({ rowNum, insert: { school_id: campusId, first_name: r.first_name, last_name: r.last_name, age: r.age ? parseInt(String(r.age), 10) : null, roll_no: r.roll_no || null, class_id: classId, section_id: sectionId } });
+      }
+
+      // Bulk insert in batches of 100
+      const BATCH = 100;
+      for (let i = 0; i < validRows.length; i += BATCH) {
+        const batch = validRows.slice(i, i + BATCH);
+        const { error: bulkErr } = await db.from("students").insert(batch.map(r => r.insert));
+        if (bulkErr) {
+          for (const { insert, rowNum } of batch) {
+            const { error: rowErr } = await db.from("students").insert(insert);
+            if (rowErr) { errors.push(`Row ${rowNum}: ${rowErr.message}`); }
+            else { created++; }
+          }
+        } else { created += batch.length; }
       }
       return json({ message: `Import complete. Created: ${created}, Skipped: ${errors.length}`, created, errors });
     } catch (err) { console.error("[org-admin/ie/students/import]", err); return json({ message: "Server error" }, 500); }
@@ -1372,12 +1458,10 @@ export async function handleOrgAdminImportExport(
         if (!r.campus_id || !r.class_name || !r.section_name) { errors.push(`Row ${rowNum}: campus_id, class_name, section_name are required`); continue; }
         const campusId = parseInt(String(r.campus_id));
         if (!(await verifyCampus(campusId))) { errors.push(`Row ${rowNum}: campus_id ${campusId} not in your org`); continue; }
-        let { data: cls } = await db.from("classes").select("id").eq("class_name", r.class_name).eq("school_id", campusId).maybeSingle();
-        let classId: number;
-        if (!cls) {
-          const { data: newCls } = await db.from("classes").insert({ school_id: campusId, class_name: r.class_name }).select("id").single();
-          classId = newCls!.id;
-        } else { classId = cls.id; }
+        // Class must already exist — do NOT auto-create
+        const { data: cls } = await db.from("classes").select("id").eq("class_name", r.class_name).eq("school_id", campusId).maybeSingle();
+        if (!cls) { errors.push(`Row ${rowNum}: class "${r.class_name}" not found — create the class first`); continue; }
+        const classId: number = cls.id;
         const { data: sec } = await db.from("sections").select("id").eq("class_id", classId).eq("section_name", r.section_name).maybeSingle();
         if (sec) { errors.push(`Row ${rowNum}: ${r.class_name}-${r.section_name} already exists — skipped`); continue; }
         await db.from("sections").insert({ class_id: classId, section_name: r.section_name });

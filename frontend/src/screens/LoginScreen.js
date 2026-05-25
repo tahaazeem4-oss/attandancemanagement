@@ -11,6 +11,20 @@ import { C } from '../config/theme';
 import { LogoHero } from '../components/Logo';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_REGEX = /^(\+92|0092|92|0)[0-9]{9,10}$/;
+
+function normalizeIdentifier(val) {
+  const v = val.trim().replace(/[\s\-]/g, '');
+  // If it looks like a phone, normalize to +92XXXXXXXXXX
+  if (PHONE_REGEX.test(v)) {
+    if (v.startsWith('+92')) return v;
+    if (v.startsWith('0092')) return '+92' + v.slice(4);
+    if (v.startsWith('92') && v.length === 12) return '+' + v;
+    if (v.startsWith('0')) return '+92' + v.slice(1);
+    return '+92' + v;
+  }
+  return v.toLowerCase();
+};
 
 export default function LoginScreen({ navigation }) {
   const { login } = useAuth();
@@ -21,6 +35,8 @@ export default function LoginScreen({ navigation }) {
   const [formError, setFormError] = useState('');
   const [focus,     setFocus]     = useState('');
   const [showPw,    setShowPw]    = useState(false);
+
+  const isPhoneInput = (val) => PHONE_REGEX.test(val.trim());
 
   const cardY    = useRef(new Animated.Value(48)).current;
   const cardFade = useRef(new Animated.Value(0)).current;
@@ -37,9 +53,13 @@ export default function LoginScreen({ navigation }) {
 
   const validate = () => {
     const e = {};
-    if (!email.trim())                        e.email    = 'Email is required.';
-    else if (!EMAIL_REGEX.test(email.trim())) e.email    = 'Enter a valid email.';
-    if (!password)                            e.password = 'Password is required.';
+    const v = email.trim();
+    if (!v) {
+      e.email = 'Email or phone number is required.';
+    } else if (!isPhoneInput(v) && !EMAIL_REGEX.test(v)) {
+      e.email = 'Enter a valid email, or a phone in format 03XXXXXXXXX (11 digits).';
+    }
+    if (!password) e.password = 'Password is required.';
     setErrors(e);
     return !Object.keys(e).length;
   };
@@ -49,9 +69,9 @@ export default function LoginScreen({ navigation }) {
     if (!validate()) return;
     setLoading(true);
     try {
-      await login(email.trim().toLowerCase(), password);
+      await login(normalizeIdentifier(email), password);
     } catch (err) {
-      const msg = err?.response?.data?.message || 'Invalid email or password.';
+      const msg = err?.response?.data?.message || 'Invalid credentials.';
       if (err?.response?.status === 401) setErrors({ password: msg });
       else setFormError(msg);
     } finally {
@@ -66,25 +86,36 @@ export default function LoginScreen({ navigation }) {
   return (
     <KeyboardAvoidingView
       style={styles.root}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior="padding"
     >
+      <StatusBar barStyle="light-content" backgroundColor={C.brandDeep} />
+      <LinearGradient
+        colors={C.brandGradient}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      >
+        <View style={styles.deco1} pointerEvents="none" />
+        <View style={styles.deco2} pointerEvents="none" />
+      </LinearGradient>
+
       <ScrollView
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ flexGrow: 1 }}
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        contentInsetAdjustmentBehavior="never"
+        automaticallyAdjustKeyboardInsets={false}
+        automaticallyAdjustContentInsets={false}
       >
-      <StatusBar barStyle="light-content" backgroundColor={C.brandDeep} />
+        <View style={styles.hero}>
+          <LogoHero markSize={78} />
+        </View>
 
-      <LinearGradient colors={C.brandGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
-        <View style={styles.deco1} pointerEvents="none" />
-        <View style={styles.deco2} pointerEvents="none" />
-        <LogoHero markSize={72} />
-      </LinearGradient>
-
-      <Animated.View style={[styles.card, { opacity: cardFade, transform: [{ translateY: cardY }] }]}>
-        <View style={{ paddingBottom: 8 }}>
-          <Text style={styles.heading}>Welcome back</Text>
-          <Text style={styles.sub}>Sign in to your account</Text>
+        <Animated.View style={[styles.card, { opacity: cardFade, transform: [{ translateY: cardY }] }]}>
+          <View style={styles.cardInner}>
+          <Text style={styles.heading}>Track. Teach. Transform.</Text>
+          <Text style={styles.sub}>Sign in to continue to your dashboard</Text>
 
           {!!formError && (
             <View style={styles.errorBanner}>
@@ -92,13 +123,14 @@ export default function LoginScreen({ navigation }) {
             </View>
           )}
 
-          <Text style={styles.label}>Email Address</Text>
+          <Text style={styles.label}>Email or Phone Number</Text>
           <TextInput
             style={[styles.input, errors.email && styles.inputErr, focus === 'email' && styles.inputFocus]}
-            placeholder="teacher@school.com"
+            placeholder="email@school.com  or  03XXXXXXXXX"
             placeholderTextColor="#94A3B8"
-            keyboardType="email-address"
+            keyboardType="default"
             autoCapitalize="none"
+            autoCorrect={false}
             returnKeyType="next"
             value={email}
             onFocus={() => setFocus('email')}
@@ -145,21 +177,24 @@ export default function LoginScreen({ navigation }) {
               </LinearGradient>
             </Animated.View>
           </Pressable>
-        </View>
-      </Animated.View>
+          </View>
+        </Animated.View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.brandBright },
+  root: { flex: 1, backgroundColor: C.brandDeep },
+  scroll: { backgroundColor: 'transparent' },
+  scrollContent: { flexGrow: 1, backgroundColor: 'transparent', paddingHorizontal: 20, paddingBottom: 32, justifyContent: 'center' },
 
   hero: {
-    flex: 0.40,
+    paddingTop: 48,
+    paddingBottom: 28,
+    paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
   },
   deco1: {
     position: 'absolute', width: 280, height: 280, borderRadius: 140,
@@ -172,14 +207,18 @@ const styles = StyleSheet.create({
 
   card: {
     backgroundColor: '#fff',
-    borderTopLeftRadius: 28, borderTopRightRadius: 28,
-    paddingHorizontal: 28, paddingTop: 32, paddingBottom: 20,
-    shadowColor: '#000', shadowOpacity: 0.16,
-    shadowRadius: 20, shadowOffset: { width: 0, height: -4 },
+    borderRadius: 24,
+    shadowColor: '#000', shadowOpacity: 0.18,
+    shadowRadius: 22, shadowOffset: { width: 0, height: 8 },
     elevation: 14,
   },
+  cardInner: {
+    paddingHorizontal: 24,
+    paddingTop: 32,
+    paddingBottom: 32,
+  },
   heading: { fontSize: 22, fontWeight: '800', color: C.textDark, marginBottom: 4 },
-  sub:     { fontSize: 14, color: '#64748B', marginBottom: 24 },
+  sub:     { fontSize: 14, color: '#64748B', marginBottom: 28 },
 
   errorBanner:     { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', borderRadius: 10, padding: 12, marginBottom: 16 },
   errorBannerText: { color: '#DC2626', fontSize: 13, textAlign: 'center' },
@@ -209,7 +248,9 @@ const styles = StyleSheet.create({
   forgotText: { color: C.primary, fontSize: 13, fontWeight: '600' },
 
   btn: {
-    borderRadius: 13, paddingVertical: 15, alignItems: 'center',
+    marginTop: 6,
+    marginBottom: 8,
+    borderRadius: 13, paddingVertical: 16, alignItems: 'center',
     shadowColor: C.primaryDark, shadowOpacity: 0.35, shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 }, elevation: 7,
   },

@@ -231,7 +231,7 @@ export default function LeaveRequestsManagerScreen({ navigation, mode }) {
             <Text style={styles.studentName}>{studentName}</Text>
             <Text style={styles.meta}>
               {item.class_name} · Section {item.section_name}
-              {item.roll_no ? ` · Roll #${item.roll_no}` : ''}
+              {item.roll_no ? ` · ID: ${item.roll_no}` : ''}
               {isOrg && campusName ? ` · ${campusName}` : ''}
             </Text>
             <Text style={styles.date}>

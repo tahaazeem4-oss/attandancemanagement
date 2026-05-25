@@ -63,6 +63,32 @@ function parseUpload(buffer: ArrayBuffer): Record<string, unknown>[] {
   return XLSX.utils.sheet_to_json(ws, { defval: "" }) as Record<string, unknown>[];
 }
 
+/**
+ * Validates a phone number for import rows.
+ * Accepted formats (Pakistan):
+ *   03XXXXXXXXX  — exactly 11 characters
+ *   92XXXXXXXXXX — exactly 12 digits
+ *   +92XXXXXXXXXX — exactly 13 characters
+ * Returns an error string if invalid, or null if valid/absent.
+ */
+function validateImportPhone(raw: unknown, rowNum: number): string | null {
+  if (!raw || String(raw).trim() === "") return null; // phone is optional
+  const p = String(raw).trim();
+  if (p.startsWith("+92")) {
+    if (p.length !== 13 || !/^\+92\d{10}$/.test(p))
+      return `Row ${rowNum}: Phone "${p}" starting with +92 must be exactly 13 characters (+92 followed by 10 digits)`;
+  } else if (p.startsWith("92")) {
+    if (p.length !== 12 || !/^92\d{10}$/.test(p))
+      return `Row ${rowNum}: Phone "${p}" starting with 92 must be exactly 12 digits (92 followed by 10 digits)`;
+  } else if (p.startsWith("03")) {
+    if (p.length !== 11 || !/^03\d{9}$/.test(p))
+      return `Row ${rowNum}: Phone "${p}" starting with 03 must be exactly 11 digits (03 followed by 9 digits)`;
+  } else {
+    return `Row ${rowNum}: Phone "${p}" is not a valid Pakistan number — must start with 03 (11 digits), 92 (12 digits), or +92 (13 characters)`;
+  }
+  return null;
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 
 export async function handleImportExport(
@@ -146,6 +172,10 @@ export async function handleImportExport(
           errors.push(`Row ${rowNum}: first_name, last_name, email, password are required`);
           continue;
         }
+        if (r.phone) {
+          const phoneErr = validateImportPhone(r.phone, rowNum);
+          if (phoneErr) { errors.push(phoneErr); continue; }
+        }
         const email = String(r.email).trim().toLowerCase();
         const { data: ex } = await db.from("teachers").select("id").eq("email", email).maybeSingle();
         if (ex) {
@@ -153,14 +183,16 @@ export async function handleImportExport(
           continue;
         }
         const hashed = await hashPassword(String(r.password));
-        await db.from("teachers").insert({
+        const { error: insertErr } = await db.from("teachers").insert({
           school_id: schoolId,
           first_name: r.first_name,
           last_name: r.last_name,
           email,
           password: hashed,
           phone: r.phone || null,
+          teacher_role: "subject_teacher",
         });
+        if (insertErr) { errors.push(`Row ${rowNum}: ${insertErr.message}`); continue; }
         created++;
       }
 
@@ -188,9 +220,7 @@ export async function handleImportExport(
             first_name: "Student",
             last_name: "1",
             age: 10,
-            roll_no: `${cls.class_name}${sec.section_name}-01`,
-            class_id: cls.id,
-            section_id: sec.id,
+            student_id: `${cls.class_name}${sec.section_name}-01`,
             class_name: cls.class_name,
             section_name: sec.section_name,
           });
@@ -200,7 +230,7 @@ export async function handleImportExport(
       }
 
       if (!rows.length)
-        rows.push({ first_name: "", last_name: "", age: "", roll_no: "", class_id: "", section_id: "" });
+        rows.push({ first_name: "", last_name: "", age: "", student_id: "", class_name: "", section_name: "" });
 
       return xlsxResponse(toXlsx(rows, "Students"), "students_template.xlsx");
     } catch (err) {
@@ -221,7 +251,7 @@ export async function handleImportExport(
         first_name: s.first_name,
         last_name: s.last_name,
         age: s.age,
-        roll_no: s.roll_no || "",
+        student_id: s.roll_no || "",
         class_name: s.classes?.class_name,
         section_name: s.sections?.section_name,
         class_id: s.class_id,
@@ -244,33 +274,77 @@ export async function handleImportExport(
       const errors: string[] = [];
       let created = 0;
 
+      // Pre-fetch all classes + sections for this school in ONE query (avoids N×3 DB calls per row)
+      const { data: allClasses } = await db
+        .from("classes")
+        .select("id, class_name, sections(id, section_name)")
+        .eq("school_id", schoolId);
+
+      const classByName = new Map<string, number>();
+      const classById = new Set<number>();
+      const sectionByKey = new Map<string, number>(); // `${classId}:${name_lower}` → sectionId
+      const sectionById = new Set<number>();
+      for (const cls of (allClasses || []) as any[]) {
+        classByName.set(String(cls.class_name || "").trim().toLowerCase(), Number(cls.id));
+        classById.add(Number(cls.id));
+        for (const sec of (cls.sections || []) as any[]) {
+          sectionByKey.set(`${cls.id}:${String(sec.section_name || "").trim().toLowerCase()}`, Number(sec.id));
+          sectionById.add(Number(sec.id));
+        }
+      }
+
+      // Validate all rows using in-memory maps (zero DB calls per row)
+      const validRows: Array<{ insert: Record<string, unknown>; rowNum: number }> = [];
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i];
         const rowNum = i + 2;
-        if (!r.first_name || !r.last_name || !r.class_id || !r.section_id) {
-          errors.push(`Row ${rowNum}: first_name, last_name, class_id, section_id are required`);
+        if (!r.first_name || !r.last_name) {
+          errors.push(`Row ${rowNum}: first_name and last_name are required`);
           continue;
         }
-        const { data: cls } = await db
-          .from("classes")
-          .select("id")
-          .eq("id", r.class_id)
-          .eq("school_id", schoolId)
-          .maybeSingle();
-        if (!cls) {
-          errors.push(`Row ${rowNum}: class_id ${r.class_id} not found`);
-          continue;
+        let classId: number | null = r.class_id ? Number(r.class_id) : null;
+        if (classId && !classById.has(classId)) { errors.push(`Row ${rowNum}: class not found in this school`); continue; }
+        if (!classId && r.class_name) {
+          classId = classByName.get(String(r.class_name).trim().toLowerCase()) ?? null;
+          if (!classId) { errors.push(`Row ${rowNum}: class "${r.class_name}" not found`); continue; }
         }
-        await db.from("students").insert({
-          school_id: schoolId,
-          first_name: r.first_name,
-          last_name: r.last_name,
-          age: r.age || null,
-          roll_no: r.roll_no || null,
-          class_id: r.class_id,
-          section_id: r.section_id,
+        if (!classId) { errors.push(`Row ${rowNum}: class_name is required`); continue; }
+        let sectionId: number | null = r.section_id ? Number(r.section_id) : null;
+        if (sectionId && !sectionById.has(sectionId)) { errors.push(`Row ${rowNum}: section not found`); continue; }
+        if (!sectionId && r.section_name) {
+          sectionId = sectionByKey.get(`${classId}:${String(r.section_name).trim().toLowerCase()}`) ?? null;
+          if (!sectionId) { errors.push(`Row ${rowNum}: section "${r.section_name}" not found in class`); continue; }
+        }
+        if (!sectionId) { errors.push(`Row ${rowNum}: section_name is required`); continue; }
+        validRows.push({
+          rowNum,
+          insert: {
+            school_id: schoolId,
+            first_name: r.first_name,
+            last_name: r.last_name,
+            age: r.age ? parseInt(String(r.age), 10) : null,
+            roll_no: (r.student_id || r.roll_no) ? String(r.student_id || r.roll_no).trim() : null,
+            class_id: classId,
+            section_id: sectionId,
+          },
         });
-        created++;
+      }
+
+      // Bulk insert in batches of 100 (avoids individual inserts for large files)
+      const BATCH = 100;
+      for (let i = 0; i < validRows.length; i += BATCH) {
+        const batch = validRows.slice(i, i + BATCH);
+        const { error: bulkErr } = await db.from("students").insert(batch.map(r => r.insert));
+        if (bulkErr) {
+          // Batch failed (e.g. duplicate roll_no) — retry one-by-one to isolate bad rows
+          for (const { insert, rowNum } of batch) {
+            const { error: rowErr } = await db.from("students").insert(insert);
+            if (rowErr) { errors.push(`Row ${rowNum}: ${rowErr.message}`); }
+            else { created++; }
+          }
+        } else {
+          created += batch.length;
+        }
       }
 
       return json({ message: `Import complete. Created: ${created}, Skipped: ${errors.length}`, created, errors });
@@ -400,27 +474,21 @@ export async function handleImportExport(
           continue;
         }
 
-        // Find or create class
-        let { data: cls } = await db
+        // Class must already exist — do NOT auto-create
+        const { data: cls } = await db
           .from("classes")
           .select("id")
           .eq("class_name", r.class_name)
           .eq("school_id", schoolId)
           .maybeSingle();
 
-        let classId: number;
         if (!cls) {
-          const { data: newCls } = await db
-            .from("classes")
-            .insert({ school_id: schoolId, class_name: r.class_name })
-            .select("id")
-            .single();
-          classId = newCls!.id;
-        } else {
-          classId = cls.id;
+          errors.push(`Row ${rowNum}: class "${r.class_name}" not found — create the class first`);
+          continue;
         }
+        const classId: number = cls.id;
 
-        // Find or create section
+        // Section must not already exist in this class
         const { data: sec } = await db
           .from("sections")
           .select("id")
@@ -439,6 +507,121 @@ export async function handleImportExport(
       return json({ message: `Import complete. Created: ${created}, Skipped: ${errors.length}`, created, errors });
     } catch (err) {
       console.error("[import-export/classes/import]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── PARENTS ───────────────────────────────────────────────────
+
+  if (path === "/import-export/parents/template" && method === "GET") {
+    const sample = [
+      { first_name: "Sara", last_name: "Ali", email: "sara@parent.com", password: "Pass@123", phone: "03001234567", student_roll_no: "" },
+      { first_name: "Usman", last_name: "Khan", email: "usman@parent.com", password: "Pass@123", phone: "03009876543", student_roll_no: "Grade1A-01" },
+    ];
+    return xlsxResponse(toXlsx(sample, "Parents"), "parents_template.xlsx");
+  }
+
+  if (path === "/import-export/parents/export" && method === "GET") {
+    try {
+      const { data: parents } = await db
+        .from("parents")
+        .select("id, first_name, last_name, email, phone")
+        .eq("school_id", schoolId)
+        .order("last_name");
+
+      const parentIds = (parents || []).map((p: any) => p.id as number);
+      const { data: links } = parentIds.length
+        ? await db.from("parent_student").select("parent_id, student_id, students(roll_no)").in("parent_id", parentIds)
+        : { data: [] };
+
+      const firstStudentByParent = new Map<number, string>();
+      for (const link of (links || []) as any[]) {
+        if (!firstStudentByParent.has(link.parent_id) && link.students?.roll_no) {
+          firstStudentByParent.set(link.parent_id, link.students.roll_no);
+        }
+      }
+
+      const rows = (parents || []).map((p: any) => ({
+        first_name: p.first_name || "",
+        last_name: p.last_name || "",
+        email: p.email,
+        phone: p.phone || "",
+        student_roll_no: firstStudentByParent.get(p.id) || "",
+      }));
+      return exportResponse(rows as Record<string, unknown>[], "Parents", "parents_export.xlsx", url);
+    } catch (err) {
+      console.error("[import-export/parents/export]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  if (path === "/import-export/parents/import" && method === "POST") {
+    try {
+      const formData = await req.formData();
+      const file = formData.get("file") as File | null;
+      if (!file) return json({ message: "No file uploaded" }, 400);
+
+      const rows = parseUpload(await file.arrayBuffer());
+      const errors: string[] = [];
+      let created = 0;
+
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        const rowNum = i + 2;
+        if (!r.email || !r.password) {
+          errors.push(`Row ${rowNum}: email and password are required`);
+          continue;
+        }
+        if (r.phone) {
+          const phoneErr = validateImportPhone(r.phone, rowNum);
+          if (phoneErr) { errors.push(phoneErr); continue; }
+        }
+        const emailLower = String(r.email).trim().toLowerCase();
+        // Check for duplicate email
+        const { data: dup } = await db.from("parents").select("id").eq("email", emailLower).maybeSingle();
+        if (dup) { errors.push(`Row ${rowNum}: email "${emailLower}" already exists — skipped`); continue; }
+
+        const hashed = await hashPassword(String(r.password));
+        const { data: parent, error: insertErr } = await db.from("parents").insert({
+          school_id: schoolId,
+          email: emailLower,
+          password: hashed,
+          first_name: r.first_name ? String(r.first_name).trim() : null,
+          last_name: r.last_name ? String(r.last_name).trim() : null,
+          phone: r.phone ? String(r.phone).trim() : null,
+        }).select("id").single();
+        if (insertErr) { errors.push(`Row ${rowNum}: ${insertErr.message}`); continue; }
+
+        // Register campus access
+        await db.from("parent_school_access")
+          .insert({ parent_id: parent.id, school_id: schoolId })
+          .then(() => {}).catch(() => {});
+
+        // Optionally link to student by roll_no
+        if (r.student_roll_no && String(r.student_roll_no).trim()) {
+          const rollNo = String(r.student_roll_no).trim();
+          const { data: student } = await db.from("students").select("id")
+            .eq("school_id", schoolId).eq("roll_no", rollNo).maybeSingle();
+          if (!student) {
+            errors.push(`Row ${rowNum}: parent created but student with roll_no "${rollNo}" not found — not linked`);
+          } else {
+            const { data: existingLink } = await db.from("parent_student").select("id")
+              .eq("student_id", student.id).maybeSingle();
+            if (existingLink) {
+              errors.push(`Row ${rowNum}: parent created but student "${rollNo}" is already linked to another parent`);
+            } else {
+              await db.from("parent_student").insert({
+                parent_id: parent.id, student_id: student.id, relationship: "parent", verified: true,
+              }).then(() => {}).catch(() => {});
+            }
+          }
+        }
+        created++;
+      }
+
+      return json({ message: `Import complete. Created: ${created}, Skipped: ${errors.length}`, created, errors });
+    } catch (err) {
+      console.error("[import-export/parents/import]", err);
       return json({ message: "Server error" }, 500);
     }
   }

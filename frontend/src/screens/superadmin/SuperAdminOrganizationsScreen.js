@@ -8,6 +8,7 @@ import api from '../../services/api';
 import { C, S } from '../../config/theme';
 import AppHeader from '../../components/AppHeader';
 import ScreenIntroCard from '../../components/ScreenIntroCard';
+import { toLocalPhone } from '../../lib/phoneUtils';
 
 // ── Shared helpers ────────────────────────────────────────────
 function ConfirmModal({ visible, title, message, confirmLabel = 'Delete', onConfirm, onCancel, loading }) {
@@ -93,13 +94,13 @@ function OrgFormModal({ visible, org, onClose, onSaved }) {
 
 // ── AddOrgAdminModal ──────────────────────────────────────────
 function AddOrgAdminModal({ visible, orgId, onClose, onSaved }) {
-  const [form, setForm] = useState({ first_name: '', last_name: '', email: '', password: '' });
+  const [form, setForm] = useState({ first_name: '', last_name: '', email: '', password: '', phone: '' });
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    setForm({ first_name: '', last_name: '', email: '', password: '' });
+    setForm({ first_name: '', last_name: '', email: '', password: '', phone: '' });
     setShowPw(false);
     setError('');
   }, [visible]);
@@ -107,12 +108,15 @@ function AddOrgAdminModal({ visible, orgId, onClose, onSaved }) {
   const setF = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   const handleSave = async () => {
-    if (!form.first_name || !form.last_name || !form.email || !form.password) {
-      setError('All fields are required.'); return;
+    if (!form.first_name || !form.last_name || !form.email || !form.password || !form.phone) {
+      setError('All fields including phone are required.'); return;
+    }
+    if (!/^03[0-9]{9}$/.test(form.phone.trim())) {
+      setError('Phone must be in format 03XXXXXXXXX (11 digits, starts with 03, no spaces).'); return;
     }
     setLoading(true);
     try {
-      await api.post(`/super-admin/organizations/${orgId}/org-admins`, form);
+      await api.post(`/super-admin/organizations/${orgId}/org-admins`, { ...form, phone: form.phone.trim() });
       onSaved();
     } catch (e) {
       setError(e?.response?.data?.message || 'Failed to add org admin.');
@@ -141,6 +145,10 @@ function AddOrgAdminModal({ visible, orgId, onClose, onSaved }) {
           <TextInput style={S.input} placeholder="orgadmin@example.com" placeholderTextColor={C.textLight}
             keyboardType="email-address" autoCapitalize="none"
             value={form.email} onChangeText={v => setF('email', v)} />
+          <Text style={S.label}>Phone * (03XXXXXXXXX)</Text>
+          <TextInput style={S.input} placeholder="03XXXXXXXXX" placeholderTextColor={C.textLight}
+            keyboardType="phone-pad" maxLength={11}
+            value={form.phone} onChangeText={v => setF('phone', v)} />
           <Text style={S.label}>Password *</Text>
           <View style={m.passwordWrap}>
             <TextInput style={[S.input, m.passwordInput]} placeholder="Min 6 characters" placeholderTextColor={C.textLight}
@@ -163,7 +171,7 @@ function AddOrgAdminModal({ visible, orgId, onClose, onSaved }) {
 
 // ── EditOrgAdminModal ─────────────────────────────────────────
 function EditOrgAdminModal({ visible, admin, orgId, onClose, onSaved }) {
-  const [form, setForm] = useState({ first_name: '', last_name: '', email: '' });
+  const [form, setForm] = useState({ first_name: '', last_name: '', email: '', phone: '' });
   const [newPassword, setNewPassword] = useState('');
   const [showResetPw, setShowResetPw] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -171,17 +179,18 @@ function EditOrgAdminModal({ visible, admin, orgId, onClose, onSaved }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (admin) setForm({ first_name: admin.first_name, last_name: admin.last_name, email: admin.email });
+    if (admin) setForm({ first_name: admin.first_name, last_name: admin.last_name, email: admin.email, phone: toLocalPhone(admin.phone) });
     setNewPassword(''); setShowResetPw(false); setError('');
   }, [admin, visible]);
 
   const setF = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   const handleUpdate = async () => {
-    if (!form.first_name || !form.last_name || !form.email) { setError('All fields are required.'); return; }
+    if (!form.first_name || !form.last_name || !form.email || !form.phone) { setError('All fields including phone are required.'); return; }
+    if (!/^03[0-9]{9}$/.test(form.phone.trim())) { setError('Phone must be in format 03XXXXXXXXX (11 digits, starts with 03).'); return; }
     setLoading(true); setError('');
     try {
-      await api.put(`/super-admin/organizations/${orgId}/org-admins/${admin.id}`, form);
+      await api.put(`/super-admin/organizations/${orgId}/org-admins/${admin.id}`, { ...form, phone: form.phone.trim() });
       onSaved();
     } catch (e) {
       setError(e?.response?.data?.message || 'Failed to update.');
@@ -226,6 +235,10 @@ function EditOrgAdminModal({ visible, admin, orgId, onClose, onSaved }) {
           <TextInput style={S.input} placeholderTextColor={C.textLight}
             keyboardType="email-address" autoCapitalize="none"
             value={form.email} onChangeText={v => setF('email', v)} />
+          <Text style={S.label}>Phone (03XXXXXXXXX)</Text>
+          <TextInput style={S.input} placeholderTextColor={C.textLight}
+            keyboardType="phone-pad" placeholder="03XXXXXXXXX" maxLength={11}
+            value={form.phone} onChangeText={v => setF('phone', v)} />
           <Pressable style={em.primaryBtn} onPress={handleUpdate} disabled={loading}>
             {loading ? <ActivityIndicator color="#fff" /> : <Text style={em.primaryBtnText}>Save Changes</Text>}
           </Pressable>
@@ -309,6 +322,7 @@ function OrgCard({ org, orgAdmins, campuses, onEdit, onDelete, onAddAdmin, onEdi
                   <View style={{ flex: 1 }}>
                     <Text style={styles.adminName}>{adm.first_name} {adm.last_name}</Text>
                     <Text style={styles.adminEmail}>{adm.email}</Text>
+                    {!!adm.phone && <Text style={styles.adminEmail}>{toLocalPhone(adm.phone)}</Text>}
                   </View>
                 </View>
                 <View style={styles.adminActionRow}>

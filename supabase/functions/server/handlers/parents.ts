@@ -26,14 +26,26 @@ export async function handleParent(
     try {
       const { email, password } = await req.json();
       if (!email || !password)
-        return json({ message: "Email and password are required" }, 400);
+        return json({ message: "Email or phone and password are required" }, 400);
 
+      const raw = email.trim();
+      const isPhone = /^(\+|00|0)[0-9\s\-]+$/.test(raw) || /^[0-9]{10,12}$/.test(raw.replace(/[\s\-]/g, ""));
+      const normalizePhone = (p: string): string => {
+        const d = p.replace(/[\s\-]/g, "");
+        if (d.startsWith("+92")) return d;
+        if (d.startsWith("0092")) return "+92" + d.slice(4);
+        if (d.startsWith("92") && d.length === 12) return "+" + d;
+        if (d.startsWith("0") && d.length === 11) return "+92" + d.slice(1);
+        if (d.length === 10) return "+92" + d;
+        return d;
+      };
+      const lookupVal = isPhone ? normalizePhone(raw) : raw.toLowerCase();
+      const col = isPhone ? "phone" : "email";
 
-      const lookupEmail = email.trim().toLowerCase();
       const { data: parent, error } = await db
         .from("parents")
-        .select("id, email, first_name, last_name, school_id, password")
-        .eq("email", lookupEmail)
+        .select("id, email, phone, first_name, last_name, school_id, password")
+        .eq(col, lookupVal)
         .single();
 
       if (error || !parent)

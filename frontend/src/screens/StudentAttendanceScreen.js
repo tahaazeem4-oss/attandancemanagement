@@ -4,14 +4,19 @@ import {
   StyleSheet, Alert, ActivityIndicator, Animated, RefreshControl
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
 import { C } from '../config/theme';
 import AppHeader from '../components/AppHeader';
 import ScreenIntroCard from '../components/ScreenIntroCard';
 
 const STATUS_OPTIONS = ['present', 'absent', 'leave'];
-const STATUS_COLOR   = { present: C.present,  absent: C.absent,  leave: C.leave };
-const STATUS_BG      = { present: C.presentBg, absent: C.absentBg, leave: C.leaveBg };
+const STATUS_COLOR   = { present: '#10B981', absent: '#EF4444', leave: '#F59E0B' };
+const STATUS_BG      = { present: '#ECFDF5', absent: '#FEF2F2', leave: '#FFFBEB' };
+const STATUS_BORDER  = { present: '#6EE7B7', absent: '#FCA5A5', leave: '#FCD34D' };
+const STATUS_ICON    = { present: 'checkmark',  absent: 'close',  leave: 'calendar-outline' };
+const STATUS_LABEL   = { present: 'Present',    absent: 'Absent', leave: 'Leave' };
+const STATUS_DARK    = { present: '#059669',    absent: '#DC2626', leave: '#D97706' };
 
 export default function StudentAttendanceScreen({ navigation, route }) {
   const { class_id, section_id, class_name, section_name } = route.params;
@@ -85,6 +90,105 @@ export default function StudentAttendanceScreen({ navigation, route }) {
     setAttendance(prev => ({ ...prev, [studentId]: status }));
   };
 
+  // ── Animated status chip ─────────────────────────────────────
+  function StatusChip({ status, selected, onPress }) {
+    const scale = useRef(new Animated.Value(1)).current;
+    const handlePress = () => {
+      Animated.sequence([
+        Animated.spring(scale, { toValue: 0.88, useNativeDriver: true, speed: 80, bounciness: 0 }),
+        Animated.spring(scale, { toValue: 1.06, useNativeDriver: true, speed: 80, bounciness: 12 }),
+        Animated.spring(scale, { toValue: 1,    useNativeDriver: true, speed: 50, bounciness: 4 }),
+      ]).start();
+      onPress();
+    };
+
+    const bg     = selected ? STATUS_COLOR[status]   : '#F8FAFC';
+    const border = selected ? STATUS_COLOR[status]   : C.border;
+    const color  = selected ? '#FFFFFF'              : '#94A3B8';
+    const shadow = selected ? STATUS_COLOR[status]   : 'transparent';
+
+    return (
+      <Animated.View style={{ transform: [{ scale }] }}>
+        <Pressable
+          onPress={handlePress}
+          style={[
+            styles.chip,
+            { backgroundColor: bg, borderColor: border, shadowColor: shadow },
+          ]}
+        >
+          <Ionicons name={STATUS_ICON[status]} size={14} color={color} />
+          <Text style={[styles.chipText, { color }]}>{STATUS_LABEL[status]}</Text>
+        </Pressable>
+      </Animated.View>
+    );
+  }
+
+  // ── Animated student row ─────────────────────────────────────
+  function StudentRow({ item, index }) {
+    const isLocked = !!lockedStudents[item.id];
+    const status   = attendance[item.id];
+    const fadeIn   = useRef(new Animated.Value(0)).current;
+    const slideIn  = useRef(new Animated.Value(18)).current;
+
+    useEffect(() => {
+      Animated.parallel([
+        Animated.timing(fadeIn,  { toValue: 1, duration: 280, delay: index * 40, useNativeDriver: true }),
+        Animated.spring(slideIn, { toValue: 0, speed: 18, bounciness: 6, delay: index * 40, useNativeDriver: true }),
+      ]).start();
+    }, []);
+
+    const rowBg     = status ? STATUS_BG[status]     : C.card;
+    const accentClr = status ? STATUS_COLOR[status]  : 'transparent';
+    const avatarBg  = status ? STATUS_BG[status]     : '#EFF6FF';
+    const avatarTxt = status ? STATUS_DARK[status]   : C.primary;
+
+    return (
+      <Animated.View style={{ opacity: fadeIn, transform: [{ translateY: slideIn }] }}>
+        <View style={[styles.studentRow, { backgroundColor: rowBg, borderLeftColor: accentClr }]}>
+          {/* Avatar */}
+          <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
+            {status ? (
+              <Ionicons name={STATUS_ICON[status]} size={16} color={avatarTxt} />
+            ) : (
+              <Text style={[styles.avatarText, { color: avatarTxt }]}>
+                {item.first_name[0]}{item.last_name[0]}
+              </Text>
+            )}
+          </View>
+
+          {/* Name */}
+          <View style={styles.studentInfo}>
+            <Text style={styles.studentName}>{item.first_name} {item.last_name}</Text>
+            {item.roll_no
+              ? <Text style={styles.rollNo}>ID: {item.roll_no}</Text>
+              : <Text style={[styles.rollNo, { color: status ? STATUS_COLOR[status] : '#CBD5E1' }]}>
+                  {status ? STATUS_LABEL[status] : '— not marked'}
+                </Text>}
+          </View>
+
+          {/* Buttons or lock badge */}
+          {isLocked ? (
+            <View style={styles.leaveLockBadge}>
+              <Ionicons name="lock-closed" size={12} color="#059669" />
+              <Text style={styles.leaveLockText}>On Leave</Text>
+            </View>
+          ) : (
+            <View style={styles.toggles}>
+              {STATUS_OPTIONS.map(s => (
+                <StatusChip
+                  key={s}
+                  status={s}
+                  selected={status === s}
+                  onPress={() => toggle(item.id, s)}
+                />
+              ))}
+            </View>
+          )}
+        </View>
+      </Animated.View>
+    );
+  }
+
   const handleSubmit = async () => {
     const nonLocked = students.filter(s => !lockedStudents[s.id]);
     if (nonLocked.length === 0) return Alert.alert('Info', 'All students have approved leave for today.');
@@ -136,13 +240,15 @@ export default function StudentAttendanceScreen({ navigation, route }) {
       {/* Summary pills */}
       <View style={styles.summary}>
         {Object.entries(counts).map(([key, val]) => (
-          <View key={key} style={[styles.summaryItem, { backgroundColor: STATUS_BG[key] }]}>
-            <Text style={[styles.summaryNum, { color: STATUS_COLOR[key] }]}>{val}</Text>
-            <Text style={[styles.summaryLabel, { color: STATUS_COLOR[key] }]}>{key.toUpperCase()}</Text>
+          <View key={key} style={[styles.summaryItem, { backgroundColor: STATUS_BG[key], borderColor: STATUS_BORDER[key] }]}>
+            <Ionicons name={STATUS_ICON[key]} size={14} color={STATUS_COLOR[key]} style={{ marginBottom: 2 }} />
+            <Text style={[styles.summaryNum, { color: STATUS_DARK[key] }]}>{val}</Text>
+            <Text style={[styles.summaryLabel, { color: STATUS_DARK[key] }]}>{key.toUpperCase()}</Text>
           </View>
         ))}
         {unmarkedCount > 0 && (
-          <View style={[styles.summaryItem, { backgroundColor: '#F1F5F9' }]}>
+          <View style={[styles.summaryItem, { backgroundColor: '#F1F5F9', borderColor: '#E2E8F0' }]}>
+            <Ionicons name="ellipse-outline" size={14} color="#94A3B8" style={{ marginBottom: 2 }} />
             <Text style={[styles.summaryNum, { color: '#94A3B8' }]}>{unmarkedCount}</Text>
             <Text style={[styles.summaryLabel, { color: '#94A3B8' }]}>PENDING</Text>
           </View>
@@ -155,49 +261,9 @@ export default function StudentAttendanceScreen({ navigation, route }) {
         keyExtractor={item => String(item.id)}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} colors={[C.primary]} />}
         contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 120, paddingTop: 8 }}
-        renderItem={({ item }) => {
-          const isLocked = !!lockedStudents[item.id];
-          return (
-          <View style={[styles.studentRow, isLocked && styles.lockedRow]}>
-            <View style={[styles.avatar, isLocked && { backgroundColor: '#A7F3D0' }]}>
-              <Text style={styles.avatarText}>{item.first_name[0]}{item.last_name[0]}</Text>
-            </View>
-            <View style={styles.studentInfo}>
-              <Text style={styles.studentName}>{item.first_name} {item.last_name}</Text>
-              {item.roll_no && <Text style={styles.rollNo}>#{item.roll_no}</Text>}
-            </View>
-            {isLocked ? (
-              <View style={styles.leaveLockBadge}>
-                <Text style={styles.leaveLockIcon}>🔒</Text>
-                <Text style={styles.leaveLockText}>LEAVE</Text>
-              </View>
-            ) : (
-            <View style={styles.toggles}>
-              {STATUS_OPTIONS.map(s => (
-                <Pressable
-                  key={s}
-                  style={({ pressed }) => [
-                    styles.toggleBtn,
-                    attendance[item.id] === s
-                      ? { backgroundColor: STATUS_COLOR[s], borderColor: STATUS_COLOR[s] }
-                      : { borderColor: C.border },
-                    pressed && { opacity: 0.75 }
-                  ]}
-                  onPress={() => toggle(item.id, s)}
-                >
-                  <Text style={[
-                    styles.toggleText,
-                    { color: attendance[item.id] === s ? '#fff' : C.textMed }
-                  ]}>
-                    {s === 'present' ? 'P' : s === 'absent' ? 'A' : 'L'}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-            )}
-          </View>
-          );
-        }}
+        renderItem={({ item, index }) => (
+          <StudentRow item={item} index={index} />
+        )}
       />
 
       {/* Submit footer */}
@@ -253,37 +319,46 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderColor: C.border,
   },
   summaryItem:  {
-    alignItems: 'center', borderRadius: 12,
-    paddingHorizontal: 18, paddingVertical: 8, minWidth: 80,
+    alignItems: 'center', borderRadius: 12, borderWidth: 1,
+    paddingHorizontal: 14, paddingVertical: 8, minWidth: 72,
   },
-  summaryNum:   { fontSize: 24, fontWeight: '800' },
-  summaryLabel: { fontSize: 10, fontWeight: '700', marginTop: 2, letterSpacing: 0.5 },
+  summaryNum:   { fontSize: 22, fontWeight: '800' },
+  summaryLabel: { fontSize: 9, fontWeight: '700', marginTop: 1, letterSpacing: 0.6 },
 
+  // ── Student row ────────────────────────────────────────────
   studentRow:   {
-    backgroundColor: C.card, borderRadius: 14, marginVertical: 4,
+    backgroundColor: C.card, borderRadius: 16, marginVertical: 5,
     paddingVertical: 12, paddingHorizontal: 14,
     flexDirection: 'row', alignItems: 'center',
-    shadowColor: C.shadow, shadowOpacity: 0.05, shadowRadius: 6,
+    shadowColor: '#94A3B8', shadowOpacity: 0.08, shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 }, elevation: 2,
+    borderLeftWidth: 4,
   },
-  lockedRow:    { backgroundColor: '#F0FDF4', borderLeftWidth: 3, borderLeftColor: '#059669' },
-  leaveLockBadge: { backgroundColor: '#D1FAE5', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, alignItems: 'center' },
-  leaveLockIcon:  { fontSize: 12 },
-  leaveLockText:  { fontSize: 11, fontWeight: '800', color: '#059669', marginTop: 2 },
+  leaveLockBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: '#D1FAE5', borderRadius: 10,
+    paddingHorizontal: 10, paddingVertical: 7,
+  },
+  leaveLockText:  { fontSize: 11, fontWeight: '800', color: '#059669' },
   avatar:       {
-    width: 40, height: 40, borderRadius: 12,
+    width: 42, height: 42, borderRadius: 13,
     justifyContent: 'center', alignItems: 'center', marginRight: 12,
   },
-  avatarText:   { color: C.primary, fontWeight: '800', fontSize: 13 },
+  avatarText:   { fontWeight: '800', fontSize: 13 },
   studentInfo:  { flex: 1 },
   studentName:  { fontSize: 14, fontWeight: '700', color: C.textDark },
-  rollNo:       { fontSize: 11, color: C.textLight, marginTop: 1 },
-  toggles:      { flexDirection: 'row', gap: 6 },
-  toggleBtn:    {
-    width: 34, height: 34, borderRadius: 10, borderWidth: 1.5,
-    alignItems: 'center', justifyContent: 'center',
+  rollNo:       { fontSize: 11, color: C.textLight, marginTop: 2 },
+  toggles:      { flexDirection: 'row', gap: 5 },
+
+  // ── Status chips ───────────────────────────────────────────
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 9, paddingVertical: 7,
+    borderRadius: 10, borderWidth: 1.5,
+    shadowOpacity: 0.18, shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 }, elevation: 2,
   },
-  toggleText:   { fontSize: 12, fontWeight: '800' },
+  chipText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.2 },
 
   footer:       {
     position: 'absolute', bottom: 0, left: 0, right: 0,

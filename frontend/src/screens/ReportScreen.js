@@ -119,7 +119,7 @@ function StudentPicker({ students, selected, onSelect }) {
                       <Text style={[st.studentRowText, active && { color: C.primary, fontWeight: '700' }]}>
                         {s.first_name} {s.last_name}
                       </Text>
-                      {s.roll_no ? <Text style={st.studentRoll}>Roll #{s.roll_no}</Text> : null}
+                      {s.roll_no ? <Text style={st.studentRoll}>ID: {s.roll_no}</Text> : null}
                     </View>
                     {active && <Ionicons name="checkmark-circle" size={20} color={C.primary} />}
                   </Pressable>
@@ -175,7 +175,7 @@ function StudentCard({ student, year, month, onPress }) {
         </View>
         <View style={{ flex: 1 }}>
           <Text style={st.cardName}>{student.first_name} {student.last_name}</Text>
-          {student.roll_no ? <Text style={st.cardRoll}>Roll #{student.roll_no}</Text> : null}
+          {student.roll_no ? <Text style={st.cardRoll}>ID: {student.roll_no}</Text> : null}
         </View>
         <View style={st.miniSummary}>
           <Text style={[st.miniCount, { color: C.present }]}>{student.summary.present}P</Text>
@@ -209,7 +209,7 @@ async function exportCSV(data, year, month, className, sectionName) {
   const numDays = daysInMonth(year, month);
   const monthName = MONTHS[month - 1];
   const dayHeaders = Array.from({ length: numDays }, (_, i) => `${i + 1} ${monthName.slice(0, 3)}`).join(',');
-  const header = `Name,Roll No,${dayHeaders},Present,Absent,Leave\n`;
+  const header = `Name,Student ID,${dayHeaders},Present,Absent,Leave\n`;
   const rows = data.map(s => {
     const dayMap = {};
     (s.days || []).forEach(d => { dayMap[parseInt(d.date.split('-')[2])] = d.status; });
