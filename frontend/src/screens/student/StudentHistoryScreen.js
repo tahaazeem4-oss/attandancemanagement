@@ -6,6 +6,7 @@ import {
 import api from '../../services/api';
 import { C } from '../../config/theme';
 import AppHeader from '../../components/AppHeader';
+import { createParentPortalBackHandler } from '../../navigation/parentPortalBack';
 
 const STATUS_COLOR = { present: '#059669', absent: '#DC2626', leave: '#D97706' };
 const STATUS_BG    = { present: '#ECFDF5', absent: '#FEF2F2', leave: '#FFFBEB' };
@@ -25,6 +26,7 @@ export default function StudentHistoryScreen({ navigation, route }) {
   const childData = route?.params?.child;
   const childId = childData?.student_id;
   const isParentViewing = !!childData;
+  const handleBackPress = isParentViewing ? createParentPortalBackHandler(navigation, route) : null;
   const endpoint = isParentViewing 
     ? `/parent/children/${childId}/attendance`
     : '/student-portal/attendance';
@@ -60,7 +62,7 @@ export default function StudentHistoryScreen({ navigation, route }) {
 
   return (
     <View style={styles.wrapper}>
-      <AppHeader title="Attendance History" eyebrow="Student Portal" navigation={navigation} />
+      <AppHeader title="Attendance History" eyebrow="Student Portal" navigation={navigation} onBackPress={handleBackPress} />
       <View style={styles.container}>
       {/* Month navigator */}
       <View style={styles.navRow}>

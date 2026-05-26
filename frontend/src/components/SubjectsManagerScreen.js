@@ -24,6 +24,7 @@ import EntityEmptyState from './EntityEmptyState';
 import ManagerSearchAddRow from './ManagerSearchAddRow';
 import ModalFooterActions from './ModalFooterActions';
 import { showDestructiveConfirm } from '../lib/confirmDialog';
+import { confirmDeleteWithImpact } from '../lib/deleteWithImpact';
 
 const normalizeSubjectName = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
 
@@ -258,22 +259,19 @@ export default function SubjectsManagerScreen({ navigation, mode }) {
       return;
     }
 
-    showDestructiveConfirm({
+    const basePath = isSuper
+      ? `/super-admin/schools/${campusId}/subjects/${item.id}`
+      : isOrg
+        ? `/org-admin/subjects/${item.id}`
+        : `/subjects/${item.id}`;
+
+    confirmDeleteWithImpact({
+      impactPath: `${basePath}/delete-impact`,
+      deletePath: basePath,
+      entityLabel: 'subject',
       title: 'Delete Subject',
-      message: `Are you sure you want to delete "${item.name}"? This action cannot be undone.`,
-      onConfirm: async () => {
-        try {
-          if (isSuper) {
-            await api.delete(`/super-admin/schools/${campusId}/subjects/${item.id}`);
-          } else if (isOrg) {
-            await api.delete(`/org-admin/subjects/${item.id}`);
-          } else {
-            await api.delete(`/subjects/${item.id}`);
-          }
-          setSubjects(prev => prev.filter(s => s.id !== item.id));
-        } catch (err) {
-          Alert.alert('Error', err?.response?.data?.message || 'Could not delete subject.');
-        }
+      onSuccess: () => {
+        setSubjects(prev => prev.filter(s => s.id !== item.id));
       },
     });
   };

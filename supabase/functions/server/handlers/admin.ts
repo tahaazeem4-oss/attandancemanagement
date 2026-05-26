@@ -7,6 +7,14 @@ import {
   sendPush,
   tokensForStudents,
 } from "../_shared.ts";
+import {
+  archiveClass,
+  archiveTeacher,
+  getClassDeleteImpact,
+  getTeacherDeleteImpact,
+  unarchiveClass,
+  unarchiveTeacher,
+} from "../lib/deletion.ts";
 
 export async function handleAdmin(
   req: Request,
@@ -62,9 +70,9 @@ export async function handleAdmin(
         { count: classes },
         { count: student_accounts },
       ] = await Promise.all([
-        db.from("teachers").select("*", { count: "exact", head: true }).eq("school_id", schoolId),
+        db.from("teachers").select("*", { count: "exact", head: true }).eq("school_id", schoolId).eq("is_active", true),
         db.from("students").select("*", { count: "exact", head: true }).eq("school_id", schoolId),
-        db.from("classes").select("*", { count: "exact", head: true }).eq("school_id", schoolId),
+        db.from("classes").select("*", { count: "exact", head: true }).eq("school_id", schoolId).eq("is_active", true),
         db.from("student_accounts")
           .select("*, students!inner(school_id)", { count: "exact", head: true })
           .eq("students.school_id", schoolId),
@@ -83,6 +91,7 @@ export async function handleAdmin(
         .from("teachers")
         .select("id, first_name, last_name, email, phone, teacher_role, created_at")
         .eq("school_id", schoolId)
+        .eq("is_active", true)
         .order("last_name");
 
       const { data: assignments } = await db
@@ -175,6 +184,27 @@ export async function handleAdmin(
   }
 
   // ── PUT /admin/teachers/:id ──────────────────────────────────
+  const teacherImpactMatch = path.match(/^\/admin\/teachers\/(\d+)\/delete-impact$/);
+  if (teacherImpactMatch && method === "GET") {
+    const id = parseInt(teacherImpactMatch[1]);
+    const { data: teacher } = await db.from("teachers").select("school_id").eq("id", id).eq("school_id", schoolId).maybeSingle();
+    if (!teacher) return json({ message: "Not found" }, 404);
+    return json(await getTeacherDeleteImpact(db, id));
+  }
+
+  const teacherRestoreMatch = path.match(/^\/admin\/teachers\/(\d+)\/restore$/);
+  if (teacherRestoreMatch && method === "POST") {
+    const id = parseInt(teacherRestoreMatch[1]);
+    const { data: teacher } = await db.from("teachers").select("school_id").eq("id", id).eq("school_id", schoolId).maybeSingle();
+    if (!teacher) return json({ message: "Not found" }, 404);
+    try {
+      await unarchiveTeacher(db, id);
+      return json({ message: "Teacher restored", restored: true });
+    } catch (err) {
+      return json({ message: err instanceof Error ? err.message : "Failed to restore" }, 400);
+    }
+  }
+
   const teacherMatch = path.match(/^\/admin\/teachers\/(\d+)$/);
   if (teacherMatch && method === "PUT") {
     const id = parseInt(teacherMatch[1]);
@@ -223,8 +253,23 @@ export async function handleAdmin(
   if (teacherMatch && method === "DELETE") {
     const id = parseInt(teacherMatch[1]);
     try {
-      await db.from("teachers").delete().eq("id", id).eq("school_id", schoolId);
-      return json({ message: "Teacher deleted" });
+      const { data: teacher } = await db.from("teachers").select("school_id").eq("id", id).eq("school_id", schoolId).maybeSingle();
+      if (!teacher) return json({ message: "Not found" }, 404);
+      const replacementTeacherId = Number(url.searchParams.get("replacement_teacher_id") || "") || null;
+      try {
+        const result = await archiveTeacher(db, id, Number(user.id), String(user.role), replacementTeacherId);
+        return json({
+          message: result.reassigned ? "Teacher reassigned and archived" : "Teacher archived",
+          archived: true,
+          reassigned: result.reassigned,
+          impact: result.impact,
+        });
+      } catch (archiveErr) {
+        return json({
+          message: archiveErr instanceof Error ? archiveErr.message : "Teacher cannot be deleted yet",
+          impact: await getTeacherDeleteImpact(db, id),
+        }, 409);
+      }
     } catch (err) {
       console.error("[admin/teachers DELETE]", err);
       return json({ message: "Server error" }, 500);
@@ -411,11 +456,13 @@ export async function handleAdmin(
         .from("classes")
         .select("id, class_name")
         .eq("school_id", schoolId)
+        .eq("is_active", true)
         .order("class_name");
 
       const { data: sections } = await db
         .from("sections")
         .select("id, class_id, section_name")
+        .eq("is_active", true)
         .in(
           "class_id",
           (classes || []).map((c: Record<string, unknown>) => c.id),
@@ -457,6 +504,27 @@ export async function handleAdmin(
     }
   }
 
+  const classImpactMatch = path.match(/^\/admin\/classes\/(\d+)\/delete-impact$/);
+  if (classImpactMatch && method === "GET") {
+    const id = parseInt(classImpactMatch[1]);
+    const { data: cls } = await db.from("classes").select("school_id").eq("id", id).eq("school_id", schoolId).maybeSingle();
+    if (!cls) return json({ message: "Not found" }, 404);
+    return json(await getClassDeleteImpact(db, id));
+  }
+
+  const classRestoreMatch = path.match(/^\/admin\/classes\/(\d+)\/restore$/);
+  if (classRestoreMatch && method === "POST") {
+    const id = parseInt(classRestoreMatch[1]);
+    const { data: cls } = await db.from("classes").select("school_id").eq("id", id).eq("school_id", schoolId).maybeSingle();
+    if (!cls) return json({ message: "Not found" }, 404);
+    try {
+      await unarchiveClass(db, id);
+      return json({ message: "Class restored", restored: true });
+    } catch (err) {
+      return json({ message: err instanceof Error ? err.message : "Failed to restore" }, 400);
+    }
+  }
+
   const adminClassMatch = path.match(/^\/admin\/classes\/(\d+)$/);
   // ── PUT /admin/classes/:id ───────────────────────────────────
   if (adminClassMatch && method === "PUT") {
@@ -475,8 +543,17 @@ export async function handleAdmin(
   if (adminClassMatch && method === "DELETE") {
     const id = parseInt(adminClassMatch[1]);
     try {
-      await db.from("classes").delete().eq("id", id).eq("school_id", schoolId);
-      return json({ message: "Class deleted" });
+      const { data: cls } = await db.from("classes").select("school_id").eq("id", id).eq("school_id", schoolId).maybeSingle();
+      if (!cls) return json({ message: "Not found" }, 404);
+      try {
+        const result = await archiveClass(db, id, Number(user.id), String(user.role));
+        return json({ message: "Class archived", archived: true, impact: result.impact });
+      } catch (archiveErr) {
+        return json({
+          message: archiveErr instanceof Error ? archiveErr.message : "Class cannot be deleted yet",
+          impact: await getClassDeleteImpact(db, id),
+        }, 409);
+      }
     } catch (err) {
       console.error("[admin/classes DELETE]", err);
       return json({ message: "Server error" }, 500);

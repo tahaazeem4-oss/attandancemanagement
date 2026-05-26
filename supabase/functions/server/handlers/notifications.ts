@@ -417,7 +417,16 @@ export async function handleNotifications(
       if (error) throw error;
 
       // Push (non-blocking)
-      const pushData = { type: "notification", sender: senderName };
+      const pushData = {
+        type: "notification",
+        sender: senderName,
+        notification_id: notif.id,
+        category: cat,
+        target_type,
+        class_id: class_id || null,
+        section_id: section_id || null,
+        student_id: student_id || null,
+      };
       if (target_type === "student" && student_id) {
         Promise.all([
           tokensForStudents(db, [student_id]),

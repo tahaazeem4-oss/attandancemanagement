@@ -12,6 +12,7 @@ import AppHeader from '../../components/AppHeader';
 import ScreenIntroCard from '../../components/ScreenIntroCard';
 import PickerField from '../../components/PickerField';
 import { toLocalPhone } from '../../lib/phoneUtils';
+import { confirmDeleteWithImpact } from '../../lib/deleteWithImpact';
 
 // ── CampusFormModal — add/edit a campus (with branding) ───────
 function CampusFormModal({ visible, campus, orgId, orgs = [], onClose, onSaved }) {
@@ -476,6 +477,17 @@ export default function SuperAdminSchoolsScreen({ navigation }) {
   const orgNameMap = Object.fromEntries(orgs.map(o => [o.id, o.name]));
 
   // Delete campus
+  const handleDeleteCampusClick = (campus) => {
+    if (!campus?.id) return;
+    confirmDeleteWithImpact({
+      impactPath: `/super-admin/schools/${campus.id}/delete-impact`,
+      deletePath: `/super-admin/schools/${campus.id}`,
+      entityLabel: 'campus',
+      title: 'Delete Campus',
+      onSuccess: () => loadData(),
+    });
+  };
+
   const confirmDeleteCampus = async () => {
     if (!deleteCampusPending) return;
     setDeleting(true);
@@ -534,7 +546,7 @@ export default function SuperAdminSchoolsScreen({ navigation }) {
                 admins={adminsMap[campus.id]}
                 orgName={orgNameMap[campus.org_id]}
                 onEditCampus={(c) => setCampusModal({ open: true, campus: c })}
-                onDeleteCampus={(c) => setDeleteCampusPending(c)}
+                onDeleteCampus={(c) => handleDeleteCampusClick(c)}
                 onAddAdmin={(id) => setAdminModal({ open: true, campusId: id })}
                 onEditAdmin={(id, adm) => setEditAdmin({ open: true, campusId: id, admin: adm })}
                 onDeleteAdmin={(id, adm) => setDeleteAdminPending({ campusId: id, admin: adm })}

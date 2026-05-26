@@ -6,6 +6,7 @@ import {
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
 import AppHeader from '../../components/AppHeader';
+import { createParentPortalBackHandler } from '../../navigation/parentPortalBack';
 
 const STATUS_COLOR = { pending: '#D97706', approved: '#059669', rejected: '#DC2626', cancelled: '#64748B' };
 const STATUS_BG    = { pending: '#FFFBEB', approved: '#ECFDF5', rejected: '#FEF2F2', cancelled: '#F1F5F9' };
@@ -91,6 +92,7 @@ export default function StudentLeaveScreen({ navigation, route }) {
   // Support parent viewing child's portal
   const childId = route?.params?.child?.student_id;
   const isParentViewing = !!childId;
+  const handleBackPress = isParentViewing ? createParentPortalBackHandler(navigation, route) : null;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -185,7 +187,7 @@ export default function StudentLeaveScreen({ navigation, route }) {
 
   return (
     <View style={styles.wrapper}>
-      <AppHeader title="Leave Applications" eyebrow="Student Portal" navigation={navigation} />
+      <AppHeader title="Leave Applications" eyebrow="Student Portal" navigation={navigation} onBackPress={handleBackPress} />
       <View style={styles.container}>
       {loading
         ? <ActivityIndicator color={C.primary} style={{ flex: 1 }} />

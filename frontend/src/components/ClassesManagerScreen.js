@@ -23,6 +23,7 @@ import EntityEmptyState from './EntityEmptyState';
 import ManagerSearchAddRow from './ManagerSearchAddRow';
 import ModalFooterActions from './ModalFooterActions';
 import { showDestructiveConfirm } from '../lib/confirmDialog';
+import { confirmDeleteWithImpact } from '../lib/deleteWithImpact';
 import { buildImportExportScope, getImportExportBase } from '../lib/importExportScope';
 
 const EMPTY_CLASS = { class_name: '', school_id: '' };
@@ -211,23 +212,20 @@ export default function ClassesManagerScreen({ navigation, mode }) {
 
   const handleDeleteClass = (item) => {
     if (!item?.id) return;
-    showDestructiveConfirm({
+    const basePath = isSuper
+      ? `/super-admin/schools/${item.school_id || filterCampus}/classes/${item.id}`
+      : isOrg
+        ? `/org-admin/classes/${item.id}`
+        : `/admin/classes/${item.id}`;
+    confirmDeleteWithImpact({
+      impactPath: `${basePath}/delete-impact`,
+      deletePath: basePath,
+      entityLabel: 'class',
       title: 'Delete Class',
-      message: `Are you sure you want to delete "${item.class_name}"? This action cannot be undone.`,
-      onConfirm: async () => {
-        try {
-          const endpoint = isSuper
-            ? `/super-admin/schools/${item.school_id || filterCampus}/classes/${item.id}`
-            : isOrg
-              ? `/org-admin/classes/${item.id}`
-              : `/admin/classes/${item.id}`;
-          await api.delete(endpoint);
-          setDetailModal(false);
-          setTarget(null);
-          await loadClasses();
-        } catch (err) {
-          Alert.alert('Error', err?.response?.data?.message || 'Could not delete class.');
-        }
+      onSuccess: async () => {
+        setDetailModal(false);
+        setTarget(null);
+        await loadClasses();
       },
     });
   };

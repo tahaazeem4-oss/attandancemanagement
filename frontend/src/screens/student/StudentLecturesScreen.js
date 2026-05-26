@@ -12,6 +12,7 @@ import api from '../../services/api';
 import { C } from '../../config/theme';
 import PickerField from '../../components/PickerField';
 import AppHeader from '../../components/AppHeader';
+import { createParentPortalBackHandler } from '../../navigation/parentPortalBack';
 
 const TYPE_COLOR = { classwork: '#4F46E5', homework: '#D97706' };
 const TYPE_BG    = { classwork: '#EEF2FF', homework: '#FFFBEB' };
@@ -39,6 +40,7 @@ export default function StudentLecturesScreen({ navigation, route }) {
   // Support parent viewing child's portal
   const childId = route?.params?.child?.student_id;
   const isParentViewing = !!childId;
+  const handleBackPress = isParentViewing ? createParentPortalBackHandler(navigation, route) : null;
 
   useEffect(() => {
     setFilterType(fixedType);
@@ -245,7 +247,7 @@ export default function StudentLecturesScreen({ navigation, route }) {
 
   return (
     <View style={styles.rootWrap}>
-      <AppHeader title={screenTitle} eyebrow="Student Portal" navigation={navigation} />
+      <AppHeader title={screenTitle} eyebrow="Student Portal" navigation={navigation} onBackPress={handleBackPress} />
       <View style={styles.root}>
         {loading ? (
           <ActivityIndicator color="#4F46E5" style={{ flex: 1, marginTop: 60 }} size="large" />

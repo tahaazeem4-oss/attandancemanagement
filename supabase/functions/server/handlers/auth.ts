@@ -18,11 +18,12 @@ async function getSchool(
   const { data } = await db
     .from("schools")
     .select(
-      "id, name, tagline, initials, logo_url, primary_color, accent_color",
+      "id, name, tagline, initials, logo_url, primary_color, accent_color, is_active",
     )
     .eq("id", schoolId)
     .single();
   if (!data) return null;
+  if (data.is_active === false) return null;
   // Ensure logo_url is always a full public URL
   if (data.logo_url && !String(data.logo_url).startsWith("http")) {
     data.logo_url = `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/public/logos/${data.logo_url}`;
@@ -92,9 +93,10 @@ export async function handleAuth(
         .eq(col, e);
       if (admins?.length) {
         const admin = admins[0];
+        const school = await getSchool(db, admin.school_id);
+        if (!school) return json({ message: "This campus is archived and cannot be accessed" }, 403);
         if (!(await comparePassword(password, admin.password)))
           return json({ message: "Invalid credentials" }, 401);
-        const school = await getSchool(db, admin.school_id);
         const user = {
           id: admin.id,
           first_name: admin.first_name,
@@ -114,9 +116,11 @@ export async function handleAuth(
         .eq(col, e);
       if (teachers?.length) {
         const t = teachers[0];
+        if (t.is_active === false) return json({ message: "This teacher account has been archived" }, 403);
+        const school = await getSchool(db, t.school_id);
+        if (!school) return json({ message: "This campus is archived and cannot be accessed" }, 403);
         if (!(await comparePassword(password, t.password)))
           return json({ message: "Invalid credentials" }, 401);
-        const school = await getSchool(db, t.school_id);
         const user = {
           id: t.id,
           first_name: t.first_name,
@@ -169,6 +173,7 @@ export async function handleAuth(
         if (!s) return json({ message: "Student not found" }, 404);
 
         const school = await getSchool(db, s.school_id);
+        if (!school) return json({ message: "This campus is archived and cannot be accessed" }, 403);
         const user = {
           id: a.id,
           student_id: s.id,
@@ -280,6 +285,7 @@ export async function handleAuth(
             password: hashed,
             phone: phone || null,
             teacher_role: normalizedRole,
+            is_active: true,
           })
           .select()
           .single();

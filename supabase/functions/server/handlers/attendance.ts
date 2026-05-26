@@ -70,7 +70,7 @@ export async function handleAttendance(
       if (savedIds.length) {
         const pushTitle = "Attendance Marked";
         const pushBody = `Your child's attendance has been recorded for ${date}.`;
-        const pushData = { type: "attendance", date };
+        const pushData = { type: "attendance", date, student_ids: savedIds };
         tokensForStudents(db, savedIds).then((tokens) =>
           sendPush(tokens, "Attendance Marked", `Your attendance has been recorded for ${date}.`, pushData)
         );

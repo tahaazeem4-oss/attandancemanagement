@@ -5,12 +5,361 @@ import AppNavigator from './src/navigation/AppNavigator';
 import { ActivityIndicator, Platform, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
+import api from './src/services/api';
 
 // Navigation ref — lets us navigate from outside of React tree (e.g. notification tap).
 export const navigationRef = React.createRef();
 
 // Pending navigation action queued before the navigator was ready (cold-start tap).
 let _pendingNotifNavigation = null;
+
+function toNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toIdList(value) {
+  if (Array.isArray(value)) {
+    return value.map(toNumber).filter(Boolean);
+  }
+
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((part) => toNumber(part.trim()))
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function normalizeNotificationData(rawData, meta = {}) {
+  const source = rawData && typeof rawData === 'object' ? rawData : {};
+
+  return {
+    ...source,
+    title: String(source.title || meta.title || '').trim(),
+    body: String(source.body || meta.body || '').trim(),
+    type: String(source.type || '').trim().toLowerCase(),
+    category: String(source.category || '').trim().toLowerCase(),
+    lecture_type: String(source.lecture_type || '').trim().toLowerCase(),
+    target_type: String(source.target_type || '').trim().toLowerCase(),
+    conversation_id: toNumber(source.conversation_id),
+    lecture_id: toNumber(source.lecture_id),
+    notification_id: toNumber(source.notification_id),
+    class_id: toNumber(source.class_id),
+    section_id: toNumber(source.section_id),
+    student_id: toNumber(source.student_id),
+    student_ids: toIdList(source.student_ids),
+  };
+}
+
+function inferDestination(data) {
+  if (data.type === 'chat') return 'chat';
+  if (data.type === 'attendance') return 'attendance';
+  if (data.type === 'lecture') {
+    return data.lecture_type === 'homework' ? 'homework' : 'classwork';
+  }
+
+  if (data.type === 'leave_request' || data.type === 'leave_decision' || data.type === 'withdrawal_request' || data.type === 'withdrawal_decision') {
+    return 'leaves';
+  }
+
+  const haystack = `${data.category} ${data.title} ${data.body}`.toLowerCase();
+  if (haystack.includes('attendance')) return 'attendance';
+  if (haystack.includes('homework')) return 'homework';
+  if (haystack.includes('classwork') || haystack.includes('class work')) return 'classwork';
+
+  return 'notifications';
+}
+
+function getRoleRoot(role) {
+  if (role === 'student') return 'StudentTabs';
+  if (role === 'teacher') return 'TeacherTabs';
+  if (role === 'admin') return 'AdminTabs';
+  if (role === 'org_admin') return 'OrgAdminTabs';
+  if (role === 'super_admin') return 'SuperAdminTabs';
+  if (role === 'parent') return 'ParentStack';
+  return null;
+}
+
+function navigateStaffHome(role, screen, params) {
+  const nav = navigationRef.current;
+  const root = getRoleRoot(role);
+  if (!nav || !root) return false;
+
+  nav.navigate(root, {
+    screen: 'HomeTab',
+    params: {
+      screen,
+      params,
+    },
+  });
+  return true;
+}
+
+function navigateStaffNotifications(role) {
+  const nav = navigationRef.current;
+  const root = getRoleRoot(role);
+  if (!nav || !root) return false;
+
+  nav.navigate(root, { screen: 'NotifTab' });
+  return true;
+}
+
+function navigateStudent(screen, params) {
+  const nav = navigationRef.current;
+  if (!nav) return false;
+
+  nav.navigate('StudentTabs', {
+    screen: screen === 'StudentNotifications' ? 'NotifTab' : 'HomeTab',
+    params: screen === 'StudentNotifications'
+      ? params
+      : {
+          screen,
+          params,
+        },
+  });
+  return true;
+}
+
+async function resolveParentChild(data) {
+  const { data: dashboard } = await api.get('/parent/dashboard');
+  const children = Array.isArray(dashboard?.children) ? dashboard.children : [];
+
+  if (!children.length) return null;
+
+  if (data.student_id) {
+    const exact = children.find((child) => Number(child?.student_id) === data.student_id);
+    if (exact) return exact;
+  }
+
+  if (data.student_ids.length) {
+    const allowed = new Set(data.student_ids);
+    const match = children.find((child) => allowed.has(Number(child?.student_id)));
+    if (match) return match;
+  }
+
+  if (data.class_id && data.section_id) {
+    const sectionMatch = children.find(
+      (child) => Number(child?.class_id) === data.class_id && Number(child?.section_id) === data.section_id,
+    );
+    if (sectionMatch) return sectionMatch;
+  }
+
+  if (data.class_id) {
+    const classMatch = children.find((child) => Number(child?.class_id) === data.class_id);
+    if (classMatch) return classMatch;
+  }
+
+  return children.length === 1 ? children[0] : null;
+}
+
+function navigateParentPortal(child, screen, params = {}) {
+  const nav = navigationRef.current;
+  if (!nav || !child) return false;
+
+  const selectionToken = Date.now();
+
+  if (screen === 'StudentNotifications') {
+    nav.navigate('ParentStack', {
+      screen: 'ChildStudentPortal',
+      params: {
+        child,
+        selectionToken,
+        screen: 'NotifTab',
+        params: {
+          child,
+          selectionToken,
+          ...params,
+        },
+      },
+    });
+    return true;
+  }
+
+  nav.navigate('ParentStack', {
+    screen: 'ChildStudentPortal',
+    params: {
+      child,
+      selectionToken,
+      screen: 'HomeTab',
+      params: {
+        screen,
+        params: {
+          child,
+          selectionToken,
+          ...params,
+        },
+      },
+    },
+  });
+  return true;
+}
+
+async function openConversationFromNotification(role, data) {
+  const nav = navigationRef.current;
+  const conversationId = data.conversation_id;
+
+  if (!nav || !conversationId) return false;
+
+  const { data: conversations } = await api.get('/chat/conversations');
+  const conversation = (Array.isArray(conversations) ? conversations : []).find(
+    (item) => Number(item?.id) === conversationId,
+  );
+
+  if (!conversation) return false;
+
+  if (role === 'parent') {
+    nav.navigate('ParentStack', {
+      screen: 'Chat',
+      params: { conversation },
+    });
+    return true;
+  }
+
+  const root = getRoleRoot(role);
+  if (!root) return false;
+
+  nav.navigate(root, {
+    screen: 'ChatTab',
+    params: {
+      screen: 'Chat',
+      params: { conversation },
+    },
+  });
+  return true;
+}
+
+async function navigateParentForNotification(destination, data) {
+  const nav = navigationRef.current;
+  if (!nav) return;
+
+  if (destination === 'chat') {
+    const opened = await openConversationFromNotification('parent', data);
+    if (opened) return;
+  }
+
+  const child = await resolveParentChild(data).catch(() => null);
+
+  if (destination === 'attendance' && child) {
+    navigateParentPortal(child, 'StudentHistory');
+    return;
+  }
+
+  if (destination === 'homework' && child) {
+    navigateParentPortal(child, 'StudentHomework');
+    return;
+  }
+
+  if (destination === 'classwork' && child) {
+    navigateParentPortal(child, 'StudentClasswork');
+    return;
+  }
+
+  if (destination === 'leaves' && child) {
+    navigateParentPortal(child, 'StudentLeaves');
+    return;
+  }
+
+  if (child) {
+    navigateParentPortal(child, 'StudentNotifications');
+    return;
+  }
+
+  nav.navigate('ParentStack', { screen: 'ParentDashboard' });
+}
+
+async function navigateForNotification(rawData, role, meta = {}) {
+  const nav = navigationRef.current;
+
+  if (!nav || !nav.isReady() || !role) {
+    _pendingNotifNavigation = { rawData, meta };
+    return;
+  }
+
+  const data = normalizeNotificationData(rawData, meta);
+  const destination = inferDestination(data);
+
+  try {
+    if (role === 'parent') {
+      await navigateParentForNotification(destination, data);
+      return;
+    }
+
+    if (role === 'student') {
+      if (destination === 'chat') {
+        const opened = await openConversationFromNotification(role, data);
+        if (opened) return;
+      }
+      if (destination === 'attendance') {
+        navigateStudent('StudentHistory');
+        return;
+      }
+      if (destination === 'homework') {
+        navigateStudent('StudentHomework');
+        return;
+      }
+      if (destination === 'classwork') {
+        navigateStudent('StudentClasswork');
+        return;
+      }
+      if (destination === 'leaves') {
+        navigateStudent('StudentLeaves');
+        return;
+      }
+      navigateStudent('StudentNotifications');
+      return;
+    }
+
+    if (destination === 'chat') {
+      const opened = await openConversationFromNotification(role, data);
+      if (opened) return;
+    }
+
+    if (destination === 'homework' || destination === 'classwork') {
+      if (navigateStaffHome(role, 'LectureList')) return;
+    }
+
+    if (destination === 'attendance') {
+      if (navigateStaffHome(role, 'Report')) return;
+    }
+
+    if (destination === 'leaves') {
+      const leaveScreen = role === 'teacher'
+        ? 'TeacherLeaves'
+        : role === 'admin'
+          ? 'AdminLeaves'
+          : role === 'org_admin'
+            ? 'OrgAdminLeaves'
+            : null;
+
+      if (leaveScreen && navigateStaffHome(role, leaveScreen)) return;
+    }
+
+    navigateStaffNotifications(role);
+  } catch {
+    if (role === 'parent') {
+      nav.navigate('ParentStack', { screen: 'ParentDashboard' });
+      return;
+    }
+
+    if (role === 'student') {
+      navigateStudent('StudentNotifications');
+      return;
+    }
+
+    navigateStaffNotifications(role);
+  }
+}
+
+async function flushPendingNotification(role) {
+  if (!_pendingNotifNavigation || !navigationRef.current?.isReady() || !role) return;
+
+  const pending = _pendingNotifNavigation;
+  _pendingNotifNavigation = null;
+  await navigateForNotification(pending.rawData, role, pending.meta);
+}
 
 // ── Notification display handler ──────────────────────────────
 // Runs when a notification is received while the app is foregrounded.
@@ -42,66 +391,6 @@ async function ensureAndroidChannel() {
   });
 }
 
-// ── Navigate on notification tap ─────────────────────────────
-// Maps the `type` field embedded in the push payload to the correct screen.
-// The screen names match the navigators in routeConfig / AppNavigator.
-function navigateForNotification(data, role) {
-  const nav = navigationRef.current;
-  if (!nav || !nav.isReady()) {
-    // Navigator not ready yet (cold start) — queue and retry once ready
-    _pendingNotifNavigation = { data, role };
-    return;
-  }
-
-  const type = data?.type;
-
-  try {
-    if (type === 'lecture') {
-      if (role === 'student') {
-        nav.navigate('StudentClasswork');
-      } else if (role === 'parent') {
-        nav.navigate('ParentDashboard');
-      } else {
-        nav.navigate('LectureList');
-      }
-    } else if (type === 'attendance') {
-      if (role === 'student') {
-        nav.navigate('StudentHistory');
-      } else if (role === 'parent') {
-        nav.navigate('ParentDashboard');
-      } else {
-        nav.navigate('Report');
-      }
-    } else if (
-      type === 'leave_request' ||
-      type === 'leave_decision' ||
-      type === 'withdrawal_request' ||
-      type === 'withdrawal_decision'
-    ) {
-      if (role === 'student') {
-        nav.navigate('StudentLeaves');
-      } else if (role === 'teacher') {
-        nav.navigate('TeacherLeaves');
-      } else if (role === 'parent') {
-        nav.navigate('ParentDashboard');
-      } else {
-        nav.navigate('AdminLeaves');
-      }
-    } else {
-      // Fallback: open the notification inbox for the current role
-      if (role === 'student') {
-        nav.navigate('StudentNotifications');
-      } else if (role === 'parent') {
-        nav.navigate('ParentDashboard');
-      } else {
-        nav.navigate('StaffNotifications');
-      }
-    }
-  } catch {
-    // Navigation target may not exist for this role — ignore silently
-  }
-}
-
 function Root() {
   const { loading, user } = useAuth();
   const notificationListener = useRef(null);
@@ -116,8 +405,11 @@ function Root() {
     // Check if the app was opened by tapping a notification while killed (cold start).
     Notifications.getLastNotificationResponseAsync().then(response => {
       if (response) {
-        const data = response?.notification?.request?.content?.data;
-        navigateForNotification(data, user?.role);
+        const content = response?.notification?.request?.content;
+        void navigateForNotification(content?.data, user?.role, {
+          title: content?.title,
+          body: content?.body,
+        });
       }
     });
 
@@ -131,9 +423,11 @@ function Root() {
     // Fired when the user taps the notification banner or the notification
     // centre entry. Navigate to the relevant screen.
     responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
-      const data = response?.notification?.request?.content?.data;
-      const role = user?.role;
-      navigateForNotification(data, role);
+      const content = response?.notification?.request?.content;
+      void navigateForNotification(content?.data, user?.role, {
+        title: content?.title,
+        body: content?.body,
+      });
     });
 
     return () => {
@@ -141,6 +435,10 @@ function Root() {
       responseListener.current?.remove();
     };
   }, [user]);
+
+  useEffect(() => {
+    void flushPendingNotification(user?.role);
+  }, [user?.role]);
 
   if (loading) {
     return (
@@ -154,11 +452,7 @@ function Root() {
         ref={navigationRef}
         onReady={() => {
           // If a notification tap arrived before the navigator was ready, handle it now.
-          if (_pendingNotifNavigation) {
-            const { data, role } = _pendingNotifNavigation;
-            _pendingNotifNavigation = null;
-            navigateForNotification(data, role);
-          }
+          void flushPendingNotification(user?.role);
         }}
       >
       <AppNavigator />

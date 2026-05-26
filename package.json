@@ -1,4 +1,9 @@
 {
+  "scripts": {
+    "admin-web:install": "npm --prefix admin-web install",
+    "admin-web:dev": "npm --prefix admin-web run dev",
+    "admin-web:build": "npm --prefix admin-web run build"
+  },
   "dependencies": {
     "expo": "~54.0.0",
     "mysql2": "^3.22.2"

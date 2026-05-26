@@ -240,7 +240,13 @@ export async function handleLectures(
       // Push to students and parents (non-blocking)
       const pushTitle = type === "homework" ? "New Homework Uploaded" : "New Lecture Uploaded";
       const pushBody = `${subject_name}: ${lecture_name}`;
-      const pushData = { type: "lecture" };
+      const pushData = {
+        type: "lecture",
+        lecture_id: lecture.id,
+        lecture_type: type,
+        class_id,
+        section_id,
+      };
       tokensForClassStudents(db, schoolId, class_id, section_id).then((tokens) =>
         sendPush(tokens, pushTitle, pushBody, pushData)
       );

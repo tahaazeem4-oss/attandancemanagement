@@ -1,5 +1,16 @@
 // handlers/superAdmin.ts — super admin routes
-import { json, getDb, verifyToken, hashPassword } from "../_shared.ts";
+import { json, getDb, verifyToken, hashPassword, SUPABASE_URL } from "../_shared.ts";
+import {
+  archiveSchool,
+  archiveSubject,
+  archiveTeacher,
+  getSchoolDeleteImpact,
+  getSubjectDeleteImpact,
+  getTeacherDeleteImpact,
+  unarchiveSchool,
+  unarchiveSubject,
+  unarchiveTeacher,
+} from "../lib/deletion.ts";
 
 export async function handleSuperAdmin(
   req: Request,
@@ -18,6 +29,7 @@ export async function handleSuperAdmin(
     return json({ message: "Forbidden" }, 403);
 
   const db = getDb();
+  const LOGOS_BUCKET = "logos";
 
   const deriveRoleFromAssignments = (assignments: unknown[]): string => {
     const n = Array.isArray(assignments) ? assignments.length : 0;
@@ -42,9 +54,9 @@ export async function handleSuperAdmin(
         { count: students },
       ] = await Promise.all([
         db.from("organizations").select("*", { count: "exact", head: true }),
-        db.from("schools").select("*", { count: "exact", head: true }),
+        db.from("schools").select("*", { count: "exact", head: true }).eq("is_active", true),
         db.from("admins").select("*", { count: "exact", head: true }),
-        db.from("teachers").select("*", { count: "exact", head: true }),
+        db.from("teachers").select("*", { count: "exact", head: true }).eq("is_active", true),
         db.from("students").select("*", { count: "exact", head: true }),
       ]);
       return json({ organizations, campuses: schools, schools: organizations, admins, teachers, students });
@@ -127,6 +139,7 @@ export async function handleSuperAdmin(
       const { data: schools } = await db
         .from("schools")
         .select("*")
+        .eq("is_active", true)
         .order("name");
 
       const result = await Promise.all(
@@ -137,7 +150,7 @@ export async function handleSuperAdmin(
             { count: student_count },
           ] = await Promise.all([
             db.from("admins").select("*", { count: "exact", head: true }).eq("school_id", sc.id),
-            db.from("teachers").select("*", { count: "exact", head: true }).eq("school_id", sc.id),
+            db.from("teachers").select("*", { count: "exact", head: true }).eq("school_id", sc.id).eq("is_active", true),
             db.from("students").select("*", { count: "exact", head: true }).eq("school_id", sc.id),
           ]);
           return { ...sc, admin_count, teacher_count, student_count };
@@ -164,6 +177,12 @@ export async function handleSuperAdmin(
   }
 
   // ── PUT /super-admin/schools/:id ─────────────────────────────
+  const schoolImpactMatch = path.match(/^\/super-admin\/schools\/(\d+)\/delete-impact$/);
+  if (schoolImpactMatch && method === "GET") {
+    const id = parseInt(schoolImpactMatch[1]);
+    return json(await getSchoolDeleteImpact(db, id));
+  }
+
   const schoolMatch = path.match(/^\/super-admin\/schools\/(\d+)$/);
   if (schoolMatch && method === "PUT") {
     const id = parseInt(schoolMatch[1]);
@@ -177,15 +196,66 @@ export async function handleSuperAdmin(
     }
   }
 
+  const schoolLogoMatch = path.match(/^\/super-admin\/schools\/(\d+)\/logo$/);
+  if (schoolLogoMatch && method === "POST") {
+    const id = parseInt(schoolLogoMatch[1]);
+    try {
+      const { data: school } = await db.from("schools").select("id, logo_url").eq("id", id).maybeSingle();
+      if (!school?.id) return json({ message: "Not found" }, 404);
+
+      const formData = await req.formData();
+      const file = formData.get("logo") as File | null;
+      if (!file) return json({ message: "logo file is required" }, 400);
+
+      const ext = file.name.split(".").pop() || "png";
+      const storagePath = `${id}/logo_${Date.now()}.${ext}`;
+      const buffer = await file.arrayBuffer();
+
+      if (school.logo_url) {
+        const oldPath = (school.logo_url as string).replace(
+          `${SUPABASE_URL()}/storage/v1/object/public/${LOGOS_BUCKET}/`,
+          "",
+        );
+        if (oldPath && !oldPath.startsWith("http")) {
+          await db.storage.from(LOGOS_BUCKET).remove([oldPath]);
+        }
+      }
+
+      const { error: storageError } = await db.storage
+        .from(LOGOS_BUCKET)
+        .upload(storagePath, buffer, { contentType: file.type || "image/png", upsert: true });
+      if (storageError) throw storageError;
+
+      const logo_url = `${SUPABASE_URL()}/storage/v1/object/public/${LOGOS_BUCKET}/${storagePath}`;
+      await db.from("schools").update({ logo_url }).eq("id", id);
+      return json({ logo_url });
+    } catch (err) {
+      console.error("[super-admin/schools/:id/logo POST]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
   // ── DELETE /super-admin/schools/:id ─────────────────────────
   if (schoolMatch && method === "DELETE") {
     const id = parseInt(schoolMatch[1]);
     try {
-      await db.from("schools").delete().eq("id", id);
-      return json({ message: "School deleted" });
+      const result = await archiveSchool(db, id, Number(user.id), String(user.role));
+      return json({ message: "School archived", archived: true, impact: result.impact });
     } catch (err) {
       console.error("[super-admin/schools DELETE]", err);
       return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── POST /super-admin/schools/:id/restore ───────────────────
+  const schoolRestoreMatch = path.match(/^\/super-admin\/schools\/(\d+)\/restore$/);
+  if (schoolRestoreMatch && method === "POST") {
+    const id = parseInt(schoolRestoreMatch[1]);
+    try {
+      await unarchiveSchool(db, id);
+      return json({ message: "School restored", restored: true });
+    } catch (err) {
+      return json({ message: err instanceof Error ? err.message : "Failed to restore" }, 400);
     }
   }
 
@@ -293,7 +363,8 @@ export async function handleSuperAdmin(
       const { data: teachers } = await db
         .from("teachers")
         .select("id, first_name, last_name, email, phone, teacher_role")
-        .eq("school_id", schoolId);
+        .eq("school_id", schoolId)
+        .eq("is_active", true);
 
       const { data: assignments } = await db
         .from("teacher_classes")
@@ -380,6 +451,12 @@ export async function handleSuperAdmin(
   }
 
   // ── PUT/DELETE/RESET /super-admin/schools/:schoolId/teachers/:id ─
+  const schoolTeacherImpactMatch = path.match(/^\/super-admin\/schools\/\d+\/teachers\/(\d+)\/delete-impact$/);
+  if (schoolTeacherImpactMatch && method === "GET") {
+    const id = parseInt(schoolTeacherImpactMatch[1]);
+    return json(await getTeacherDeleteImpact(db, id));
+  }
+
   const schoolTeacherIdMatch = path.match(/^\/super-admin\/schools\/\d+\/teachers\/(\d+)$/);
   if (schoolTeacherIdMatch && method === "PUT") {
     const id = parseInt(schoolTeacherIdMatch[1]);
@@ -416,11 +493,35 @@ export async function handleSuperAdmin(
   if (schoolTeacherIdMatch && method === "DELETE") {
     const id = parseInt(schoolTeacherIdMatch[1]);
     try {
-      await db.from("teachers").delete().eq("id", id);
-      return json({ message: "Teacher deleted" });
+      const replacementTeacherId = Number(url.searchParams.get("replacement_teacher_id") || "") || null;
+      try {
+        const result = await archiveTeacher(db, id, Number(user.id), String(user.role), replacementTeacherId);
+        return json({
+          message: result.reassigned ? "Teacher reassigned and archived" : "Teacher archived",
+          archived: true,
+          reassigned: result.reassigned,
+          impact: result.impact,
+        });
+      } catch (archiveErr) {
+        return json({
+          message: archiveErr instanceof Error ? archiveErr.message : "Teacher cannot be deleted yet",
+          impact: await getTeacherDeleteImpact(db, id),
+        }, 409);
+      }
     } catch (err) {
       console.error("[super-admin/schools/:id/teachers/:id DELETE]", err);
       return json({ message: "Server error" }, 500);
+    }
+  }
+
+  const schoolTeacherRestoreMatch = path.match(/^\/super-admin\/schools\/\d+\/teachers\/(\d+)\/restore$/);
+  if (schoolTeacherRestoreMatch && method === "POST") {
+    const id = parseInt(schoolTeacherRestoreMatch[1]);
+    try {
+      await unarchiveTeacher(db, id);
+      return json({ message: "Teacher restored", restored: true });
+    } catch (err) {
+      return json({ message: err instanceof Error ? err.message : "Failed to restore" }, 400);
     }
   }
 
@@ -1112,6 +1213,7 @@ export async function handleSuperAdmin(
         .from("subjects")
         .select("id, name")
         .eq("school_id", schoolId)
+        .eq("is_active", true)
         .order("name");
       return json(data || []);
     } catch (err) {
@@ -1140,6 +1242,15 @@ export async function handleSuperAdmin(
       console.error("[super-admin/schools/:id/subjects POST]", err);
       return json({ message: "Server error" }, 500);
     }
+  }
+
+  const schoolSubjectImpactMatch = path.match(/^\/super-admin\/schools\/(\d+)\/subjects\/(\d+)\/delete-impact$/);
+  if (schoolSubjectImpactMatch && method === "GET") {
+    const schoolId = parseInt(schoolSubjectImpactMatch[1]);
+    const subjectId = parseInt(schoolSubjectImpactMatch[2]);
+    const { data: subject } = await db.from("subjects").select("school_id").eq("id", subjectId).eq("school_id", schoolId).maybeSingle();
+    if (!subject) return json({ message: "Not found" }, 404);
+    return json(await getSubjectDeleteImpact(db, subjectId));
   }
 
   // ── PUT /super-admin/schools/:schoolId/subjects/:subjectId ───
@@ -1173,11 +1284,28 @@ export async function handleSuperAdmin(
     const schoolId = parseInt(schoolSubjectEditMatch[1]);
     const subjectId = parseInt(schoolSubjectEditMatch[2]);
     try {
-      await db.from("subjects").delete().eq("id", subjectId).eq("school_id", schoolId);
-      return json({ message: "Subject deleted" });
+      const { data: subject } = await db.from("subjects").select("school_id").eq("id", subjectId).eq("school_id", schoolId).maybeSingle();
+      if (!subject) return json({ message: "Not found" }, 404);
+      const result = await archiveSubject(db, subjectId, Number(user.id), String(user.role));
+      return json({ message: "Subject archived", archived: true, impact: result.impact });
     } catch (err) {
       console.error("[super-admin/schools/:id/subjects DELETE]", err);
       return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── POST /super-admin/schools/:schoolId/subjects/:subjectId/restore ─
+  const schoolSubjectRestoreMatch = path.match(/^\/super-admin\/schools\/(\d+)\/subjects\/(\d+)\/restore$/);
+  if (schoolSubjectRestoreMatch && method === "POST") {
+    const schoolId = parseInt(schoolSubjectRestoreMatch[1]);
+    const subjectId = parseInt(schoolSubjectRestoreMatch[2]);
+    const { data: subject } = await db.from("subjects").select("school_id").eq("id", subjectId).eq("school_id", schoolId).maybeSingle();
+    if (!subject) return json({ message: "Not found" }, 404);
+    try {
+      await unarchiveSubject(db, subjectId);
+      return json({ message: "Subject restored", restored: true });
+    } catch (err) {
+      return json({ message: err instanceof Error ? err.message : "Failed to restore" }, 400);
     }
   }
 

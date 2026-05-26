@@ -1,5 +1,6 @@
 // handlers/subjects.ts
 import { json, getDb, verifyToken } from "../_shared.ts";
+import { archiveSubject, getSubjectDeleteImpact } from "../lib/deletion.ts";
 
 export async function handleSubjects(
   req: Request,
@@ -25,6 +26,7 @@ export async function handleSubjects(
         .from("subjects")
         .select("id, name")
         .eq("school_id", schoolId)
+        .eq("is_active", true)
         .order("name");
 
       // Include subject names that may exist only in lectures (legacy/manual uploads).
@@ -89,6 +91,19 @@ export async function handleSubjects(
   }
 
   // PUT /subjects/:id (rename)
+  const impactMatch = path.match(/^\/subjects\/(\d+)\/delete-impact$/);
+  if (impactMatch && method === "GET") {
+    if (user.role !== "admin" && user.role !== "super_admin")
+      return json({ message: "Forbidden" }, 403);
+    const id = parseInt(impactMatch[1]);
+    const impact = await getSubjectDeleteImpact(db, id);
+    if (!impact || Number((impact as any).counts?.school_id || schoolId) !== schoolId) {
+      const { data: subject } = await db.from("subjects").select("school_id").eq("id", id).maybeSingle();
+      if (!subject || Number(subject.school_id) !== schoolId) return json({ message: "Not found" }, 404);
+    }
+    return json(impact);
+  }
+
   const editMatch = path.match(/^\/subjects\/(\d+)$/);
   if (editMatch && method === "PUT") {
     if (user.role !== "admin" && user.role !== "super_admin")
@@ -122,8 +137,10 @@ export async function handleSubjects(
       return json({ message: "Forbidden" }, 403);
     const id = parseInt(deleteMatch[1]);
     try {
-      await db.from("subjects").delete().eq("id", id).eq("school_id", schoolId);
-      return json({ message: "Subject deleted" });
+      const { data: subject } = await db.from("subjects").select("school_id").eq("id", id).eq("school_id", schoolId).maybeSingle();
+      if (!subject) return json({ message: "Not found" }, 404);
+      const result = await archiveSubject(db, id, Number(user.id), String(user.role));
+      return json({ message: "Subject archived", impact: result.impact, archived: true });
     } catch (err) {
       console.error("[subjects DELETE]", err);
       return json({ message: "Server error" }, 500);

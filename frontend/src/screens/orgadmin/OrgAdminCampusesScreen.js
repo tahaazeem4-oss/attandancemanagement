@@ -11,6 +11,7 @@ import AppHeader from '../../components/AppHeader';
 import ImportExportBar from '../../components/ImportExportBar';
 import ScreenIntroCard from '../../components/ScreenIntroCard';
 import { showDestructiveConfirm } from '../../lib/confirmDialog';
+import { confirmDeleteWithImpact } from '../../lib/deleteWithImpact';
 
 const EMPTY_FORM = { name: '', tagline: '', initials: '' };
 
@@ -90,17 +91,12 @@ export default function OrgAdminCampusesScreen({ navigation }) {
   };
 
   const handleDelete = (item) => {
-    showDestructiveConfirm({
+    confirmDeleteWithImpact({
+      impactPath: `/org-admin/campuses/${item.id}/delete-impact`,
+      deletePath: `/org-admin/campuses/${item.id}`,
+      entityLabel: 'campus',
       title: 'Delete Campus',
-      message: `Are you sure you want to delete "${item.name}"? This action cannot be undone.`,
-      onConfirm: async () => {
-        try {
-          await api.delete(`/org-admin/campuses/${item.id}`);
-          load();
-        } catch (err) {
-          Alert.alert('Error', err?.response?.data?.message || 'Could not delete.');
-        }
-      },
+      onSuccess: () => load(),
     });
   };
 

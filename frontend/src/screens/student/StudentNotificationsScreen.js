@@ -7,6 +7,7 @@ import {
 import api from '../../services/api';
 import { C } from '../../config/theme';
 import AppHeader from '../../components/AppHeader';
+import { createParentPortalBackHandler } from '../../navigation/parentPortalBack';
 
 // Enable LayoutAnimation on Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -54,6 +55,7 @@ export default function StudentNotificationsScreen({ navigation, route }) {
   // Support parent viewing child's portal
   const childId = route?.params?.child?.student_id;
   const isParentViewing = !!childId;
+  const handleBackPress = isParentViewing ? createParentPortalBackHandler(navigation, route) : null;
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -197,7 +199,7 @@ export default function StudentNotificationsScreen({ navigation, route }) {
 
   return (
     <View style={styles.rootWrap}>
-      <AppHeader title="Notifications" eyebrow="Student Portal" navigation={navigation} />
+      <AppHeader title="Notifications" eyebrow="Student Portal" navigation={navigation} onBackPress={handleBackPress} />
     <View style={styles.root}>
 
       {/* Mark all read row */}

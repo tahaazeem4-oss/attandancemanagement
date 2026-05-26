@@ -7,6 +7,20 @@ import {
   sendPush,
   SUPABASE_URL,
 } from "../_shared.ts";
+import {
+  archiveClass,
+  archiveSchool,
+  archiveSubject,
+  archiveTeacher,
+  getClassDeleteImpact,
+  getSchoolDeleteImpact,
+  getSubjectDeleteImpact,
+  getTeacherDeleteImpact,
+  unarchiveClass,
+  unarchiveSchool,
+  unarchiveSubject,
+  unarchiveTeacher,
+} from "../lib/deletion.ts";
 import * as XLSX from "npm:xlsx";
 
 export async function handleOrgAdmin(
@@ -33,12 +47,12 @@ export async function handleOrgAdmin(
   }
 
   async function getCampusIds(): Promise<number[]> {
-    const { data } = await db.from("schools").select("id").eq("org_id", orgId);
+    const { data } = await db.from("schools").select("id").eq("org_id", orgId).eq("is_active", true);
     return (data || []).map((s: Record<string, unknown>) => s.id as number);
   }
 
   async function verifyCampus(campusId: number): Promise<boolean> {
-    const { data } = await db.from("schools").select("id").eq("id", campusId).eq("org_id", orgId).single();
+    const { data } = await db.from("schools").select("id").eq("id", campusId).eq("org_id", orgId).eq("is_active", true).single();
     return !!data;
   }
 
@@ -71,9 +85,9 @@ export async function handleOrgAdmin(
       if (!campusIds.length)
         return json({ campuses: 0, teachers: 0, students: 0, classes: 0, pending_leaves: 0 });
       const [{ count: teachers }, { count: students }, { count: classes }] = await Promise.all([
-        db.from("teachers").select("*", { count: "exact", head: true }).in("school_id", campusIds),
+        db.from("teachers").select("*", { count: "exact", head: true }).in("school_id", campusIds).eq("is_active", true),
         db.from("students").select("*", { count: "exact", head: true }).in("school_id", campusIds),
-        db.from("classes").select("*", { count: "exact", head: true }).in("school_id", campusIds),
+        db.from("classes").select("*", { count: "exact", head: true }).in("school_id", campusIds).eq("is_active", true),
       ]);
       const { data: leaveRows } = await db
         .from("leave_applications")
@@ -101,12 +115,12 @@ export async function handleOrgAdmin(
       const { data: campuses } = await db
         .from("schools")
         .select("id, name, tagline, initials, logo_url, primary_color, accent_color, created_at")
-        .eq("org_id", orgId).order("name");
+        .eq("org_id", orgId).eq("is_active", true).order("name");
       const result = await Promise.all((campuses || []).map(async (c: Record<string, unknown>) => {
         const [{ count: teacher_count }, { count: student_count }, { count: class_count }] = await Promise.all([
-          db.from("teachers").select("*", { count: "exact", head: true }).eq("school_id", c.id),
+          db.from("teachers").select("*", { count: "exact", head: true }).eq("school_id", c.id).eq("is_active", true),
           db.from("students").select("*", { count: "exact", head: true }).eq("school_id", c.id),
-          db.from("classes").select("*", { count: "exact", head: true }).eq("school_id", c.id),
+          db.from("classes").select("*", { count: "exact", head: true }).eq("school_id", c.id).eq("is_active", true),
         ]);
         return { ...c, teacher_count, student_count, class_count };
       }));
@@ -132,6 +146,13 @@ export async function handleOrgAdmin(
     }
   }
 
+  const campusImpactMatch = path.match(/^\/org-admin\/campuses\/(\d+)\/delete-impact$/);
+  if (campusImpactMatch && method === "GET") {
+    const id = parseInt(campusImpactMatch[1]);
+    if (!(await verifyCampus(id))) return json({ message: "Not found" }, 404);
+    return json(await getSchoolDeleteImpact(db, id));
+  }
+
   const campusMatch = path.match(/^\/org-admin\/campuses\/(\d+)$/);
   if (campusMatch && method === "PUT") {
     const id = parseInt(campusMatch[1]);
@@ -150,11 +171,24 @@ export async function handleOrgAdmin(
     const id = parseInt(campusMatch[1]);
     if (!(await verifyCampus(id))) return json({ message: "Not found" }, 404);
     try {
-      await db.from("schools").delete().eq("id", id);
-      return json({ message: "Campus deleted" });
+      const result = await archiveSchool(db, id, Number(user.id), String(user.role));
+      return json({ message: "Campus archived", archived: true, impact: result.impact });
     } catch (err) {
       console.error("[org-admin/campuses DELETE]", err);
       return json({ message: "Server error" }, 500);
+    }
+  }
+
+  const campusRestoreMatch = path.match(/^\/org-admin\/campuses\/(\d+)\/restore$/);
+  if (campusRestoreMatch && method === "POST") {
+    const id = parseInt(campusRestoreMatch[1]);
+    const { data: campus } = await db.from("schools").select("id").eq("id", id).eq("org_id", orgId).maybeSingle();
+    if (!campus) return json({ message: "Not found" }, 404);
+    try {
+      await unarchiveSchool(db, id);
+      return json({ message: "Campus restored", restored: true });
+    } catch (err) {
+      return json({ message: err instanceof Error ? err.message : "Failed to restore" }, 400);
     }
   }
 
@@ -257,7 +291,7 @@ export async function handleOrgAdmin(
       if (!campusIds.length) return json([]);
       const { data: teachers } = await db.from("teachers")
         .select("id, first_name, last_name, email, phone, school_id, created_at, teacher_role")
-        .in("school_id", campusIds).order("last_name");
+        .in("school_id", campusIds).eq("is_active", true).order("last_name");
 
       const teacherIds = (teachers || []).map((t: Record<string, unknown>) => t.id as number);
       const { data: assignments } = teacherIds.length
@@ -352,6 +386,15 @@ export async function handleOrgAdmin(
     }
   }
 
+  const teacherImpactMatch = path.match(/^\/org-admin\/teachers\/(\d+)\/delete-impact$/);
+  if (teacherImpactMatch && method === "GET") {
+    const id = parseInt(teacherImpactMatch[1]);
+    const campusIds = await getCampusIds();
+    const { data: teacher } = await db.from("teachers").select("school_id").eq("id", id).maybeSingle();
+    if (!teacher || !campusIds.includes(Number(teacher.school_id))) return json({ message: "Not found" }, 404);
+    return json(await getTeacherDeleteImpact(db, id));
+  }
+
   const teacherMatch = path.match(/^\/org-admin\/teachers\/(\d+)$/);
   if (teacherMatch && method === "PUT") {
     const id = parseInt(teacherMatch[1]);
@@ -396,11 +439,40 @@ export async function handleOrgAdmin(
     const id = parseInt(teacherMatch[1]);
     try {
       const campusIds = await getCampusIds();
-      await db.from("teachers").delete().eq("id", id).in("school_id", campusIds);
-      return json({ message: "Teacher deleted" });
+      const { data: teacher } = await db.from("teachers").select("school_id").eq("id", id).maybeSingle();
+      if (!teacher || !campusIds.includes(Number(teacher.school_id))) return json({ message: "Not found" }, 404);
+      const replacementTeacherId = Number(url.searchParams.get("replacement_teacher_id") || "") || null;
+      try {
+        const result = await archiveTeacher(db, id, Number(user.id), String(user.role), replacementTeacherId);
+        return json({
+          message: result.reassigned ? "Teacher reassigned and archived" : "Teacher archived",
+          archived: true,
+          reassigned: result.reassigned,
+          impact: result.impact,
+        });
+      } catch (archiveErr) {
+        return json({
+          message: archiveErr instanceof Error ? archiveErr.message : "Teacher cannot be deleted yet",
+          impact: await getTeacherDeleteImpact(db, id),
+        }, 409);
+      }
     } catch (err) {
       console.error("[org-admin/teachers DELETE]", err);
       return json({ message: "Server error" }, 500);
+    }
+  }
+
+  const teacherRestoreMatch = path.match(/^\/org-admin\/teachers\/(\d+)\/restore$/);
+  if (teacherRestoreMatch && method === "POST") {
+    const id = parseInt(teacherRestoreMatch[1]);
+    const campusIds = await getCampusIds();
+    const { data: teacher } = await db.from("teachers").select("school_id").eq("id", id).maybeSingle();
+    if (!teacher || !campusIds.includes(Number(teacher.school_id))) return json({ message: "Not found" }, 404);
+    try {
+      await unarchiveTeacher(db, id);
+      return json({ message: "Teacher restored", restored: true });
+    } catch (err) {
+      return json({ message: err instanceof Error ? err.message : "Failed to restore" }, 400);
     }
   }
 
@@ -521,7 +593,7 @@ export async function handleOrgAdmin(
       if (!campusIds.length) return json([]);
       const { data } = await db.from("classes")
         .select("id, class_name, school_id, sections(id, section_name)")
-        .in("school_id", campusIds).order("class_name");
+        .in("school_id", campusIds).eq("is_active", true).order("class_name");
       const sMap = await buildSchoolMap(campusIds);
       return json((data || []).map((c: Record<string, unknown>) => ({ ...c, campus_name: sMap[c.school_id as number] || null })));
     } catch (err) {
@@ -544,6 +616,15 @@ export async function handleOrgAdmin(
     }
   }
 
+  const classImpactMatch = path.match(/^\/org-admin\/classes\/(\d+)\/delete-impact$/);
+  if (classImpactMatch && method === "GET") {
+    const id = parseInt(classImpactMatch[1]);
+    const campusIds = await getCampusIds();
+    const { data: cls } = await db.from("classes").select("school_id").eq("id", id).maybeSingle();
+    if (!cls || !campusIds.includes(Number(cls.school_id))) return json({ message: "Not found" }, 404);
+    return json(await getClassDeleteImpact(db, id));
+  }
+
   const classMatch = path.match(/^\/org-admin\/classes\/(\d+)$/);
   if (classMatch && method === "PUT") {
     const id = parseInt(classMatch[1]);
@@ -562,11 +643,34 @@ export async function handleOrgAdmin(
     const id = parseInt(classMatch[1]);
     try {
       const campusIds = await getCampusIds();
-      await db.from("classes").delete().eq("id", id).in("school_id", campusIds);
-      return json({ message: "Class deleted" });
+      const { data: cls } = await db.from("classes").select("school_id").eq("id", id).maybeSingle();
+      if (!cls || !campusIds.includes(Number(cls.school_id))) return json({ message: "Not found" }, 404);
+      try {
+        const result = await archiveClass(db, id, Number(user.id), String(user.role));
+        return json({ message: "Class archived", archived: true, impact: result.impact });
+      } catch (archiveErr) {
+        return json({
+          message: archiveErr instanceof Error ? archiveErr.message : "Class cannot be deleted yet",
+          impact: await getClassDeleteImpact(db, id),
+        }, 409);
+      }
     } catch (err) {
       console.error("[org-admin/classes DELETE]", err);
       return json({ message: "Server error" }, 500);
+    }
+  }
+
+  const classRestoreMatch = path.match(/^\/org-admin\/classes\/(\d+)\/restore$/);
+  if (classRestoreMatch && method === "POST") {
+    const id = parseInt(classRestoreMatch[1]);
+    const campusIds = await getCampusIds();
+    const { data: cls } = await db.from("classes").select("school_id").eq("id", id).maybeSingle();
+    if (!cls || !campusIds.includes(Number(cls.school_id))) return json({ message: "Not found" }, 404);
+    try {
+      await unarchiveClass(db, id);
+      return json({ message: "Class restored", restored: true });
+    } catch (err) {
+      return json({ message: err instanceof Error ? err.message : "Failed to restore" }, 400);
     }
   }
 
@@ -1006,7 +1110,7 @@ export async function handleOrgAdmin(
     const cid = parseInt(campusId);
     if (!(await verifyCampus(cid))) return json({ message: "Not found" }, 404);
     try {
-      const { data } = await db.from("subjects").select("id, name").eq("school_id", cid).order("name");
+      const { data } = await db.from("subjects").select("id, name").eq("school_id", cid).eq("is_active", true).order("name");
       return json(data || []);
     } catch (err) {
       console.error("[org-admin/subjects GET]", err);
@@ -1032,6 +1136,15 @@ export async function handleOrgAdmin(
       console.error("[org-admin/subjects POST]", err);
       return json({ message: "Server error" }, 500);
     }
+  }
+
+  const subjectImpactMatch = path.match(/^\/org-admin\/subjects\/(\d+)\/delete-impact$/);
+  if (subjectImpactMatch && method === "GET") {
+    const id = parseInt(subjectImpactMatch[1]);
+    const campusIds = await getCampusIds();
+    const { data: sub } = await db.from("subjects").select("school_id").eq("id", id).maybeSingle();
+    if (!sub || !campusIds.includes(Number(sub.school_id))) return json({ message: "Not found" }, 404);
+    return json(await getSubjectDeleteImpact(db, id));
   }
 
   const subjectMatch = path.match(/^\/org-admin\/subjects\/(\d+)$/);
@@ -1065,11 +1178,25 @@ export async function handleOrgAdmin(
       const { data: sub } = await db.from("subjects").select("school_id").eq("id", id).single();
       if (!sub || !campusIds.includes(sub.school_id as number))
         return json({ message: "Not found" }, 404);
-      await db.from("subjects").delete().eq("id", id);
-      return json({ message: "Subject deleted" });
+      const result = await archiveSubject(db, id, Number(user.id), String(user.role));
+      return json({ message: "Subject archived", archived: true, impact: result.impact });
     } catch (err) {
       console.error("[org-admin/subjects DELETE]", err);
       return json({ message: "Server error" }, 500);
+    }
+  }
+
+  const subjectRestoreMatch = path.match(/^\/org-admin\/subjects\/(\d+)\/restore$/);
+  if (subjectRestoreMatch && method === "POST") {
+    const id = parseInt(subjectRestoreMatch[1]);
+    const campusIds = await getCampusIds();
+    const { data: sub } = await db.from("subjects").select("school_id").eq("id", id).maybeSingle();
+    if (!sub || !campusIds.includes(Number(sub.school_id))) return json({ message: "Not found" }, 404);
+    try {
+      await unarchiveSubject(db, id);
+      return json({ message: "Subject restored", restored: true });
+    } catch (err) {
+      return json({ message: err instanceof Error ? err.message : "Failed to restore" }, 400);
     }
   }
 

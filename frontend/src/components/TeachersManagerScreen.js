@@ -14,6 +14,7 @@ import EntityEmptyState from './EntityEmptyState';
 import ManagerSearchAddRow from './ManagerSearchAddRow';
 import ModalFooterActions from './ModalFooterActions';
 import { showDestructiveConfirm } from '../lib/confirmDialog';
+import { confirmDeleteWithImpact } from '../lib/deleteWithImpact';
 import { buildImportExportScope, getImportExportBase } from '../lib/importExportScope';
 
 const EMPTY_FORM = { first_name: '', last_name: '', email: '', password: '', phone: '', assignments: [], school_id: '', teacher_role: 'subject_teacher' };
@@ -345,22 +346,17 @@ export default function TeachersManagerScreen({ navigation, mode }) {
   };
 
   const handleDelete = item => {
-    showDestructiveConfirm({
+    const basePath = isSuper
+      ? `/super-admin/schools/${item.school_id}/teachers/${item.id}`
+      : isOrg
+        ? `/org-admin/teachers/${item.id}`
+        : `/admin/teachers/${item.id}`;
+    confirmDeleteWithImpact({
+      impactPath: `${basePath}/delete-impact`,
+      deletePath: basePath,
+      entityLabel: 'teacher',
       title: 'Delete Teacher',
-      message: `Are you sure you want to delete ${item.first_name} ${item.last_name}? This action cannot be undone.`,
-      onConfirm: async () => {
-        try {
-          const path = isSuper
-            ? `/super-admin/schools/${item.school_id}/teachers/${item.id}`
-            : isOrg
-              ? `/org-admin/teachers/${item.id}`
-              : `/admin/teachers/${item.id}`;
-          await api.delete(path);
-          await load();
-        } catch (err) {
-          Alert.alert('Error', err?.response?.data?.message || 'Could not delete');
-        }
-      },
+      onSuccess: () => load(),
     });
   };
 

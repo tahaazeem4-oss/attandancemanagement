@@ -1,0 +1,29 @@
+# EAS Build Upload Exclusions
+# These are platform-specific binaries and local build artifacts
+# that EAS Linux build servers don't need.
+
+# Local JDK download — EAS has its own
+android/.jdks/
+
+# Local build artifacts (pre-built bundles from expo export)
+dist/
+
+# Android Gradle caches (not needed, EAS rebuilds)
+android/.gradle/
+
+# Hermes compiler — EAS Linux only needs linux64-bin
+node_modules/react-native/sdks/hermesc/win64-bin/
+node_modules/react-native/sdks/hermesc/osx-bin/
+
+# Windows-only native binaries
+node_modules/lightningcss-win32-x64-msvc/
+
+# macOS-only native binaries
+node_modules/lightningcss-darwin-arm64/
+node_modules/lightningcss-darwin-x64/
+
+# Expo telemetry / cache
+.expo/
+
+# Test & coverage output
+coverage/

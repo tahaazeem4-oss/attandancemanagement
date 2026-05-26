@@ -4,6 +4,7 @@ import { Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '../../components/AppHeader';
 import { C } from '../../config/theme';
+import { createParentPortalBackHandler } from '../../navigation/parentPortalBack';
 
 const TYPE_LABEL   = { classwork: 'Class Work', homework: 'Homework' };
 const TYPE_COLOR   = { classwork: '#4338CA', homework: '#B45309' };
@@ -13,6 +14,8 @@ const TYPE_ICON    = { classwork: 'book-outline', homework: 'pencil-outline' };
 
 export default function StudentLectureDetailScreen({ navigation, route }) {
   const lecture = route?.params?.lecture;
+  const isParentViewing = !!route?.params?.child?.student_id;
+  const handleBackPress = isParentViewing ? createParentPortalBackHandler(navigation, route) : null;
 
   const handleDownload = async () => {
     const url = lecture?.file_url;
@@ -25,7 +28,7 @@ export default function StudentLectureDetailScreen({ navigation, route }) {
   if (!lecture) {
     return (
       <View style={styles.root}>
-        <AppHeader title="Details" eyebrow="Student Portal" navigation={navigation} />
+        <AppHeader title="Details" eyebrow="Student Portal" navigation={navigation} onBackPress={handleBackPress} />
         <View style={styles.emptyWrap}>
           <Text style={styles.emptyTitle}>Item not found</Text>
           <Text style={styles.emptySub}>Go back and open the item again.</Text>
@@ -41,7 +44,7 @@ export default function StudentLectureDetailScreen({ navigation, route }) {
 
   return (
     <View style={styles.root}>
-      <AppHeader title="Lecture Details" eyebrow="Student Portal" navigation={navigation} />
+      <AppHeader title="Lecture Details" eyebrow="Student Portal" navigation={navigation} onBackPress={handleBackPress} />
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
         {/* ── Header card ── */}

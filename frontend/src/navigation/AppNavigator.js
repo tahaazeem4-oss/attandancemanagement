@@ -24,6 +24,7 @@ import {
   notificationTabIcon,
   renderTabScreens,
 } from './tabComposition';
+import { goToParentPortalStudentHome } from './parentPortalBack';
 import { subscribeChatUnreadRefresh } from '../lib/chatEvents';
 
 // Auth screens
@@ -200,7 +201,29 @@ function ParentChildHomeStack({ route, child }) {
   return (
     <Stack.Navigator
       key={activeChild?.student_id ? `child-${activeChild.student_id}` : 'child-none'}
-      screenOptions={{ ...sharedStackOptions, headerEyebrow: 'Student Portal' }}
+      screenOptions={{
+        ...sharedStackOptions,
+        headerEyebrow: 'Student Portal',
+        header: ({ navigation, route, options, back }) => {
+          const isChildHomeRoot = route?.name === 'StudentHome';
+          const onBackPress = activeChild && !isChildHomeRoot
+            ? () => {
+                if (goToParentPortalStudentHome(navigation, activeChild)) return;
+                if (navigation.canGoBack()) navigation.goBack();
+              }
+            : null;
+
+          return (
+            <AppHeader
+              title={options?.title || prettyRouteTitle(route?.name)}
+              subtitle={options?.headerSubtitle}
+              navigation={navigation}
+              showBack={!!back}
+              onBackPress={onBackPress}
+            />
+          );
+        },
+      }}
     >
       {renderStackScreens(buildParentChildScreens(activeChild))}
     </Stack.Navigator>
@@ -337,6 +360,7 @@ const ROLE_ROOT_SCREENS = {
   org_admin: { name: 'OrgAdminTabs', component: OrgAdminTabs },
   admin: { name: 'AdminTabs', component: AdminTabs },
   parent: { name: 'ParentStack', component: ParentStack },
+  student: { name: 'StudentTabs', component: StudentTabs },
   teacher: { name: 'TeacherTabs', component: TeacherTabs },
 };
 
