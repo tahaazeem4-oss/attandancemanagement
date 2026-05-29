@@ -4678,6 +4678,382 @@ export function PortalAiAnalyticsPage({ request }) {
   );
 }
 
+function timetableEntryKey(dayKey, slotId) {
+  return `${dayKey}:${slotId}`;
+}
+
+function buildSectionSelection(classes, selectedClass, selectedSection) {
+  const classList = safeArray(classes);
+  const activeClass = classList.find((item) => String(item.id) === String(selectedClass)) || classList[0] || null;
+  const sections = safeArray(activeClass?.sections);
+  const nextSection = sections.find((item) => String(item.id) === String(selectedSection)) || sections[0] || null;
+  return {
+    classId: activeClass ? String(activeClass.id) : '',
+    sectionId: nextSection ? String(nextSection.id) : '',
+    sections,
+  };
+}
+
+export function PortalTimetablePage({ session, request }) {
+  const role = session?.user?.role;
+  const [selectedCampus, setSelectedCampus] = useState('');
+  const [selectedClass, setSelectedClass] = useState('');
+  const [selectedSection, setSelectedSection] = useState('');
+  const [days, setDays] = useState([]);
+  const [slots, setSlots] = useState([]);
+  const [entriesMap, setEntriesMap] = useState({});
+  const [message, setMessage] = useState('');
+  const [messageTone, setMessageTone] = useState('neutral');
+  const [savingStructure, setSavingStructure] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+
+  const campusParam = role === 'org_admin' && selectedCampus ? { school_id: selectedCampus } : {};
+  const { loading: metaLoading, error: metaError, data: meta, reload: reloadMeta } = useRemoteResource(async () => {
+    return request('GET', '/timetable/meta', { params: campusParam });
+  }, [request, role, selectedCampus]);
+
+  const classes = safeArray(meta?.classes);
+  const campuses = safeArray(meta?.campuses);
+  const teachers = safeArray(meta?.teachers);
+  const subjects = safeArray(meta?.subjects);
+
+  useEffect(() => {
+    if (!meta) return;
+    if (role === 'org_admin' && meta.school_id && !selectedCampus) {
+      setSelectedCampus(String(meta.school_id));
+    }
+    setDays(safeArray(meta.days).map((day) => ({
+      day_key: day.day_key,
+      day_label: day.day_label,
+      is_active: day.is_active !== false,
+    })));
+    setSlots(safeArray(meta.slots).map((slot, index) => ({
+      id: slot.id,
+      slot_name: slot.slot_name,
+      start_time: String(slot.start_time || '').slice(0, 5),
+      end_time: String(slot.end_time || '').slice(0, 5),
+      slot_type: slot.slot_type || 'instruction',
+      is_active: slot.is_active !== false,
+      display_order: index + 1,
+    })));
+
+    const selection = buildSectionSelection(classes, selectedClass, selectedSection);
+    setSelectedClass(selection.classId);
+    setSelectedSection(selection.sectionId);
+  }, [classes, meta, role, selectedCampus, selectedClass, selectedSection]);
+
+  const { sections } = useMemo(
+    () => buildSectionSelection(classes, selectedClass, selectedSection),
+    [classes, selectedClass, selectedSection],
+  );
+
+  const activeDays = useMemo(() => days.filter((day) => day.is_active !== false), [days]);
+  const activeSlots = useMemo(() => slots.filter((slot) => slot.is_active !== false), [slots]);
+
+  const { loading: sectionLoading, error: sectionError, data: sectionData, reload: reloadSection } = useRemoteResource(async () => {
+    if (!selectedClass || !selectedSection) return { entries: [] };
+    return request('GET', '/timetable/section', {
+      params: {
+        class_id: selectedClass,
+        section_id: selectedSection,
+        ...campusParam,
+        status: 'draft',
+      },
+    });
+  }, [request, selectedClass, selectedSection, selectedCampus]);
+
+  useEffect(() => {
+    if (sectionLoading || sectionError) return;
+    setEntriesMap(safeArray(sectionData?.entries).reduce((acc, entry) => ({
+      ...acc,
+      [timetableEntryKey(entry.day_key, entry.slot_id)]: {
+        subject_id: entry.subject_id ? String(entry.subject_id) : '',
+        teacher_id: entry.teacher_id ? String(entry.teacher_id) : '',
+        note: entry.note || '',
+      },
+    }), {}));
+  }, [sectionData, sectionError, sectionLoading]);
+
+  const updateEntry = (dayKey, slotId, field, value) => {
+    const key = timetableEntryKey(dayKey, slotId);
+    setEntriesMap((current) => ({
+      ...current,
+      [key]: {
+        ...(current[key] || { subject_id: '', teacher_id: '', note: '' }),
+        [field]: value,
+      },
+    }));
+  };
+
+  const updateSlot = (index, field, value) => {
+    setSlots((current) => current.map((slot, slotIndex) => slotIndex === index ? { ...slot, [field]: value } : slot));
+  };
+
+  const toggleDay = (dayKey) => {
+    setDays((current) => current.map((day) => day.day_key === dayKey ? { ...day, is_active: !day.is_active } : day));
+  };
+
+  const addSlot = () => {
+    setSlots((current) => ([
+      ...current,
+      {
+        slot_name: `Slot ${current.length + 1}`,
+        start_time: '08:00',
+        end_time: '08:45',
+        slot_type: 'instruction',
+        is_active: true,
+        display_order: current.length + 1,
+      },
+    ]));
+  };
+
+  const removeSlot = (index) => {
+    setSlots((current) => current.filter((_, slotIndex) => slotIndex !== index).map((slot, slotIndex) => ({ ...slot, display_order: slotIndex + 1 })));
+  };
+
+  const saveStructure = async () => {
+    setSavingStructure(true);
+    setMessage('');
+    try {
+      const data = await request('PUT', '/timetable/structure', {
+        data: {
+          ...campusParam,
+          days,
+          slots: slots.map((slot, index) => ({ ...slot, display_order: index + 1 })),
+        },
+      });
+      setDays(safeArray(data.days).map((day) => ({
+        day_key: day.day_key,
+        day_label: day.day_label,
+        is_active: day.is_active !== false,
+      })));
+      setSlots(safeArray(data.slots).map((slot, index) => ({
+        id: slot.id,
+        slot_name: slot.slot_name,
+        start_time: String(slot.start_time || '').slice(0, 5),
+        end_time: String(slot.end_time || '').slice(0, 5),
+        slot_type: slot.slot_type || 'instruction',
+        is_active: slot.is_active !== false,
+        display_order: index + 1,
+      })));
+      setMessage('Timetable structure updated.');
+      setMessageTone('neutral');
+      reloadMeta();
+      reloadSection();
+    } catch (error) {
+      setMessage(error.message || 'Could not save timetable structure.');
+      setMessageTone('danger');
+    } finally {
+      setSavingStructure(false);
+    }
+  };
+
+  const saveDraft = async () => {
+    if (!selectedClass || !selectedSection) return;
+    setSavingDraft(true);
+    setMessage('');
+    try {
+      const entries = [];
+      activeDays.forEach((day) => {
+        activeSlots.forEach((slot) => {
+          if (slot.slot_type !== 'instruction') return;
+          const row = entriesMap[timetableEntryKey(day.day_key, slot.id)] || {};
+          if (!row.subject_id && !row.teacher_id && !String(row.note || '').trim()) return;
+          entries.push({
+            day_key: day.day_key,
+            slot_id: slot.id,
+            subject_id: row.subject_id || null,
+            teacher_id: row.teacher_id || null,
+            note: String(row.note || '').trim(),
+          });
+        });
+      });
+
+      await request('PUT', '/timetable/section', {
+        data: {
+          ...campusParam,
+          class_id: selectedClass,
+          section_id: selectedSection,
+          entries,
+        },
+      });
+      setMessage('Draft timetable saved.');
+      setMessageTone('neutral');
+      reloadSection();
+    } catch (error) {
+      setMessage(error.message || 'Could not save draft timetable.');
+      setMessageTone('danger');
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  const publishDraft = async () => {
+    if (!selectedClass || !selectedSection) return;
+    if (!window.confirm('Publish this timetable? Students and parents will immediately see the published version.')) return;
+    setPublishing(true);
+    setMessage('');
+    try {
+      await request('POST', '/timetable/section/publish', {
+        data: {
+          ...campusParam,
+          class_id: selectedClass,
+          section_id: selectedSection,
+        },
+      });
+      setMessage('Published timetable is now live.');
+      setMessageTone('neutral');
+    } catch (error) {
+      setMessage(error.message || 'Could not publish timetable.');
+      setMessageTone('danger');
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  return (
+    <div className="page-grid page-grid-2">
+      <section className="panel">
+        <SectionIntro title="Timetable" description="Use the same backend timetable rules for campus structure, draft editing, and published calendar visibility across web and mobile." action={<button className="secondary-button" onClick={() => { reloadMeta(); reloadSection(); }}>Refresh</button>} />
+        <Banner message={metaError || sectionError || message} tone={messageTone === 'danger' || metaError || sectionError ? 'danger' : 'neutral'} />
+
+        <div className="stack-form stack-form-compact">
+          {role === 'org_admin' ? (
+            <label>
+              <span>Campus</span>
+              <select value={selectedCampus} onChange={(event) => { setSelectedCampus(event.target.value); setSelectedClass(''); setSelectedSection(''); }}>
+                {campuses.map((campus) => <option key={campus.id} value={campus.id}>{campus.name}</option>)}
+              </select>
+            </label>
+          ) : null}
+
+          <div className="form-grid-2">
+            <label>
+              <span>Class</span>
+              <select value={selectedClass} onChange={(event) => { setSelectedClass(event.target.value); setSelectedSection(''); }}>
+                {classes.map((item) => <option key={item.id} value={item.id}>{item.class_name}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>Section</span>
+              <select value={selectedSection} onChange={(event) => setSelectedSection(event.target.value)}>
+                {sections.map((item) => <option key={item.id} value={item.id}>{item.section_name}</option>)}
+              </select>
+            </label>
+          </div>
+
+          <div className="selection-banner">
+            <strong>Draft editor</strong>
+            <span>Admins edit draft timetable first, then publish it for students and parents.</span>
+          </div>
+
+          {metaLoading ? <LoadingCard /> : (
+            <>
+              {activeDays.map((day) => (
+                <div key={day.day_key} className="timetable-day-card">
+                  <h3>{day.day_label}</h3>
+                  <div className="timetable-slot-list">
+                    {activeSlots.map((slot) => {
+                      const row = entriesMap[timetableEntryKey(day.day_key, slot.id)] || {};
+                      return (
+                        <div key={`${day.day_key}-${slot.id}`} className="timetable-slot-row">
+                          <div className="timetable-slot-meta">
+                            <strong>{slot.slot_name}</strong>
+                            <span>{String(slot.start_time || '').slice(0, 5)} - {String(slot.end_time || '').slice(0, 5)}</span>
+                          </div>
+                          {slot.slot_type !== 'instruction' ? (
+                            <span className="chip chip-active">{String(slot.slot_type || '').replace(/_/g, ' ')}</span>
+                          ) : (
+                            <div className="timetable-editor-grid">
+                              <select value={row.subject_id || ''} onChange={(event) => updateEntry(day.day_key, slot.id, 'subject_id', event.target.value)}>
+                                <option value="">Select subject</option>
+                                {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
+                              </select>
+                              <select value={row.teacher_id || ''} onChange={(event) => updateEntry(day.day_key, slot.id, 'teacher_id', event.target.value)}>
+                                <option value="">Not assigned</option>
+                                {teachers.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.full_name || `${teacher.first_name || ''} ${teacher.last_name || ''}`.trim()}</option>)}
+                              </select>
+                              <input value={row.note || ''} onChange={(event) => updateEntry(day.day_key, slot.id, 'note', event.target.value)} placeholder="Optional note" />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+
+          <div className="button-row">
+            <button className="primary-button" type="button" onClick={saveDraft} disabled={savingDraft || !selectedClass || !selectedSection}>{savingDraft ? 'Saving...' : 'Save Draft'}</button>
+            <button className="secondary-button" type="button" onClick={publishDraft} disabled={publishing || !selectedClass || !selectedSection}>{publishing ? 'Publishing...' : 'Publish'}</button>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel accent-panel">
+        <SectionIntro title="Campus Structure" description="Keep slot times, working days, and non-teaching periods consistent with the current mobile behavior." action={<button type="button" className="secondary-button" onClick={addSlot}>Add Slot</button>} />
+        <div className="stack-form stack-form-compact">
+          <div>
+            <span className="field-caption">Working Days</span>
+            <div className="chip-group">
+              {[
+                { key: 'monday', label: 'Monday' },
+                { key: 'tuesday', label: 'Tuesday' },
+                { key: 'wednesday', label: 'Wednesday' },
+                { key: 'thursday', label: 'Thursday' },
+                { key: 'friday', label: 'Friday' },
+                { key: 'saturday', label: 'Saturday' },
+                { key: 'sunday', label: 'Sunday' },
+              ].map((day) => {
+                const active = days.some((item) => item.day_key === day.key && item.is_active !== false);
+                return <button key={day.key} type="button" className={active ? 'chip chip-active' : 'chip'} onClick={() => toggleDay(day.key)}>{day.label}</button>;
+              })}
+            </div>
+          </div>
+
+          {slots.map((slot, index) => (
+            <div key={`${slot.id || 'new'}-${index}`} className="assignment-block">
+              <div className="toolbar toolbar-inline">
+                <strong>Slot {index + 1}</strong>
+                <button type="button" className="secondary-button" onClick={() => removeSlot(index)}>Remove</button>
+              </div>
+              <div className="form-grid-2">
+                <label>
+                  <span>Name</span>
+                  <input value={slot.slot_name} onChange={(event) => updateSlot(index, 'slot_name', event.target.value)} placeholder="Slot name" />
+                </label>
+                <label>
+                  <span>Type</span>
+                  <select value={slot.slot_type} onChange={(event) => updateSlot(index, 'slot_type', event.target.value)}>
+                    <option value="instruction">Instruction</option>
+                    <option value="break">Break</option>
+                    <option value="assembly">Assembly</option>
+                    <option value="free_period">Free Period</option>
+                    <option value="other">Other</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Start Time</span>
+                  <input value={slot.start_time} onChange={(event) => updateSlot(index, 'start_time', event.target.value)} placeholder="08:00" />
+                </label>
+                <label>
+                  <span>End Time</span>
+                  <input value={slot.end_time} onChange={(event) => updateSlot(index, 'end_time', event.target.value)} placeholder="08:45" />
+                </label>
+              </div>
+            </div>
+          ))}
+
+          <button className="primary-button" type="button" onClick={saveStructure} disabled={savingStructure}>{savingStructure ? 'Saving...' : 'Save Structure'}</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export function PortalEmptyPage({ message }) {
   return <EmptyState message={message} />;
 }

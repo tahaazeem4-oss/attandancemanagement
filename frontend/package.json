@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
-    "start": "cross-env REACT_NATIVE_PACKAGER_HOSTNAME=192.168.100.36 expo start --host lan",
-    "start:dev-client": "cross-env REACT_NATIVE_PACKAGER_HOSTNAME=192.168.100.36 expo start --dev-client --host lan",
-    "android": "cross-env REACT_NATIVE_PACKAGER_HOSTNAME=192.168.100.36 expo start --android --host lan",
-    "ios": "cross-env REACT_NATIVE_PACKAGER_HOSTNAME=192.168.100.36 expo start --ios --host lan",
+    "start": "expo start --host lan",
+    "start:dev-client": "expo start --dev-client --host lan",
+    "android": "expo start --android --host lan",
+    "ios": "expo start --ios --host lan",
     "web": "expo start --web --host lan"
   },
   "dependencies": {
@@ -37,8 +37,7 @@
     "react-native-web": "^0.21.0"
   },
   "devDependencies": {
-    "@babel/core": "^7.24.0",
-    "cross-env": "^10.1.0"
+    "@babel/core": "^7.24.0"
   },
   "private": true
 }

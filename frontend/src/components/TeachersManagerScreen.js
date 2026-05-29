@@ -17,7 +17,7 @@ import { showDestructiveConfirm } from '../lib/confirmDialog';
 import { confirmDeleteWithImpact } from '../lib/deleteWithImpact';
 import { buildImportExportScope, getImportExportBase } from '../lib/importExportScope';
 
-const EMPTY_FORM = { first_name: '', last_name: '', email: '', password: '', phone: '', assignments: [], school_id: '', teacher_role: 'subject_teacher' };
+const EMPTY_FORM = { first_name: '', last_name: '', email: '', password: '', phone: '', assignments: [], school_id: '', teacher_role: 'subject_teacher', subject_ids: [] };
 
 const ROLE = {
   class_teacher: { label: 'Class Teacher', bg: '#ECFDF5', color: '#065F46' },
@@ -117,6 +117,7 @@ export default function TeachersManagerScreen({ navigation, mode }) {
 
   const [teachers, setTeachers] = useState([]);
   const [classes, setClasses] = useState([]);
+  const [subjects, setSubjects] = useState([]);
   const [campuses, setCampuses] = useState([]);
   const [organizations, setOrganizations] = useState([]);
 
@@ -202,6 +203,7 @@ export default function TeachersManagerScreen({ navigation, mode }) {
     if (!(isSuper || isOrg)) return;
     if (!form.school_id) {
       setClasses([]);
+      setSubjects([]);
       return;
     }
 
@@ -209,12 +211,23 @@ export default function TeachersManagerScreen({ navigation, mode }) {
       api.get(`/super-admin/schools/${form.school_id}/classes`)
         .then(({ data }) => setClasses(data || []))
         .catch(() => setClasses([]));
+      api.get(`/super-admin/schools/${form.school_id}/subjects`)
+        .then(({ data }) => setSubjects(data || []))
+        .catch(() => setSubjects([]));
     } else if (isOrg) {
       api.get('/org-admin/classes', { params: { campus_id: form.school_id } })
         .then(({ data }) => setClasses(data || []))
         .catch(() => setClasses([]));
+      api.get('/org-admin/subjects', { params: { campus_id: form.school_id } })
+        .then(({ data }) => setSubjects(data || []))
+        .catch(() => setSubjects([]));
     }
   }, [isSuper, isOrg, form.school_id]);
+
+  useEffect(() => {
+    if (isSuper || isOrg) return;
+    api.get('/subjects').then(({ data }) => setSubjects(data || [])).catch(() => setSubjects([]));
+  }, [isSuper, isOrg]);
 
   useEffect(() => {
     load();
@@ -257,11 +270,15 @@ export default function TeachersManagerScreen({ navigation, mode }) {
       assignments: item.assignments || [],
       school_id: String(item.school_id || ''),
       teacher_role: item.teacher_role || deriveRoleFromAssignments(item.assignments || []),
+      subject_ids: [],
     });
     setNewPw('');
     setShowCreatePw(false);
     setShowResetPw(false);
     setModal(true);
+    api.get(`/timetable/teacher-subjects/${item.id}`)
+      .then(({ data }) => setForm(p => ({ ...p, subject_ids: (data?.subject_ids || []).map(Number) })))
+      .catch(() => {});
   };
 
   const handleSave = async () => {
@@ -283,12 +300,15 @@ export default function TeachersManagerScreen({ navigation, mode }) {
 
     setSaving(true);
     try {
+      let savedTeacherId = editing?.id || null;
+      let savedSchoolId = editing?.school_id || form.school_id;
       if (isSuper) {
         const schoolId = editing ? (editing.school_id || form.school_id) : form.school_id;
         if (!schoolId) {
           setSaving(false);
           return Alert.alert('Validation', 'Please select a campus.');
         }
+        savedSchoolId = schoolId;
 
         if (editing) {
           await api.put(`/super-admin/schools/${schoolId}/teachers/${editing.id}`, {
@@ -300,11 +320,12 @@ export default function TeachersManagerScreen({ navigation, mode }) {
             teacher_role: form.teacher_role,
           });
         } else {
-          await api.post(`/super-admin/schools/${schoolId}/teachers`, {
+          const { data } = await api.post(`/super-admin/schools/${schoolId}/teachers`, {
             ...form,
             assignments: form.assignments,
             teacher_role: form.teacher_role,
           });
+          savedTeacherId = data?.id || data?.teacher?.id || null;
         }
       } else if (isOrg) {
         if (editing) {
@@ -317,12 +338,14 @@ export default function TeachersManagerScreen({ navigation, mode }) {
             teacher_role: form.teacher_role,
           });
         } else {
-          await api.post('/org-admin/teachers', {
+          const { data } = await api.post('/org-admin/teachers', {
             ...form,
             school_id: parseInt(form.school_id, 10),
             assignments: form.assignments,
             teacher_role: form.teacher_role,
           });
+          savedTeacherId = data?.id || data?.teacher?.id || null;
+          savedSchoolId = parseInt(form.school_id, 10);
         }
       } else if (editing) {
         await api.put(`/admin/teachers/${editing.id}`, {
@@ -334,8 +357,22 @@ export default function TeachersManagerScreen({ navigation, mode }) {
           teacher_role: form.teacher_role,
         });
       } else {
-        await api.post('/admin/teachers', { ...form, assignments: form.assignments, teacher_role: form.teacher_role });
+        const { data } = await api.post('/admin/teachers', { ...form, assignments: form.assignments, teacher_role: form.teacher_role });
+        savedTeacherId = data?.id || data?.teacher?.id || null;
       }
+
+      if (savedTeacherId) {
+        try {
+          await api.put('/timetable/teacher-subjects', {
+            teacher_id: Number(savedTeacherId),
+            subject_ids: (form.subject_ids || []).map(Number),
+            ...(savedSchoolId ? { school_id: Number(savedSchoolId) } : {}),
+          });
+        } catch {
+          // non-fatal — teacher saved successfully
+        }
+      }
+
       setModal(false);
       await load();
     } catch (err) {
@@ -549,6 +586,31 @@ export default function TeachersManagerScreen({ navigation, mode }) {
               />
 
               <MultiAssignmentPicker classes={classes} assignments={form.assignments} onChange={v => F('assignments', v)} />
+
+              <Text style={S.label}>Subjects</Text>
+              <Text style={[styles.sub, { marginBottom: 6 }]}>Pick the subjects this teacher can teach. Used to filter teacher list in the timetable.</Text>
+              {subjects.length === 0 ? (
+                <View style={mp.emptyTag}><Text style={mp.emptyTagTxt}>No subjects available{(isOrg || isSuper) && !form.school_id ? ' — select a campus first.' : '.'}</Text></View>
+              ) : (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
+                  {subjects.map(s => {
+                    const id = Number(s.id);
+                    const active = (form.subject_ids || []).map(Number).includes(id);
+                    return (
+                      <Pressable
+                        key={id}
+                        onPress={() => {
+                          const cur = (form.subject_ids || []).map(Number);
+                          F('subject_ids', active ? cur.filter(x => x !== id) : [...cur, id]);
+                        }}
+                        style={[mp.pill, active && mp.pillActive]}
+                      >
+                        <Text style={[mp.pillTxt, active && mp.pillTxtActive]}>{s.name}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
 
               {editing && (
                 <>

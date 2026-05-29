@@ -27,6 +27,7 @@ const PortalStudentsPage = lazyPortalExport('PortalStudentsPage');
 const PortalSubjectsPage = lazyPortalExport('PortalSubjectsPage');
 const PortalTeacherAttendancePage = lazyPortalExport('PortalTeacherAttendancePage');
 const PortalTeachersPage = lazyPortalExport('PortalTeachersPage');
+const PortalTimetablePage = lazyPortalExport('PortalTimetablePage');
 
 const ROLE_LABELS = {
   super_admin: 'Super Admin',
@@ -56,6 +57,7 @@ const NAVIGATION = {
     { key: 'teachers', label: 'Teachers' },
     { key: 'students', label: 'Students' },
     { key: 'classes', label: 'Classes' },
+    { key: 'timetable', label: 'Timetable' },
     { key: 'subjects', label: 'Subjects' },
     { key: 'parents', label: 'Parents' },
     { key: 'leaves', label: 'Leaves' },
@@ -68,6 +70,7 @@ const NAVIGATION = {
     { key: 'ai-analytics', label: 'AI Analytics' },
     { key: 'teachers', label: 'Teachers' },
     { key: 'classes', label: 'Classes' },
+    { key: 'timetable', label: 'Timetable' },
     { key: 'students', label: 'Students' },
     { key: 'subjects', label: 'Subjects' },
     { key: 'parents', label: 'Parents' },
@@ -381,6 +384,7 @@ function RoleSection({ role, section }) {
   if (section === 'subjects') return <PortalSubjectsPage session={session} request={request} />;
   if (section === 'teachers') return <PortalTeachersPage session={session} request={request} />;
   if (section === 'classes') return <PortalClassesPage session={session} request={request} />;
+  if (section === 'timetable' && (role === 'org_admin' || role === 'admin')) return <PortalTimetablePage session={session} request={request} />;
   if (section === 'students') return <PortalStudentsPage session={session} request={request} />;
   if (section === 'parents') return <PortalParentsPage session={session} request={request} />;
   if (section === 'leaves' && (role === 'org_admin' || role === 'admin')) return <PortalLeavesPage session={session} request={request} />;

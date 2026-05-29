@@ -16,6 +16,7 @@ import useAiTutorConfig from '../../features/aiTutor/hooks/useAiTutorConfig';
 
 const ACTIONS = buildDashboardCards([
   { type: 'attendanceHistory', key: 'StudentHistory' },
+  { type: 'timetable', key: 'StudentTimetable' },
   { type: 'leaveApplications', key: 'StudentLeaves' },
   { type: 'classWork', key: 'StudentClasswork' },
   { type: 'homework', key: 'StudentHomework' },

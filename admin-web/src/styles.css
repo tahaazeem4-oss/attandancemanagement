@@ -511,6 +511,52 @@ h1, h2, h3, p {
   background: rgba(242, 247, 255, 0.85);
 }
 
+.timetable-day-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(248, 250, 252, 0.9);
+}
+
+.timetable-day-card h3 {
+  font-size: 1rem;
+}
+
+.timetable-slot-list {
+  display: grid;
+  gap: 12px;
+}
+
+.timetable-slot-row {
+  display: grid;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.timetable-slot-row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.timetable-slot-meta {
+  display: grid;
+  gap: 3px;
+}
+
+.timetable-slot-meta span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.timetable-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .toolbar-inline {
   margin-bottom: 0;
   align-items: center;
@@ -1130,7 +1176,8 @@ h1, h2, h3, p {
   }
 
   .form-grid-2,
-  .form-grid-assignment {
+  .form-grid-assignment,
+  .timetable-editor-grid {
     grid-template-columns: 1fr;
   }
 

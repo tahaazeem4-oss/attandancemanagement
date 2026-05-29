@@ -10,6 +10,7 @@ const CARDS = buildDashboardCards([
   { type: 'teachers', key: 'AdminTeachers' },
   { type: 'students', key: 'AdminStudents' },
   { type: 'classes', key: 'AdminClasses' },
+  { type: 'timetable', key: 'AdminTimetable' },
   { type: 'leaves', key: 'AdminLeaves' },
   { type: 'notifications', key: 'SendNotification' },
   { type: 'upload', key: 'UploadLecture' },

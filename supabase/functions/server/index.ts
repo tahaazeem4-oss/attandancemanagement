@@ -25,6 +25,7 @@ import { handleAiTutorMaterials } from "./handlers/aiTutorMaterials.ts";
 import { handleAiTutorIngestion } from "./handlers/aiTutorIngestion.ts";
 import { handleAiTutorChat } from "./handlers/aiTutorChat.ts";
 import { handleAiTutorAnalytics } from "./handlers/aiTutorAnalytics.ts";
+import { handleTimetable } from "./handlers/timetable.ts";
 
 Deno.serve(async (req: Request) => {
   // CORS preflight
@@ -57,6 +58,7 @@ Deno.serve(async (req: Request) => {
     if (path.startsWith("/lectures"))        return await handleLectures(req, path, url);
     if (path.startsWith("/notifications"))   return await handleNotifications(req, path, url);
     if (path.startsWith("/subjects"))        return await handleSubjects(req, path, url);
+    if (path.startsWith("/timetable"))       return await handleTimetable(req, path, url);
     if (path.startsWith("/push-token"))      return await handlePushToken(req, path, url);
     if (path.startsWith("/upload"))          return await handleUpload(req, path, url);
     if (path.startsWith("/import-export"))   return await handleImportExport(req, path, url);

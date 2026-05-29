@@ -76,6 +76,13 @@ const CARD_LIBRARY = {
     tint: '#10B981',
     bg: '#ECFDF5',
   },
+  timetable: {
+    icon: 'calendar-clear-outline',
+    label: 'Timetable',
+    description: 'Manage or review the weekly class timetable.',
+    tint: '#1D4ED8',
+    bg: '#EFF6FF',
+  },
   leaves: {
     icon: 'mail-open-outline',
     label: 'Leaves',

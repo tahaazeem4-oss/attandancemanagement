@@ -31,6 +31,7 @@ const TEACHER_HOME_CARDS = buildDashboardCards([
   { type: 'attendance', key: 'TeacherAttendance' },
   { type: 'leaves', key: 'TeacherLeavesCard' },
   { type: 'attendanceReports', key: 'TeacherAttendanceReports' },
+  { type: 'timetable', key: 'TeacherTimetable' },
   { type: 'upload', key: 'UploadLectureCard' },
   { type: 'lectures', key: 'LectureListCard' },
   { type: 'students', key: 'TeacherStudentsCard' },
@@ -200,6 +201,9 @@ export default function HomeScreen({ navigation }) {
       }
       if (card.key === 'TeacherAiMaterialsCard') {
         return { ...card, onPress: () => navigation.navigate('TeacherAiMaterials') };
+      }
+      if (card.key === 'TeacherTimetable') {
+        return { ...card, onPress: () => navigation.navigate('TeacherTimetable') };
       }
       return card;
     });
