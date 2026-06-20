@@ -104,6 +104,13 @@ const CARD_LIBRARY = {
     tint: '#8B5CF6',
     bg: '#F5F3FF',
   },
+  circulars: {
+    icon: 'megaphone-outline',
+    label: 'Circulars',
+    description: 'View school announcements, notices, and circulars.',
+    tint: '#6366F1',
+    bg: '#EEF2FF',
+  },
   upload: {
     icon: 'cloud-upload-outline',
     label: 'Upload',

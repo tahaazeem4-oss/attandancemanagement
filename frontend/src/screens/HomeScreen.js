@@ -36,6 +36,7 @@ const TEACHER_HOME_CARDS = buildDashboardCards([
   { type: 'lectures', key: 'LectureListCard' },
   { type: 'students', key: 'TeacherStudentsCard' },
   { type: 'notifications', key: 'SendNotificationCard' },
+  { type: 'circulars', key: 'TeacherCirculars' },
   { type: 'subjects', key: 'TeacherSubjectsCard' },
   { type: 'aiMaterials', key: 'TeacherAiMaterialsCard' },
 ]);
@@ -195,6 +196,9 @@ export default function HomeScreen({ navigation }) {
       }
       if (card.key === 'SendNotificationCard') {
         return { ...card, onPress: () => navigation.navigate('SendNotification') };
+      }
+      if (card.key === 'TeacherCirculars') {
+        return { ...card, onPress: () => navigation.navigate('StaffNotifications') };
       }
       if (card.key === 'TeacherSubjectsCard') {
         return { ...card, onPress: () => navigation.navigate('TeacherSubjects') };

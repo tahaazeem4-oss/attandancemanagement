@@ -13,6 +13,7 @@ const CARDS = buildDashboardCards([
   { type: 'timetable', key: 'AdminTimetable' },
   { type: 'leaves', key: 'AdminLeaves' },
   { type: 'notifications', key: 'SendNotification' },
+  { type: 'circulars', key: 'StaffNotifications' },
   { type: 'upload', key: 'UploadLecture' },
   { type: 'lectures', key: 'LectureList' },
   { type: 'subjects', key: 'AdminSubjects' },

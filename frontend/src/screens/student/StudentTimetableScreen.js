@@ -57,15 +57,31 @@ function subjectInitials(name) {
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
-function dateForDay(targetKey) {
+function dateForDay(targetKey, weekOffset = 0) {
   const today = new Date();
   const todayIdx = today.getDay();
   const targetIdx = DAY_ORDER.indexOf(targetKey);
   if (targetIdx < 0) return today;
-  const diff = targetIdx - todayIdx;
+  const diff = targetIdx - todayIdx + weekOffset * 7;
   const d = new Date(today);
   d.setDate(today.getDate() + diff);
   return d;
+}
+
+function weekRangeLabel(offset) {
+  if (offset === 0) return 'This week';
+  if (offset === 1) return 'Next week';
+  if (offset === -1) return 'Last week';
+  const today = new Date();
+  const sun = new Date(today);
+  sun.setDate(today.getDate() - today.getDay() + offset * 7);
+  const sat = new Date(sun);
+  sat.setDate(sun.getDate() + 6);
+  const sM = MONTHS[sun.getMonth()];
+  const eM = MONTHS[sat.getMonth()];
+  return sM === eM
+    ? `${sM} ${sun.getDate()}\u2013${sat.getDate()}`
+    : `${sM} ${sun.getDate()} \u2013 ${eM} ${sat.getDate()}`;
 }
 
 export default function StudentTimetableScreen({ route }) {
@@ -76,6 +92,7 @@ export default function StudentTimetableScreen({ route }) {
   const [data, setData] = useState(null);
   const [selectedDay, setSelectedDay] = useState(null);
   const [now, setNow] = useState(() => new Date());
+  const [weekOffset, setWeekOffset] = useState(0);
   const tickRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -93,7 +110,8 @@ export default function StudentTimetableScreen({ route }) {
     }
   }, [child?.student_id]);
 
-  useEffect(() => { load(); }, [load]);
+  // useFocusEffect covers both initial mount and every subsequent re-focus.
+  // No separate useEffect needed — avoids double API call on mount.
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   useEffect(() => {
@@ -137,7 +155,7 @@ export default function StudentTimetableScreen({ route }) {
   const goPrev = () => { if (canPrev) setSelectedDay(activeDays[dayIndex - 1].day_key); };
   const goNext = () => { if (canNext) setSelectedDay(activeDays[dayIndex + 1].day_key); };
 
-  const isToday = selectedDay === todayKey;
+  const isToday = weekOffset === 0 && selectedDay === todayKey;
   const nowMinutes = isToday ? now.getHours() * 60 + now.getMinutes() : null;
 
   const { currentSlotId, nextSlotId } = useMemo(() => {
@@ -167,6 +185,20 @@ export default function StudentTimetableScreen({ route }) {
         </View>
       ) : (
         <>
+          {/* Week navigator */}
+          <View style={styles.weekNav}>
+            <Pressable style={styles.weekNavBtn} onPress={() => setWeekOffset(o => o - 1)}>
+              <Ionicons name="chevron-back" size={16} color={C.primary} />
+            </Pressable>
+            <Pressable style={{ alignItems: 'center', flex: 1 }} onPress={() => weekOffset !== 0 && setWeekOffset(0)}>
+              <Text style={styles.weekLabel}>{weekRangeLabel(weekOffset)}</Text>
+              {weekOffset !== 0 ? <Text style={styles.weekSub}>Tap \u00b7 Go to today</Text> : null}
+            </Pressable>
+            <Pressable style={styles.weekNavBtn} onPress={() => setWeekOffset(o => o + 1)}>
+              <Ionicons name="chevron-forward" size={16} color={C.primary} />
+            </Pressable>
+          </View>
+
           {/* Day strip */}
           <ScrollView
             horizontal
@@ -176,8 +208,8 @@ export default function StudentTimetableScreen({ route }) {
           >
             {activeDays.map((d) => {
               const active = d.day_key === selectedDay;
-              const isTodayChip = d.day_key === todayKey;
-              const date = dateForDay(d.day_key);
+              const isTodayChip = weekOffset === 0 && d.day_key === todayKey;
+              const date = dateForDay(d.day_key, weekOffset);
               return (
                 <Pressable
                   key={d.day_key}
@@ -208,8 +240,8 @@ export default function StudentTimetableScreen({ route }) {
             <View style={{ alignItems: 'center', flex: 1 }}>
               <Text style={styles.currentDay}>{activeDays[dayIndex]?.day_label || ''}</Text>
               <Text style={styles.currentDate}>
-                {(() => { const dt = dateForDay(selectedDay); return `${MONTHS[dt.getMonth()]} ${dt.getDate()}`; })()}
-                {isToday ? '  ·  Today' : ''}
+                {(() => { const dt = dateForDay(selectedDay, weekOffset); return `${MONTHS[dt.getMonth()]} ${dt.getDate()}`; })()}
+                {isToday ? '  \u00b7  Today' : ''}
               </Text>
             </View>
             <Pressable style={[styles.navBtn, !canNext && styles.navBtnDisabled]} onPress={goNext} disabled={!canNext}>
@@ -374,4 +406,17 @@ const styles = StyleSheet.create({
 
   teacher: { fontSize: 11, fontWeight: '700', marginTop: 2 },
   subMuted: { color: C.textLight, fontSize: 11, fontWeight: '600', marginTop: 2 },
+
+  // Week navigator
+  weekNav: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 14, paddingTop: 12, paddingBottom: 2,
+  },
+  weekNavBtn: {
+    width: 32, height: 32, borderRadius: 10,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  weekLabel: { fontSize: 13, fontWeight: '800', color: C.textDark, letterSpacing: 0.1 },
+  weekSub: { fontSize: 10, fontWeight: '600', color: C.primary, marginTop: 1 },
 });

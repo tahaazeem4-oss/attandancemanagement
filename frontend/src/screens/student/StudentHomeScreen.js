@@ -13,6 +13,7 @@ import { C } from '../../config/theme';
 import DashboardCardGrid from '../../components/DashboardCardGrid';
 import { buildDashboardCards } from '../../config/dashboardCards';
 import useAiTutorConfig from '../../features/aiTutor/hooks/useAiTutorConfig';
+import AiUsageCard from '../../features/aiTutor/components/AiUsageCard';
 
 const ACTIONS = buildDashboardCards([
   { type: 'attendanceHistory', key: 'StudentHistory' },
@@ -20,6 +21,7 @@ const ACTIONS = buildDashboardCards([
   { type: 'leaveApplications', key: 'StudentLeaves' },
   { type: 'classWork', key: 'StudentClasswork' },
   { type: 'homework', key: 'StudentHomework' },
+  { type: 'circulars', key: 'StudentNotifications' },
   { type: 'aiTutor', key: 'StudentAiTutorHome' },
 ]);
 
@@ -51,7 +53,7 @@ export default function StudentHomeScreen({ navigation, route }) {
   const childData = route?.params?.child;
   const isParentViewing = !!childData;
   const childStudentId = childData?.student_id ?? childData?.id ?? null;
-  const { loading: aiConfigLoading, enabled: aiEnabled, refresh: refreshAiConfig } = useAiTutorConfig({ studentId: childStudentId });
+  const { loading: aiConfigLoading, enabled: aiEnabled, quota: aiQuota, refresh: refreshAiConfig } = useAiTutorConfig({ studentId: childStudentId });
   const displayUser = childData || user;
 
   useEffect(() => {
@@ -397,6 +399,19 @@ export default function StudentHomeScreen({ navigation, route }) {
               );
             })}
           </View>
+
+          {aiEnabled && aiQuota ? (
+            <AiUsageCard
+              quota={aiQuota}
+              onPress={() => {
+                if (isParentViewing) {
+                  navigation.navigate('StudentAiTutorHome', { child: childData });
+                } else {
+                  navigation.navigate('StudentAiTutorHome');
+                }
+              }}
+            />
+          ) : null}
 
           <DashboardCardGrid
             cards={quickActions}

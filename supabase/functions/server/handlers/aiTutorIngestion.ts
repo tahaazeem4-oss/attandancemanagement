@@ -4,6 +4,7 @@
 import { getDb, json, verifyToken } from "../_shared.ts";
 import { chunkText } from "../lib/aiChunking.ts";
 import { embedBatch, hasEmbeddings } from "../lib/aiOpenAI.ts";
+import { invalidateCacheForSubject } from "../lib/aiCache.ts";
 
 const MAX_JOBS_PER_RUN = 5;
 
@@ -89,6 +90,9 @@ export async function processDocument(docId: string): Promise<void> {
     error_message: null,
     updated_at: new Date().toISOString(),
   }).eq("id", docId);
+
+  // Invalidate cached answers for this subject+campus so students get fresh answers
+  await invalidateCacheForSubject(db, Number(doc.campus_id), Number(doc.subject_id));
 }
 
 export async function handleAiTutorIngestion(req: Request, path: string, _url: URL): Promise<Response> {

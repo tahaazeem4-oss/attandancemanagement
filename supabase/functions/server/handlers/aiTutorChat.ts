@@ -6,6 +6,7 @@ import { getEffectiveQuota, loadQuotaState, assertCanQuery, incrementUsage } fro
 import { enforceRateLimit } from "../lib/aiRateLimit.ts";
 import { buildPrompt } from "../lib/aiPrompt.ts";
 import { embedText, chatComplete, hasEmbeddings } from "../lib/aiOpenAI.ts";
+import { buildCacheKey, getCachedAnswer, setCachedAnswer } from "../lib/aiCache.ts";
 
 const MAX_QUESTION_CHARS = 2000;
 
@@ -436,7 +437,7 @@ export async function handleAiTutorChat(req: Request, path: string, url: URL): P
       return json({ session_id, answer: refusal, citations: [] });
     }
 
-    // Build prompt + ask LLM
+    // Build prompt + check cache before calling LLM
     const prompt = buildPrompt({
       question,
       chunks: usableChunks,
@@ -444,6 +445,35 @@ export async function handleAiTutorChat(req: Request, path: string, url: URL): P
       sectionName: scope.section_name,
     });
     const maxOut = limits.max_output_tokens || 700;
+
+    // Cache key is based on question + campus + subject + the exact set of source documents
+    const documentIds = [...new Set(usableChunks.map((c) => c.document_id))];
+    const cacheKey = await buildCacheKey(question, scope.campus_id!, subjectId, documentIds);
+    const cached = await getCachedAnswer(db, cacheKey);
+
+    if (cached) {
+      // Cache hit — return stored answer without calling LLM or consuming quota
+      const { data: aMsg } = await db.from("ai_chat_messages").insert({
+        session_id, role: "assistant", content: cached.answer, citations: cached.citations,
+        model: cached.model, prompt_tokens: cached.prompt_tokens, completion_tokens: cached.completion_tokens,
+      }).select().single();
+
+      await db.from("ai_chat_sessions").update({ updated_at: new Date().toISOString() }).eq("id", session_id);
+
+      await db.from("ai_usage_logs").insert({
+        student_id: studentId, session_id, message_id: aMsg?.id,
+        organization_id: scope.organization_id, campus_id: scope.campus_id,
+        class_id: scope.class_id, section_id: scope.section_id, subject_id,
+        event_type: "cache_hit", request_chars: question.length,
+        retrieved_chunks: usableChunks.length, model: cached.model,
+        prompt_tokens: 0, completion_tokens: 0, total_tokens: 0,
+        latency_ms: Date.now() - started,
+      });
+
+      return json({ session_id, answer: cached.answer, citations: cached.citations, from_cache: true });
+    }
+
+    // Cache miss — call LLM
     let llm;
     try {
       llm = await chatComplete(prompt.system, prompt.user, maxOut);
@@ -476,7 +506,21 @@ export async function handleAiTutorChat(req: Request, path: string, url: URL): P
       latency_ms: Date.now() - started,
     });
 
-    return json({ session_id, answer: llm.text, citations });
+    // Store in cache for future identical questions (best-effort, don't await)
+    setCachedAnswer(db, {
+      cacheKey,
+      question,
+      campusId:         scope.campus_id!,
+      subjectId,
+      answer:           llm.text,
+      citations,
+      model:            llm.model,
+      promptTokens:     llm.prompt_tokens,
+      completionTokens: llm.completion_tokens,
+      totalTokens:      llm.total_tokens,
+    });
+
+    return json({ session_id, answer: llm.text, citations, from_cache: false });
   }
 
   return json({ message: "Not found" }, 404);

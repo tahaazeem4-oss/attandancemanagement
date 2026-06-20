@@ -17,6 +17,7 @@ const CARDS = buildDashboardCards([
   { type: 'parents', key: 'OrgAdminParents' },
   { type: 'leaves', key: 'OrgAdminLeaves' },
   { type: 'notifications', key: 'OrgAdminNotifications' },
+  { type: 'circulars', key: 'StaffNotifications' },
   { type: 'aiPolicy', key: 'AdminAiPolicy' },
   { type: 'aiAnalytics', key: 'AdminAiAnalytics' },
 ]);

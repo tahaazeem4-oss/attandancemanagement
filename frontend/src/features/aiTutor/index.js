@@ -10,4 +10,5 @@ export { default as AdminAiAnalyticsScreen } from './screens/AdminAiAnalyticsScr
 
 export { default as useAiTutorConfig } from './hooks/useAiTutorConfig';
 export { default as useAiTutorChat } from './hooks/useAiTutorChat';
+export { default as AiUsageCard } from './components/AiUsageCard';
 export * as aiTutorApi from './api/aiTutorApi';

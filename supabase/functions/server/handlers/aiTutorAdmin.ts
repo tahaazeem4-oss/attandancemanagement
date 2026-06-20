@@ -425,8 +425,9 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
     if (!["super_admin", "org_admin", "admin"].includes(role)) {
       return json({ message: "Forbidden" }, 403);
     }
-    const openai_key_set    = Boolean(Deno.env.get("OPENAI_API_KEY"));
-    const cron_secret_set   = Boolean(Deno.env.get("AI_TUTOR_CRON_SECRET"));
+    const openai_key_set       = Boolean(Deno.env.get("OPENAI_API_KEY"));
+    const openrouter_key_set   = Boolean(Deno.env.get("OPENROUTER_API_KEY"));
+    const cron_secret_set      = Boolean(Deno.env.get("AI_TUTOR_CRON_SECRET"));
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
     const { count: pending_jobs } = await db
@@ -447,6 +448,7 @@ export async function handleAiTutorAdmin(req: Request, path: string, _url: URL):
 
     return json({
       openai_key_set,
+      openrouter_key_set,
       cron_secret_set,
       pending_jobs: pending_jobs ?? 0,
       failed_jobs_last_24h: failed_jobs_last_24h ?? 0,

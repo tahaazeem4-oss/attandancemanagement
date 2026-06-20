@@ -568,6 +568,7 @@ function defaultTeacherForm() {
     school_id: '',
     teacher_role: 'subject_teacher',
     assignments: [{ class_id: '', section_id: '' }],
+    subject_ids: [],
   };
 }
 
@@ -1330,6 +1331,7 @@ export function PortalTeachersPage({ session, request }) {
   const [form, setForm] = useState(defaultTeacherForm());
   const [saving, setSaving] = useState(false);
   const [classOptions, setClassOptions] = useState([]);
+  const [subjectOptions, setSubjectOptions] = useState([]);
 
   const { loading, error, data, reload } = useTeacherScopeData(request, role, orgFilter, campusFilter);
   const organizations = data?.organizations || [];
@@ -1375,6 +1377,26 @@ export function PortalTeachersPage({ session, request }) {
     }
   }, [form.school_id, isSuper, isOrg, loadFormClasses, data?.classes]);
 
+  useEffect(() => {
+    const loadSubjects = async () => {
+      if ((isSuper || isOrg) && !form.school_id) {
+        setSubjectOptions([]);
+        return;
+      }
+      try {
+        const result = isSuper
+          ? await request('GET', `/super-admin/schools/${form.school_id}/subjects`)
+          : isOrg
+            ? await request('GET', '/org-admin/subjects', { params: { campus_id: form.school_id } })
+            : await request('GET', '/subjects');
+        setSubjectOptions(safeArray(result));
+      } catch {
+        setSubjectOptions([]);
+      }
+    };
+    loadSubjects();
+  }, [request, isSuper, isOrg, form.school_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const reset = () => setForm(defaultTeacherForm());
 
   const updateAssignment = (index, key, value) => {
@@ -1398,7 +1420,11 @@ export function PortalTeachersPage({ session, request }) {
       school_id: item.school_id ? String(item.school_id) : '',
       teacher_role: item.teacher_role || 'subject_teacher',
       assignments: normalizeAssignments(item.assignments).length ? normalizeAssignments(item.assignments) : [{ class_id: '', section_id: '' }],
+      subject_ids: [],
     });
+    request('GET', `/timetable/teacher-subjects/${item.id}`)
+      .then((subjectData) => setForm((prev) => ({ ...prev, subject_ids: safeArray(subjectData?.subject_ids).map(Number) })))
+      .catch(() => {});
   };
 
   const saveTeacher = async (event) => {
@@ -1442,23 +1468,45 @@ export function PortalTeachersPage({ session, request }) {
         teacher_role: form.teacher_role,
       };
 
+      let savedTeacherId = form.id;
+      let savedSchoolId = form.school_id;
+
       if (isSuper) {
         const schoolId = form.id ? (form.school_id || '') : form.school_id;
         if (form.id) {
           await request('PUT', `/super-admin/schools/${schoolId}/teachers/${form.id}`, { data: payload });
         } else {
-          await request('POST', `/super-admin/schools/${schoolId}/teachers`, { data: { ...payload, password: form.password, school_id: Number(form.school_id) } });
+          const result = await request('POST', `/super-admin/schools/${schoolId}/teachers`, { data: { ...payload, password: form.password, school_id: Number(form.school_id) } });
+          savedTeacherId = result?.id || result?.teacher?.id || null;
+          savedSchoolId = schoolId;
         }
       } else if (isOrg) {
         if (form.id) {
           await request('PUT', `/org-admin/teachers/${form.id}`, { data: payload });
         } else {
-          await request('POST', '/org-admin/teachers', { data: { ...payload, password: form.password, school_id: Number(form.school_id) } });
+          const result = await request('POST', '/org-admin/teachers', { data: { ...payload, password: form.password, school_id: Number(form.school_id) } });
+          savedTeacherId = result?.id || result?.teacher?.id || null;
+          savedSchoolId = Number(form.school_id);
         }
       } else if (form.id) {
         await request('PUT', `/admin/teachers/${form.id}`, { data: payload });
       } else {
-        await request('POST', '/admin/teachers', { data: { ...payload, password: form.password } });
+        const result = await request('POST', '/admin/teachers', { data: { ...payload, password: form.password } });
+        savedTeacherId = result?.id || result?.teacher?.id || null;
+      }
+
+      if (savedTeacherId) {
+        try {
+          await request('PUT', '/timetable/teacher-subjects', {
+            data: {
+              teacher_id: Number(savedTeacherId),
+              subject_ids: safeArray(form.subject_ids).map(Number),
+              ...(savedSchoolId ? { school_id: Number(savedSchoolId) } : {}),
+            },
+          });
+        } catch {
+          // non-fatal — teacher saved successfully
+        }
       }
 
       await reload();
@@ -1655,6 +1703,36 @@ export function PortalTeachersPage({ session, request }) {
               );
             })}
           </div>
+          {subjectOptions.length > 0 ? (
+            <div className="assignment-block">
+              <div className="toolbar toolbar-inline">
+                <strong>Subjects</strong>
+                <span className="field-caption">Pick the subjects this teacher can teach — used to filter teachers in the timetable</span>
+              </div>
+              <div className="chip-group">
+                {subjectOptions.map((subject) => {
+                  const active = (form.subject_ids || []).includes(Number(subject.id));
+                  return (
+                    <button
+                      key={subject.id}
+                      type="button"
+                      className={active ? 'chip chip-active' : 'chip'}
+                      onClick={() => setForm((current) => ({
+                        ...current,
+                        subject_ids: active
+                          ? (current.subject_ids || []).filter((id) => id !== Number(subject.id))
+                          : [...(current.subject_ids || []), Number(subject.id)],
+                      }))}
+                    >
+                      {subject.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (isSuper || isOrg) && !form.school_id ? (
+            <p className="field-caption">Select a campus to see available subjects.</p>
+          ) : null}
           <div className="button-row">
             <button className="primary-button" disabled={saving}>{saving ? 'Saving...' : form.id ? 'Update Teacher' : 'Create Teacher'}</button>
             {form.id ? <button type="button" className="ghost-button" onClick={reset}>Cancel</button> : null}
@@ -4707,6 +4785,12 @@ export function PortalTimetablePage({ session, request }) {
   const [savingStructure, setSavingStructure] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [teacherBusy, setTeacherBusy] = useState({});
+  const [teacherSubjects, setTeacherSubjects] = useState({});
+  const [holidays, setHolidays] = useState([]);
+  const [newHoliday, setNewHoliday] = useState({ date: '', label: '' });
+  const [savingHoliday, setSavingHoliday] = useState(false);
+  const [savingTeacherSubject, setSavingTeacherSubject] = useState(null);
 
   const campusParam = role === 'org_admin' && selectedCampus ? { school_id: selectedCampus } : {};
   const { loading: metaLoading, error: metaError, data: meta, reload: reloadMeta } = useRemoteResource(async () => {
@@ -4736,7 +4820,13 @@ export function PortalTimetablePage({ session, request }) {
       slot_type: slot.slot_type || 'instruction',
       is_active: slot.is_active !== false,
       display_order: index + 1,
+      day_keys: Array.isArray(slot.day_keys) && slot.day_keys.length ? slot.day_keys : null,
     })));
+
+    // Initialise teacher→subject map from meta (subject_ids already joined by backend)
+    const tSubjects = {};
+    safeArray(meta.teachers).forEach((t) => { tSubjects[String(t.id)] = safeArray(t.subject_ids).map(Number); });
+    setTeacherSubjects(tSubjects);
 
     const selection = buildSectionSelection(classes, selectedClass, selectedSection);
     setSelectedClass(selection.classId);
@@ -4804,8 +4894,18 @@ export function PortalTimetablePage({ session, request }) {
         slot_type: 'instruction',
         is_active: true,
         display_order: current.length + 1,
+        day_keys: null,
       },
     ]));
+  };
+
+  const toggleSlotDay = (index, dayKey) => {
+    setSlots((current) => current.map((slot, slotIndex) => {
+      if (slotIndex !== index) return slot;
+      const cur = Array.isArray(slot.day_keys) && slot.day_keys.length ? slot.day_keys : [];
+      const next = cur.includes(dayKey) ? cur.filter((k) => k !== dayKey) : [...cur, dayKey];
+      return { ...slot, day_keys: next.length ? next : null };
+    }));
   };
 
   const removeSlot = (index) => {
@@ -4836,6 +4936,7 @@ export function PortalTimetablePage({ session, request }) {
         slot_type: slot.slot_type || 'instruction',
         is_active: slot.is_active !== false,
         display_order: index + 1,
+        day_keys: Array.isArray(slot.day_keys) && slot.day_keys.length ? slot.day_keys : null,
       })));
       setMessage('Timetable structure updated.');
       setMessageTone('neutral');
@@ -4858,6 +4959,9 @@ export function PortalTimetablePage({ session, request }) {
       activeDays.forEach((day) => {
         activeSlots.forEach((slot) => {
           if (slot.slot_type !== 'instruction') return;
+          // Respect per-slot day_keys: skip this slot if it doesn't apply to the current day
+          const slotDayKeys = Array.isArray(slot.day_keys) && slot.day_keys.length ? slot.day_keys : null;
+          if (slotDayKeys && !slotDayKeys.includes(day.day_key)) return;
           const row = entriesMap[timetableEntryKey(day.day_key, slot.id)] || {};
           if (!row.subject_id && !row.teacher_id && !String(row.note || '').trim()) return;
           entries.push({
@@ -4881,6 +4985,13 @@ export function PortalTimetablePage({ session, request }) {
       setMessage('Draft timetable saved.');
       setMessageTone('neutral');
       reloadSection();
+      // Refresh conflict data after saving
+      try {
+        const busyData = await request('GET', '/timetable/teacher-busy', {
+          params: { exclude_class_id: selectedClass, exclude_section_id: selectedSection, status: 'draft', ...campusParam },
+        });
+        setTeacherBusy(busyData?.busy || {});
+      } catch { /* non-critical */ }
     } catch (error) {
       setMessage(error.message || 'Could not save draft timetable.');
       setMessageTone('danger');
@@ -4909,6 +5020,69 @@ export function PortalTimetablePage({ session, request }) {
       setMessageTone('danger');
     } finally {
       setPublishing(false);
+    }
+  };
+
+  // Load teacher conflict data whenever class/section changes
+  useEffect(() => {
+    if (!selectedClass || !selectedSection) { setTeacherBusy({}); return; }
+    request('GET', '/timetable/teacher-busy', {
+      params: { exclude_class_id: selectedClass, exclude_section_id: selectedSection, status: 'draft', ...campusParam },
+    }).then((data) => setTeacherBusy(data?.busy || {})).catch(() => setTeacherBusy({}));
+  }, [selectedClass, selectedSection, selectedCampus]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load holidays on mount / campus change
+  useEffect(() => {
+    request('GET', '/timetable/holidays', { params: campusParam })
+      .then((data) => setHolidays(safeArray(data?.holidays)))
+      .catch(() => setHolidays([]));
+  }, [selectedCampus]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const addHoliday = async () => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(newHoliday.date)) {
+      setMessage('Holiday date must be in YYYY-MM-DD format.'); setMessageTone('danger'); return;
+    }
+    setSavingHoliday(true);
+    try {
+      await request('POST', '/timetable/holidays', {
+        data: { ...campusParam, holiday_date: newHoliday.date, label: newHoliday.label || null },
+      });
+      setNewHoliday({ date: '', label: '' });
+      const data = await request('GET', '/timetable/holidays', { params: campusParam });
+      setHolidays(safeArray(data?.holidays));
+      setMessage('Holiday added.'); setMessageTone('neutral');
+    } catch (error) {
+      setMessage(error.message || 'Could not add holiday.'); setMessageTone('danger');
+    } finally {
+      setSavingHoliday(false);
+    }
+  };
+
+  const removeHoliday = async (id) => {
+    try {
+      await request('DELETE', `/timetable/holidays/${id}`, { params: campusParam });
+      const data = await request('GET', '/timetable/holidays', { params: campusParam });
+      setHolidays(safeArray(data?.holidays));
+    } catch (error) {
+      setMessage(error.message || 'Could not remove holiday.'); setMessageTone('danger');
+    }
+  };
+
+  const toggleSubjectForTeacher = async (teacherId, subjectId, currentlyAssigned) => {
+    const tid = String(teacherId);
+    const sid = Number(subjectId);
+    setSavingTeacherSubject(`${tid}:${sid}`);
+    try {
+      const current = teacherSubjects[tid] || [];
+      const next = currentlyAssigned ? current.filter((s) => s !== sid) : [...current, sid];
+      await request('PUT', '/timetable/teacher-subjects', {
+        data: { teacher_id: teacherId, subject_ids: next, ...campusParam },
+      });
+      setTeacherSubjects((prev) => ({ ...prev, [tid]: next }));
+    } catch (error) {
+      setMessage(error.message || 'Could not update subject assignment.'); setMessageTone('danger');
+    } finally {
+      setSavingTeacherSubject(null);
     }
   };
 
@@ -4970,10 +5144,30 @@ export function PortalTimetablePage({ session, request }) {
                                 <option value="">Select subject</option>
                                 {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
                               </select>
-                              <select value={row.teacher_id || ''} onChange={(event) => updateEntry(day.day_key, slot.id, 'teacher_id', event.target.value)}>
-                                <option value="">Not assigned</option>
-                                {teachers.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.full_name || `${teacher.first_name || ''} ${teacher.last_name || ''}`.trim()}</option>)}
-                              </select>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <select
+                                  style={{ flex: 1 }}
+                                  value={row.teacher_id || ''}
+                                  onChange={(event) => updateEntry(day.day_key, slot.id, 'teacher_id', event.target.value)}
+                                >
+                                  <option value="">Not assigned</option>
+                                  {/* Filter to teachers assigned to the selected subject; show all if no subject picked */}
+                                  {(row.subject_id
+                                    ? teachers.filter((t) => (teacherSubjects[String(t.id)] || []).includes(Number(row.subject_id)))
+                                    : teachers
+                                  ).map((teacher) => {
+                                    const isBusy = !!(teacherBusy[String(teacher.id)] || {})[timetableEntryKey(day.day_key, slot.id)];
+                                    return (
+                                      <option key={teacher.id} value={teacher.id}>
+                                        {isBusy ? '⚠ ' : ''}{teacher.full_name || `${teacher.first_name || ''} ${teacher.last_name || ''}`.trim()}
+                                      </option>
+                                    );
+                                  })}
+                                </select>
+                                {row.teacher_id && (teacherBusy[String(row.teacher_id)] || {})[timetableEntryKey(day.day_key, slot.id)] ? (
+                                  <span title="Teacher already assigned to another class at this slot" style={{ color: '#EF4444', fontWeight: 700, fontSize: 14 }}>⚠</span>
+                                ) : null}
+                              </div>
                               <input value={row.note || ''} onChange={(event) => updateEntry(day.day_key, slot.id, 'note', event.target.value)} placeholder="Optional note" />
                             </div>
                           )}
@@ -4990,6 +5184,86 @@ export function PortalTimetablePage({ session, request }) {
             <button className="primary-button" type="button" onClick={saveDraft} disabled={savingDraft || !selectedClass || !selectedSection}>{savingDraft ? 'Saving...' : 'Save Draft'}</button>
             <button className="secondary-button" type="button" onClick={publishDraft} disabled={publishing || !selectedClass || !selectedSection}>{publishing ? 'Publishing...' : 'Publish'}</button>
           </div>
+
+          {/* ── Teacher → Subject mapping ─────────────────────────────── */}
+          {teachers.length > 0 ? (
+            <>
+              <div className="selection-banner" style={{ marginTop: 16 }}>
+                <strong>Teacher → Subject mapping</strong>
+                <span>Toggle which subjects each teacher can teach. Only mapped teachers appear in the filtered dropdown above.</span>
+              </div>
+              {teachers.map((teacher) => {
+                const tid = String(teacher.id);
+                const assignedIds = teacherSubjects[tid] || [];
+                const name = teacher.full_name || `${teacher.first_name || ''} ${teacher.last_name || ''}`.trim();
+                return (
+                  <div key={tid} className="assignment-block">
+                    <div className="toolbar toolbar-inline">
+                      <strong>{name}</strong>
+                      <span className="field-caption">{String(teacher.teacher_role || 'teacher').replace(/_/g, ' ')}</span>
+                    </div>
+                    <div className="chip-group">
+                      {subjects.map((subject) => {
+                        const assigned = assignedIds.includes(Number(subject.id));
+                        const isSaving = savingTeacherSubject === `${tid}:${subject.id}`;
+                        return (
+                          <button
+                            key={subject.id}
+                            type="button"
+                            className={assigned ? 'chip chip-active' : 'chip'}
+                            disabled={isSaving}
+                            onClick={() => toggleSubjectForTeacher(teacher.id, subject.id, assigned)}
+                          >
+                            {isSaving ? '…' : subject.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          ) : null}
+
+          {/* ── Holidays / non-teaching days ──────────────────────────── */}
+          <div className="selection-banner" style={{ marginTop: 16 }}>
+            <strong>Holidays</strong>
+            <span>Non-teaching dates are respected by the timetable view. Format: YYYY-MM-DD.</span>
+          </div>
+          <div className="form-grid-2">
+            <label>
+              <span>Date</span>
+              <input
+                type="date"
+                value={newHoliday.date}
+                onChange={(e) => setNewHoliday((h) => ({ ...h, date: e.target.value }))}
+                placeholder="YYYY-MM-DD"
+              />
+            </label>
+            <label>
+              <span>Label (optional)</span>
+              <input
+                value={newHoliday.label}
+                onChange={(e) => setNewHoliday((h) => ({ ...h, label: e.target.value }))}
+                placeholder="e.g. Eid ul-Fitr"
+              />
+            </label>
+          </div>
+          <button className="secondary-button" type="button" onClick={addHoliday} disabled={savingHoliday || !newHoliday.date}>
+            {savingHoliday ? 'Adding…' : 'Add Holiday'}
+          </button>
+          {holidays.length > 0 ? (
+            <div className="stack-form stack-form-compact" style={{ marginTop: 8 }}>
+              {holidays.map((h) => (
+                <div key={h.id} className="toolbar toolbar-inline">
+                  <span><strong>{h.holiday_date}</strong>{h.label ? ` — ${h.label}` : ''}</span>
+                  <button type="button" className="secondary-button" onClick={() => removeHoliday(h.id)}>Remove</button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="field-caption">No holidays added yet.</p>
+          )}
         </div>
       </section>
 
@@ -5043,6 +5317,24 @@ export function PortalTimetablePage({ session, request }) {
                   <span>End Time</span>
                   <input value={slot.end_time} onChange={(event) => updateSlot(index, 'end_time', event.target.value)} placeholder="08:45" />
                 </label>
+              </div>
+              <div style={{ marginTop: 8 }}>
+                <span className="field-caption">Applies to days (leave all off = every working day)</span>
+                <div className="chip-group" style={{ marginTop: 4 }}>
+                  {activeDays.map((day) => {
+                    const on = Array.isArray(slot.day_keys) && slot.day_keys.includes(day.day_key);
+                    return (
+                      <button
+                        key={day.day_key}
+                        type="button"
+                        className={on ? 'chip chip-active' : 'chip'}
+                        onClick={() => toggleSlotDay(index, day.day_key)}
+                      >
+                        {day.day_label.slice(0, 3)}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           ))}
