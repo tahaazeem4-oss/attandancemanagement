@@ -10,6 +10,7 @@ import {
   StyleSheet, Alert, ActivityIndicator, Modal,
 } from 'react-native';
 import { Linking } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import api from '../services/api';
 import PickerField from '../components/PickerField';
 import { C } from '../config/theme';
@@ -145,7 +146,7 @@ export default function LectureListScreen({ navigation }) {
     }
   }, [user, belongsToCurrentTeacher]);
 
-  useEffect(() => { load(); }, [load]);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const openLecture = async (lecture) => {
     const url = lecture.file_url;

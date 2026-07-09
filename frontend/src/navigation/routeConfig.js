@@ -61,6 +61,7 @@ import {
   StudentAiTutorHomeScreen,
   StudentAiMaterialsScreen,
   StudentAiChatScreen,
+  StudentAiAnalyticsScreen,
   TeacherAiMaterialsScreen,
   AdminAiPolicyScreen,
   AdminAiPolicyAdvancedScreen,
@@ -167,6 +168,7 @@ export const studentHomeScreens = [
   { name: 'StudentAiTutorHome', component: StudentAiTutorHomeScreen, options: HIDDEN_HEADER },
   { name: 'StudentAiMaterials', component: StudentAiMaterialsScreen, options: HIDDEN_HEADER },
   { name: 'StudentAiChat', component: StudentAiChatScreen, options: HIDDEN_HEADER },
+  { name: 'StudentAiAnalytics', component: StudentAiAnalyticsScreen, options: HIDDEN_HEADER },
 ];
 
 export function buildParentChildScreens(activeChild) {
@@ -189,6 +191,7 @@ export function buildParentChildScreens(activeChild) {
     { name: 'StudentAiTutorHome', component: StudentAiTutorHomeScreen, options: HIDDEN_HEADER, initialParams: { child: activeChild } },
     { name: 'StudentAiMaterials', component: StudentAiMaterialsScreen, options: HIDDEN_HEADER, initialParams: { child: activeChild } },
     { name: 'StudentAiChat', component: StudentAiChatScreen, options: HIDDEN_HEADER, initialParams: { child: activeChild } },
+    { name: 'StudentAiAnalytics', component: StudentAiAnalyticsScreen, options: HIDDEN_HEADER, initialParams: { child: activeChild } },
     { name: 'StudentLectureDetail', component: StudentLectureDetailScreen },
     { name: 'StudentNotifications', component: StudentNotificationsScreen, initialParams: { child: activeChild } },
   ];

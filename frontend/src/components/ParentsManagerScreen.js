@@ -13,6 +13,7 @@ import ImportExportBar from './ImportExportBar';
 import EntityEmptyState from './EntityEmptyState';
 import ManagerSearchAddRow from './ManagerSearchAddRow';
 import ModalFooterActions from './ModalFooterActions';
+import { useFocusEffect } from '@react-navigation/native';
 import { showDestructiveConfirm } from '../lib/confirmDialog';
 import { buildImportExportScope } from '../lib/importExportScope';
 
@@ -141,9 +142,7 @@ export default function ParentsManagerScreen({ navigation, mode }) {
     setFilterCampus('');
   }, [isSuper, filterOrg]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);

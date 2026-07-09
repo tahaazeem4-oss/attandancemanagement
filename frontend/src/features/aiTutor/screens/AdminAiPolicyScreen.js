@@ -3,13 +3,14 @@
 // route does now: set the global feature flag + global quota policy that
 // every other scope inherits from. Per-org / per-campus / per-class /
 // per-section / per-student work happens on AdminAiPolicy (hierarchy nav).
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, Switch, ScrollView, StyleSheet,
   Alert, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ScreenIntroCard from '../../../components/ScreenIntroCard';
+import { useFocusEffect } from '@react-navigation/native';
 import { C, S } from '../../../config/theme';
 import {
   setFeatureFlag, setQuotaPolicy, deleteScopeConfig,
@@ -62,7 +63,7 @@ export default function AdminAiPolicyScreen({ navigation }) {
   const [refreshingProvider, setRefreshingProvider] = useState(false);
   const [autoSyncProvider, setAutoSyncProvider] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const [s, h, p] = await Promise.all([
@@ -88,9 +89,9 @@ export default function AdminAiPolicyScreen({ navigation }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const onChange = (k, v) => setValues((p) => ({ ...p, [k]: v.replace(/[^0-9]/g, '') }));
 

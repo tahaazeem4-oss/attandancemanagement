@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TextInput, Pressable, ScrollView,
   StyleSheet, Alert, ActivityIndicator,
@@ -11,6 +11,7 @@ import { C } from '../config/theme';
 import PickerField from '../components/PickerField';
 import AppHeader from '../components/AppHeader';
 import ScreenIntroCard from '../components/ScreenIntroCard';
+import { useFocusEffect } from '@react-navigation/native';
 
 const TYPES = [
   { label: '📖  Class Work', value: 'classwork' },
@@ -60,7 +61,7 @@ export default function UploadLectureScreen({ navigation }) {
   const [pdfFile, setPdfFile] = useState(null);
 
   // ── Load classes + subjects ───────────────────────────────────
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     Promise.all([
       api.get('/lectures/classes'),
       api.get('/lectures/subjects'),
@@ -68,7 +69,7 @@ export default function UploadLectureScreen({ navigation }) {
       .then(([cls, subs]) => { setClasses(cls.data); setSubjects(subs.data); })
       .catch(() => Alert.alert('Error', 'Could not load form data'))
       .finally(() => setLoadingCls(false));
-  }, []);
+  }, []));
 
   // ── Update sections when class changes ────────────────────────
   useEffect(() => {

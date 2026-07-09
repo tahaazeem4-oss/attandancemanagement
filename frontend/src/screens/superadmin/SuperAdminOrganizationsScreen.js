@@ -8,6 +8,7 @@ import api from '../../services/api';
 import { C, S } from '../../config/theme';
 import AppHeader from '../../components/AppHeader';
 import ScreenIntroCard from '../../components/ScreenIntroCard';
+import { useFocusEffect } from '@react-navigation/native';
 import { toLocalPhone } from '../../lib/phoneUtils';
 
 // ── Shared helpers ────────────────────────────────────────────
@@ -390,7 +391,7 @@ export default function SuperAdminOrganizationsScreen({ navigation }) {
     } finally { setLoading(false); }
   }, [loadOrgAdmins]);
 
-  useEffect(() => { loadData(); }, []);
+  useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
 
   // Delete org
   const confirmDeleteOrg = async () => {

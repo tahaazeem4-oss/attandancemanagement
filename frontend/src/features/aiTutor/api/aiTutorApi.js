@@ -56,6 +56,10 @@ export const resetQuotaCounters   = () => api.post('/ai-tutor/admin/reset-counte
 
 // ── Analytics ────────────────────────────────────────────────
 export const fetchUsageAnalytics = (days = 30) => api.get('/ai-tutor/analytics/usage', { params: { days } });
+export const fetchStudentAnalytics = (days = 30, studentId) =>
+  api.get('/ai-tutor/analytics/student', {
+    params: { days, ...(studentId != null ? { student_id: studentId } : {}) },
+  });
 export const fetchScopeAnalytics = (nodeType = 'root', nodeId, days = 30) =>
   api.get('/ai-tutor/analytics/scope', {
     params: { node_type: nodeType, ...(nodeId ? { node_id: nodeId } : {}), days },

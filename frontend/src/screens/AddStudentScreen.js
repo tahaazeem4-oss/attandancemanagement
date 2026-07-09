@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, TextInput, Pressable,
   StyleSheet, ScrollView, Alert, ActivityIndicator, StatusBar, Animated
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import api from '../services/api';
+import { useFocusEffect } from '@react-navigation/native';
 import { C, S } from '../config/theme';
 import { useEntrance } from '../components/Deco';
 import PickerField from '../components/PickerField';
@@ -23,9 +24,9 @@ export default function AddStudentScreen({ navigation }) {
   const pOut = () => Animated.spring(btnS, { toValue: 1,    useNativeDriver: true, speed: 20 }).start();
   const [focus, setFocus] = useState('');
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     api.get('/classes').then(({ data }) => setClasses(data)).catch(() => {});
-  }, []);
+  }, []));
 
   useEffect(() => {
     if (!form.class_id) { setSections([]); return; }

@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import api from '../services/api';
+import { useFocusEffect } from '@react-navigation/native';
 import { C } from '../config/theme';
 import { exportFile } from '../services/importExport';
 import AppHeader from '../components/AppHeader';
@@ -293,11 +294,11 @@ export default function ReportScreen({ route, navigation }) {
   const [xlsxModal,       setXlsxModal]       = useState(false);
 
   // Load once: full student list for the picker (year/month-independent)
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     api.get('/attendance/monthly', { params: { class_id, section_id, year: now.getFullYear(), month: now.getMonth() + 1 } })
       .then(({ data: d }) => setAllStudents(d || []))
       .catch(() => {});
-  }, []);
+  }, []));
 
   const load = useCallback(() => {
     setLoading(true);

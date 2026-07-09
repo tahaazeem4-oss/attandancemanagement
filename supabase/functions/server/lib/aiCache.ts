@@ -31,22 +31,25 @@ function normaliseQuestion(question: string): string {
 
 /**
  * Build a stable cache key from the question + context.
- * Uses SubtleCrypto SHA-256 (available in Deno / browser runtimes).
+ * Uses a fast synchronous djb2 hash — no async crypto overhead.
  *
- * Key input: "<normalised_question>|<campus_id>|<subject_id>|<sorted_doc_ids>"
+ * Key: "<campus_id>_<subject_id>_<hash32>" where hash covers
+ * the normalised question + campus + subject + sorted doc IDs.
  */
-export async function buildCacheKey(
+export function buildCacheKey(
   question: string,
   campusId: number,
   subjectId: number,
   documentIds: string[],
-): Promise<string> {
+): string {
   const sortedDocs = [...documentIds].sort().join(",");
   const raw = `${normaliseQuestion(question)}|${campusId}|${subjectId}|${sortedDocs}`;
-  const encoded = new TextEncoder().encode(raw);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", encoded);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  // djb2 hash — fast, deterministic, good enough for a best-effort cache key
+  let h = 5381;
+  for (let i = 0; i < raw.length; i++) {
+    h = (((h << 5) + h) ^ raw.charCodeAt(i)) & 0xffffffff;
+  }
+  return `${campusId}_${subjectId}_${(h >>> 0).toString(16)}`;
 }
 
 /**

@@ -86,7 +86,8 @@ Deno.serve(async (req: Request) => {
     });
   } catch (err) {
     console.error("[index] Unhandled error:", err);
-    return new Response(JSON.stringify({ message: "Internal server error" }), {
+    const message = err instanceof Error ? err.message : String((err as Record<string,unknown>)?.message || "Internal server error");
+    return new Response(JSON.stringify({ message }), {
       status: 500,
       headers: { ...CORS, "Content-Type": "application/json" },
     });

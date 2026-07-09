@@ -75,7 +75,11 @@ async function request(method, path, data, config = {}) {
   if (config.responseType === 'arraybuffer') {
     responseData = await res.arrayBuffer();
   } else if (ct.includes('application/json')) {
-    responseData = await res.json();
+    try {
+      responseData = await res.json();
+    } catch {
+      responseData = null;
+    }
   } else if (
     ct.includes('spreadsheetml') ||
     ct.includes('octet-stream') ||
@@ -97,7 +101,10 @@ async function request(method, path, data, config = {}) {
   }
 
   if (!res.ok) {
-    throw { response: { status: res.status, data: responseData } };
+    const fallbackMsg = `Server error ${res.status}`;
+    const safeData = (responseData && typeof responseData === 'object') ? responseData : { message: fallbackMsg };
+    if (!safeData.message) safeData.message = fallbackMsg;
+    throw { response: { status: res.status, data: safeData } };
   }
 
   return { data: responseData, status: res.status };

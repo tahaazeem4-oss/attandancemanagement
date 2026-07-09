@@ -5,6 +5,7 @@ import {
   KeyboardAvoidingView, Platform, Modal,
 } from 'react-native';
 import api from '../services/api';
+import { useFocusEffect } from '@react-navigation/native';
 import { C } from '../config/theme';
 import PickerField from '../components/PickerField';
 import AppHeader from '../components/AppHeader';
@@ -73,12 +74,12 @@ export default function SendNotificationScreen({ navigation, route }) {
   const [editMessage, setEditMessage] = useState('');
 
   // ── Load classes ───────────────────────────────────────────
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     api.get('/lectures/classes')   // reuse same endpoint
       .then(({ data }) => setClasses(data))
       .catch(() => {})
       .finally(() => setLoadingCls(false));
-  }, []);
+  }, []));
 
   // ── Update sections on class change ───────────────────────
   useEffect(() => {

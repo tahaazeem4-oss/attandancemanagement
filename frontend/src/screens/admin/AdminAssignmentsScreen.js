@@ -9,6 +9,7 @@ import PickerField from '../../components/PickerField';
 import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '../../components/AppHeader';
 import { showDestructiveConfirm } from '../../lib/confirmDialog';
+import { useFocusEffect } from '@react-navigation/native';
 
 export default function AdminAssignmentsScreen({ navigation }) {
   const [assignments, setAssignments] = useState([]);
@@ -33,7 +34,7 @@ export default function AdminAssignmentsScreen({ navigation }) {
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { load(); }, []);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   useEffect(() => {
     if (form.class_id) {

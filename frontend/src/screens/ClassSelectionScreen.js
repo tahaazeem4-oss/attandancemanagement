@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, Pressable, StyleSheet,
   ActivityIndicator, Alert, ScrollView, Animated
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import api from '../services/api';
+import { useFocusEffect } from '@react-navigation/native';
 import { C, S } from '../config/theme';
 import { useEntrance } from '../components/Deco';
 import PickerField from '../components/PickerField';
@@ -22,7 +23,8 @@ export default function ClassSelectionScreen({ navigation, route }) {
   const pIn  = () => Animated.spring(btnS, { toValue: 0.96, useNativeDriver: true, speed: 50 }).start();
   const pOut = () => Animated.spring(btnS, { toValue: 1,    useNativeDriver: true, speed: 20 }).start();
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoading(true);
     api.get('/teachers/classes')
       .then(({ data }) => {
         setAssignments(data);
@@ -41,6 +43,8 @@ export default function ClassSelectionScreen({ navigation, route }) {
       .catch(() => Alert.alert('Error', 'Could not load assigned classes'))
       .finally(() => setLoading(false));
   }, []);
+
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   // Unique classes from assignments
   const uniqueClasses = [...new Map(

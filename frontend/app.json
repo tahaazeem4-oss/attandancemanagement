@@ -23,8 +23,12 @@
         "NSCameraUsageDescription": "Used to scan documents for uploads.",
         "NSPhotoLibraryUsageDescription": "Used to attach files from your photo library.",
         "UIBackgroundModes": [
+          "remote-notification",
           "remote-notification"
         ]
+      },
+      "runtimeVersion": {
+        "policy": "appVersion"
       }
     },
     "android": {
@@ -33,7 +37,8 @@
         "backgroundColor": "#FFFFFF"
       },
       "package": "com.attendanceapp.management",
-      "versionCode": 1
+      "versionCode": 1,
+      "runtimeVersion": "1.0.0"
     },
     "web": {
       "bundler": "metro"
@@ -58,6 +63,9 @@
         "projectId": "a44aa75b-be87-44f2-adb5-fecd56da3c69"
       }
     },
-    "owner": "tahaexpo2"
+    "owner": "tahaexpo2",
+    "updates": {
+      "url": "https://u.expo.dev/a44aa75b-be87-44f2-adb5-fecd56da3c69"
+    }
   }
 }

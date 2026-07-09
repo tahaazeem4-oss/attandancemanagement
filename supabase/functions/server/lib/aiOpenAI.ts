@@ -81,19 +81,35 @@ export async function chatComplete(system: string, user: string, maxOutputTokens
     headers["X-Title"]      = Deno.env.get("OPENROUTER_TITLE")   || "School AI Tutor";
   }
 
-  const res = await fetch(`${base}/chat/completions`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      model: CHAT_MODEL,
-      temperature: 0.2,
-      max_tokens: maxOutputTokens,
-      messages: [
-        { role: "system", content: system },
-        { role: "user",   content: user },
-      ],
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
+  let res: Response;
+  try {
+    res = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers,
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: CHAT_MODEL,
+        temperature: 0.2,
+        max_tokens: maxOutputTokens,
+        messages: [
+          // cache_control tells OpenRouter/Anthropic to cache this system prompt.
+          // For OpenAI models via OpenRouter, prompt caching is automatic.
+          { role: "system", content: [
+            { type: "text", text: system, cache_control: { type: "ephemeral" } },
+          ]},
+          { role: "user", content: user },
+        ],
+      }),
+    });
+  } catch (fetchErr) {
+    clearTimeout(timeoutId);
+    const name = (fetchErr as Error).name;
+    if (name === "AbortError") throw new Error("AI model request timed out after 30s. Please try again.");
+    throw fetchErr;
+  }
+  clearTimeout(timeoutId);
   if (!res.ok) throw new Error(`Chat completion failed: ${res.status} ${await res.text()}`);
   const j = await res.json();
   const choice = j.choices?.[0];

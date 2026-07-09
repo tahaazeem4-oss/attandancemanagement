@@ -8,6 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
+import { useFocusEffect } from '@react-navigation/native';
 import AppHeader from '../../components/AppHeader';
 import ScreenIntroCard from '../../components/ScreenIntroCard';
 import PickerField from '../../components/PickerField';
@@ -471,7 +472,7 @@ export default function SuperAdminSchoolsScreen({ navigation }) {
     } finally { setLoading(false); }
   }, [loadAdmins]);
 
-  useEffect(() => { loadData(); }, []);
+  useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
 
   // Build a map from orgId → org name for badge labels
   const orgNameMap = Object.fromEntries(orgs.map(o => [o.id, o.name]));

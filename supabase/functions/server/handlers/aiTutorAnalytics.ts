@@ -8,6 +8,74 @@ export async function handleAiTutorAnalytics(req: Request, path: string, _url: U
   if (!user) return json({ message: "Unauthorized" }, 401);
   const role = String(user.role || "");
   const userId = Number(user.id || 0);
+
+  // ── Student self-analytics ─────────────────────────────────────────────────
+  if (path === "/ai-tutor/analytics/student" && req.method === "GET") {
+    if (!["student", "parent"].includes(role)) return json({ message: "Forbidden" }, 403);
+
+    const db = getDb();
+    const url = new URL(req.url);
+    const days = Math.min(90, Math.max(1, Number(url.searchParams.get("days") || 30)));
+    const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
+
+    // Resolve student_id from token
+    let studentId: number | null = null;
+    if (role === "student") {
+      const tokenStudentId = Number((user as Record<string, unknown>).student_id || 0);
+      studentId = tokenStudentId > 0 ? tokenStudentId : userId;
+    } else {
+      // parent: must pass student_id query param (owned child)
+      const reqStudentId = Number(url.searchParams.get("student_id") || 0);
+      if (!reqStudentId) return json({ message: "student_id required for parent" }, 400);
+      const { data: link } = await db
+        .from("parent_student")
+        .select("id")
+        .eq("parent_id", userId)
+        .eq("student_id", reqStudentId)
+        .maybeSingle();
+      if (!link) return json({ message: "Forbidden" }, 403);
+      studentId = reqStudentId;
+    }
+
+    if (!studentId) return json({ message: "Could not resolve student" }, 400);
+
+    const { data: rowsRaw, error } = await db
+      .from("ai_usage_logs")
+      .select("event_type, total_tokens, latency_ms, created_at")
+      .eq("student_id", studentId)
+      .gte("created_at", since)
+      .limit(10000);
+
+    if (error) return json({ message: error.message }, 500);
+
+    const rows = (rowsRaw || []) as Array<{
+      event_type: string; total_tokens: number | null; latency_ms: number | null; created_at: string;
+    }>;
+
+    const totals = {
+      queries:       rows.filter((r) => r.event_type === "query").length,
+      blocked_quota: rows.filter((r) => r.event_type === "blocked_quota").length,
+      blocked_scope: rows.filter((r) => r.event_type === "blocked_scope").length,
+      total_tokens:  rows.reduce((a, r) => a + (r.total_tokens || 0), 0),
+      avg_latency_ms: (() => {
+        const q = rows.filter((r) => r.event_type === "query");
+        return q.length ? Math.round(q.reduce((a, r) => a + (r.latency_ms || 0), 0) / q.length) : 0;
+      })(),
+    };
+
+    const byDay = new Map<string, number>();
+    for (const r of rows) {
+      if (r.event_type !== "query") continue;
+      const d = r.created_at.slice(0, 10);
+      byDay.set(d, (byDay.get(d) || 0) + 1);
+    }
+    const series = [...byDay.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([day, count]) => ({ day, count }));
+
+    return json({ totals, series, days });
+  }
+
   if (!["super_admin","org_admin","admin","teacher"].includes(role)) return json({ message: "Forbidden" }, 403);
 
   if (["org_admin", "admin", "teacher"].includes(role)) {

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   ActivityIndicator,
   Alert,
@@ -420,7 +421,7 @@ export default function TimetableManagerScreen({ navigation, mode = 'teacher' })
     }
   }, [mode]);
 
-  useEffect(() => { reloadMeta(''); }, []);
+  useFocusEffect(useCallback(() => { reloadMeta(''); }, [reloadMeta]));
 
   // -- Derived data -----------------------------------------------------------
   const classes = useMemo(

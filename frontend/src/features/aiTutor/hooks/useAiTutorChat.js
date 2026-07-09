@@ -41,7 +41,7 @@ export default function useAiTutorChat({ studentId } = {}) {
       ]);
       return data;
     } catch (e) {
-      const msg = e?.response?.data?.message || 'AI request failed';
+      const msg = e?.response?.data?.message || e?.message || 'AI request failed';
       setError(msg);
       setMessages((prev) => [...prev, { role: 'assistant', content: msg, _error: true }]);
       throw e;

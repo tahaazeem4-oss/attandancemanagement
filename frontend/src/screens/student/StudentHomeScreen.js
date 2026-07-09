@@ -405,9 +405,9 @@ export default function StudentHomeScreen({ navigation, route }) {
               quota={aiQuota}
               onPress={() => {
                 if (isParentViewing) {
-                  navigation.navigate('StudentAiTutorHome', { child: childData });
+                  navigation.navigate('StudentAiAnalytics', { child: childData });
                 } else {
-                  navigation.navigate('StudentAiTutorHome');
+                  navigation.navigate('StudentAiAnalytics');
                 }
               }}
             />
