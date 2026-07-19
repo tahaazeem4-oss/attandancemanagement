@@ -1,9 +1,11 @@
 // handlers/superAdmin.ts — super admin routes
 import { json, getDb, verifyToken, hashPassword, SUPABASE_URL } from "../_shared.ts";
 import {
+  archiveClass,
   archiveSchool,
   archiveSubject,
   archiveTeacher,
+  getClassDeleteImpact,
   getSchoolDeleteImpact,
   getSubjectDeleteImpact,
   getTeacherDeleteImpact,
@@ -740,6 +742,117 @@ export async function handleSuperAdmin(
     } catch (err) {
       console.error("[super-admin/schools/:id/classes GET]", err);
       return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // ── POST /super-admin/schools/:schoolId/classes ────────────────
+  // These class/section write endpoints didn't previously exist for
+  // super_admin at all (only the list GET above did) — the shared
+  // ClassesManagerScreen already called them, so every super-admin
+  // "Add Class"/"Add Section" attempt 404'd outright.
+  if (schoolClassesMatch && method === "POST") {
+    const schoolId = parseInt(schoolClassesMatch[1]);
+    try {
+      const { class_name } = await req.json();
+      const name = String(class_name || "").trim();
+      if (!name) return json({ message: "Class name is required" }, 400);
+      const { data, error } = await db.from("classes").insert({ school_id: schoolId, class_name: name }).select().single();
+      if (error) throw error;
+      return json({ message: "Class created", id: data.id }, 201);
+    } catch (err) {
+      console.error("[super-admin/schools/:id/classes POST]", err);
+      return json({ message: err instanceof Error ? err.message : "Could not create class" }, 500);
+    }
+  }
+
+  // ── PUT/DELETE /super-admin/schools/:schoolId/classes/:classId ─
+  const schoolClassMatch = path.match(/^\/super-admin\/schools\/(\d+)\/classes\/(\d+)$/);
+  if (schoolClassMatch && method === "PUT") {
+    const schoolId = parseInt(schoolClassMatch[1]);
+    const classId = parseInt(schoolClassMatch[2]);
+    try {
+      const { class_name } = await req.json();
+      const name = String(class_name || "").trim();
+      if (!name) return json({ message: "Class name is required" }, 400);
+      await db.from("classes").update({ class_name: name }).eq("id", classId).eq("school_id", schoolId);
+      return json({ message: "Class updated" });
+    } catch (err) {
+      console.error("[super-admin/schools/:id/classes PUT]", err);
+      return json({ message: err instanceof Error ? err.message : "Could not update class" }, 500);
+    }
+  }
+  if (schoolClassMatch && method === "DELETE") {
+    const classId = parseInt(schoolClassMatch[2]);
+    try {
+      const result = await archiveClass(db, classId, Number(user.id), String(user.role));
+      return json({ message: "Class archived", archived: true, impact: result.impact });
+    } catch (err) {
+      return json({
+        message: err instanceof Error ? err.message : "Class cannot be deleted yet",
+        impact: await getClassDeleteImpact(db, classId),
+      }, 409);
+    }
+  }
+
+  // ── POST /super-admin/schools/:schoolId/classes/:classId/sections ─
+  const schoolClassSectionsMatch = path.match(/^\/super-admin\/schools\/(\d+)\/classes\/(\d+)\/sections$/);
+  if (schoolClassSectionsMatch && method === "POST") {
+    const schoolId = parseInt(schoolClassSectionsMatch[1]);
+    const classId = parseInt(schoolClassSectionsMatch[2]);
+    try {
+      const { section_name } = await req.json();
+      const name = String(section_name || "").trim();
+      if (!name) return json({ message: "Section name is required" }, 400);
+
+      const { data: cls } = await db.from("classes").select("id").eq("id", classId).eq("school_id", schoolId).maybeSingle();
+      if (!cls) return json({ message: "Class not found" }, 404);
+
+      const { data: existing } = await db.from("sections").select("id, section_name").eq("class_id", classId);
+      if ((existing || []).some((s) => String(s.section_name).trim().toLowerCase() === name.toLowerCase())) {
+        return json({ message: `A section named "${name}" already exists in this class.` }, 409);
+      }
+
+      const { data, error } = await db.from("sections").insert({ class_id: classId, section_name: name }).select().single();
+      if (error) throw error;
+      return json({ message: "Section created", id: data.id }, 201);
+    } catch (err) {
+      console.error("[super-admin/schools/:id/classes/:id/sections POST]", err);
+      return json({ message: err instanceof Error ? err.message : "Could not create section" }, 500);
+    }
+  }
+
+  // ── PUT/DELETE /super-admin/schools/:schoolId/sections/:sectionId ─
+  const schoolSectionMatch = path.match(/^\/super-admin\/schools\/(\d+)\/sections\/(\d+)$/);
+  if (schoolSectionMatch && method === "PUT") {
+    const sectionId = parseInt(schoolSectionMatch[2]);
+    try {
+      const { section_name } = await req.json();
+      const name = String(section_name || "").trim();
+      if (!name) return json({ message: "Section name is required" }, 400);
+
+      const { data: sec } = await db.from("sections").select("class_id").eq("id", sectionId).maybeSingle();
+      if (sec?.class_id) {
+        const { data: siblings } = await db.from("sections").select("id, section_name").eq("class_id", sec.class_id).neq("id", sectionId);
+        if ((siblings || []).some((s) => String(s.section_name).trim().toLowerCase() === name.toLowerCase())) {
+          return json({ message: `A section named "${name}" already exists in this class.` }, 409);
+        }
+      }
+
+      await db.from("sections").update({ section_name: name }).eq("id", sectionId);
+      return json({ message: "Section updated" });
+    } catch (err) {
+      console.error("[super-admin/schools/:id/sections PUT]", err);
+      return json({ message: err instanceof Error ? err.message : "Could not update section" }, 500);
+    }
+  }
+  if (schoolSectionMatch && method === "DELETE") {
+    const sectionId = parseInt(schoolSectionMatch[2]);
+    try {
+      await db.from("sections").delete().eq("id", sectionId);
+      return json({ message: "Section deleted" });
+    } catch (err) {
+      console.error("[super-admin/schools/:id/sections DELETE]", err);
+      return json({ message: err instanceof Error ? err.message : "Could not delete section" }, 500);
     }
   }
 

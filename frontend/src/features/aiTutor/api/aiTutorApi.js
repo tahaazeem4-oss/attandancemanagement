@@ -42,11 +42,11 @@ export const listQuotaPolicies = (params = {}) => api.get('/ai-tutor/admin/quota
 export const fetchAiTutorHealth = () => api.get('/ai-tutor/admin/health');
 export const fetchScopeOptions  = (type, parentId) =>
   api.get('/ai-tutor/admin/scope-options', { params: { type, ...(parentId ? { parent_id: parentId } : {}) } });
-export const fetchPolicySummary = () => api.get('/ai-tutor/admin/policy-summary');
-export const deleteScopeConfig  = (scopeType, scopeId, target = 'both') =>
-  api.delete('/ai-tutor/admin/scope', { params: { scope_type: scopeType, scope_id: scopeId, target } });
-export const fetchHierarchy     = (nodeType = 'root', nodeId) =>
-  api.get('/ai-tutor/admin/hierarchy', { params: { node_type: nodeType, ...(nodeId ? { node_id: nodeId } : {}) } });
+export const fetchPolicySummary = (actorType = 'student') => api.get('/ai-tutor/admin/policy-summary', { params: { actor_type: actorType } });
+export const deleteScopeConfig  = (scopeType, scopeId, target = 'both', actorType = 'student') =>
+  api.delete('/ai-tutor/admin/scope', { params: { scope_type: scopeType, scope_id: scopeId, target, actor_type: actorType } });
+export const fetchHierarchy     = (nodeType = 'root', nodeId, actorType = 'student') =>
+  api.get('/ai-tutor/admin/hierarchy', { params: { node_type: nodeType, actor_type: actorType, ...(nodeId ? { node_id: nodeId } : {}) } });
 export const cascadeFeatureFlag = (body) => api.post('/ai-tutor/admin/cascade-flag', body);
 
 // ── Provider key sync (super admin only) ─────────────────────

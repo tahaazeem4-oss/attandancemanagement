@@ -7,7 +7,6 @@ export default function AiQuotaPill({ quota }) {
   if (!quota) return null;
   const parts = [];
   if (quota.remaining_daily_requests   !== null && quota.remaining_daily_requests   !== undefined) parts.push(`D ${quota.remaining_daily_requests}`);
-  if (quota.remaining_weekly_requests  !== null && quota.remaining_weekly_requests  !== undefined) parts.push(`W ${quota.remaining_weekly_requests}`);
   if (quota.remaining_monthly_requests !== null && quota.remaining_monthly_requests !== undefined) parts.push(`M ${quota.remaining_monthly_requests}`);
   if (!parts.length) return null;
 

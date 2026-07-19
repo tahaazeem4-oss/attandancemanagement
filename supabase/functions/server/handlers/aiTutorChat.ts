@@ -2,7 +2,7 @@
 // Student-facing chat endpoints: config, sessions, query, history.
 import { getDb, json, verifyToken } from "../_shared.ts";
 import { resolveStudentScope, getEffectiveAiAccess, getEffectiveAiAccessForUser } from "../lib/aiScope.ts";
-import { getEffectiveQuota, loadQuotaState, assertCanQuery, incrementUsage } from "../lib/aiQuota.ts";
+import { getEffectiveQuota, loadQuotaState, assertCanQuery, incrementUsage, loadTeacherQuotaState } from "../lib/aiQuota.ts";
 import { enforceRateLimit } from "../lib/aiRateLimit.ts";
 import { buildPrompt } from "../lib/aiPrompt.ts";
 import { embedText, chatComplete, hasEmbeddings } from "../lib/aiOpenAI.ts";
@@ -148,7 +148,13 @@ export async function handleAiTutorChat(req: Request, path: string, url: URL): P
 
     if (["super_admin", "org_admin", "admin", "teacher"].includes(role)) {
       const access = await getEffectiveAiAccessForUser(user);
-      return json({ enabled: access.enabled, blocked_at: access.blocked_at, scope: access.scope || null });
+      if (role !== "teacher" || !access.enabled || !access.scope) {
+        return json({ enabled: access.enabled, blocked_at: access.blocked_at, scope: access.scope || null });
+      }
+      // Teachers get their (shared, pooled) upload/usage quota too, so the
+      // materials screen can show remaining allowance instead of nothing.
+      const teacherState = await loadTeacherQuotaState(access.scope);
+      return json({ enabled: true, scope: access.scope, quota: teacherState });
     }
 
     const resolvedForConfig = await resolveStudentFromUser(db, user, url);

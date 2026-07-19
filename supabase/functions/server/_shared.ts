@@ -257,6 +257,23 @@ export async function tokensForParents(
   return (data || []).map((r: { token: string }) => r.token).filter(Boolean);
 }
 
+// Push a student and their parent(s) at once — used for leave-decision events
+// (approve/reject/withdraw) so both audiences stay in sync with each other,
+// matching the attendance and lecture notification flows.
+export async function notifyStudentAndParents(
+  db: ReturnType<typeof getDb>,
+  studentId: number,
+  title: string,
+  body: string,
+  data: Record<string, unknown> = {},
+): Promise<void> {
+  const [studentTokens, parentTokens] = await Promise.all([
+    tokensForStudents(db, [studentId]),
+    tokensForParents(db, [studentId]),
+  ]);
+  await sendPush([...new Set([...studentTokens, ...parentTokens])], title, body, data);
+}
+
 // Returns push tokens for parents of all students in a given class (and optionally section).
 export async function tokensForClassParents(
   db: ReturnType<typeof getDb>,

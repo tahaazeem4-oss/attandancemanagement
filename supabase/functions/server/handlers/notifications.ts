@@ -390,6 +390,10 @@ export async function handleNotifications(
       const VALID_CATS = ["general", "holiday", "complaint", "announcement", "homework", "exam"];
       if (!VALID_TARGETS.includes(target_type))
         return json({ message: "Invalid target_type" }, 400);
+      // Whole-school broadcasts are Admin-only — a teacher may still notify
+      // their own class/section/student, just not the entire school.
+      if (target_type === "school" && role === "teacher")
+        return json({ message: "Only an admin can send a notification to the whole school" }, 403);
       if (!title?.trim() || !message?.trim())
         return json({ message: "title and message are required" }, 400);
 

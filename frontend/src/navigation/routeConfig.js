@@ -1,5 +1,9 @@
 import StaffNotificationsScreen from '../screens/StaffNotificationsScreen';
 import SendNotificationScreen from '../screens/SendNotificationScreen';
+import CircularsScreen from '../screens/CircularsScreen';
+import CircularDetailScreen from '../screens/CircularDetailScreen';
+import ParentAlertsScreen from '../screens/parent/ParentAlertsScreen';
+import ParentLeavesScreen from '../screens/parent/ParentLeavesScreen';
 import ChatListScreen from '../screens/chat/ChatListScreen';
 import ChatScreen from '../screens/chat/ChatScreen';
 import NewChatScreen from '../screens/chat/NewChatScreen';
@@ -89,6 +93,8 @@ export const teacherHomeScreens = [
   { name: 'TeacherSubjects', component: TeacherSubjectsScreen, options: HIDDEN_HEADER },
   { name: 'SendNotification', component: SendNotificationScreen },
   { name: 'StaffNotifications', component: StaffNotificationsScreen },
+  { name: 'Circulars', component: CircularsScreen },
+  { name: 'CircularDetail', component: CircularDetailScreen },
   { name: 'ChatList', component: ChatListScreen },
   { name: 'Chat', component: ChatScreen, options: { headerShown: false } },
   { name: 'StaffNewChat', component: StaffNewChatScreen, options: { headerShown: false } },
@@ -109,6 +115,8 @@ export const adminHomeScreens = [
   { name: 'AdminSubjects', component: AdminSubjectsScreen },
   { name: 'AdminParents', component: AdminParentsScreen },
   { name: 'StaffNotifications', component: StaffNotificationsScreen },
+  { name: 'Circulars', component: CircularsScreen },
+  { name: 'CircularDetail', component: CircularDetailScreen },
   { name: 'AdminTeacherAttendance', component: AdminTeacherAttendanceScreen },
   { name: 'Report', component: ReportScreen },
   { name: 'StudentAttendanceDetail', component: StudentAttendanceDetailScreen },
@@ -134,6 +142,8 @@ export const orgAdminHomeScreens = [
   { name: 'OrgAdminNotifications', component: OrgAdminNotificationsScreen },
   { name: 'OrgAdminSubjects', component: OrgAdminSubjectsScreen },
   { name: 'StaffNotifications', component: StaffNotificationsScreen },
+  { name: 'Circulars', component: CircularsScreen },
+  { name: 'CircularDetail', component: CircularDetailScreen },
   { name: 'AdminAiPolicy', component: AdminAiPolicyScreen, options: { title: 'AI Tutor Policies' } },
   { name: 'AdminAiPolicyAdvanced', component: AdminAiPolicyAdvancedScreen, options: { title: 'AI Tutor Policies (Advanced)' } },
   { name: 'AdminAiAnalytics', component: AdminAiAnalyticsScreen, options: { title: 'AI Tutor Analytics' } },
@@ -150,6 +160,8 @@ export const superAdminHomeScreens = [
   { name: 'SuperAdminSubjects', component: SuperAdminSubjectsScreen },
   { name: 'SuperAdminParents', component: SuperAdminParentsScreen },
   { name: 'StaffNotifications', component: StaffNotificationsScreen },
+  { name: 'Circulars', component: CircularsScreen },
+  { name: 'CircularDetail', component: CircularDetailScreen },
   { name: 'AdminAiPolicy', component: AdminAiPolicyScreen, options: { title: 'AI Tutor Policies' } },
   { name: 'AdminAiPolicyAdvanced', component: AdminAiPolicyAdvancedScreen, options: { title: 'AI Tutor Policies (Advanced)' } },
   { name: 'AdminAiAnalytics', component: AdminAiAnalyticsScreen, options: { title: 'AI Tutor Analytics' } },
@@ -165,6 +177,8 @@ export const studentHomeScreens = [
   { name: 'StudentTimetable', component: StudentTimetableScreen, options: { title: 'Timetable' } },
   { name: 'StudentLectureDetail', component: StudentLectureDetailScreen },
   { name: 'StudentNotifications', component: StudentNotificationsScreen },
+  { name: 'Circulars', component: CircularsScreen },
+  { name: 'CircularDetail', component: CircularDetailScreen },
   { name: 'StudentAiTutorHome', component: StudentAiTutorHomeScreen, options: HIDDEN_HEADER },
   { name: 'StudentAiMaterials', component: StudentAiMaterialsScreen, options: HIDDEN_HEADER },
   { name: 'StudentAiChat', component: StudentAiChatScreen, options: HIDDEN_HEADER },
@@ -194,6 +208,8 @@ export function buildParentChildScreens(activeChild) {
     { name: 'StudentAiAnalytics', component: StudentAiAnalyticsScreen, options: HIDDEN_HEADER, initialParams: { child: activeChild } },
     { name: 'StudentLectureDetail', component: StudentLectureDetailScreen },
     { name: 'StudentNotifications', component: StudentNotificationsScreen, initialParams: { child: activeChild } },
+    { name: 'Circulars', component: CircularsScreen },
+    { name: 'CircularDetail', component: CircularDetailScreen },
   ];
 }
 
@@ -202,6 +218,8 @@ export function getParentStackScreens(parentStudentPortalTabsComponent, parentDa
     { name: 'ParentDashboard', component: parentDashboardScreenComponent },
     { name: 'ParentProfile', component: ProfileScreen, options: { headerShown: false } },
     { name: 'ChildStudentPortal', component: parentStudentPortalTabsComponent },
+    { name: 'ParentAlerts', component: ParentAlertsScreen },
+    { name: 'ParentLeaves', component: ParentLeavesScreen },
     { name: 'ChatList', component: ChatListScreen },
     { name: 'Chat', component: ChatScreen, options: { headerShown: false } },
     { name: 'NewChat', component: NewChatScreen, options: { headerShown: false } },

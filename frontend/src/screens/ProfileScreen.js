@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, ScrollView, Pressable, TextInput,
-  StyleSheet, Alert, ActivityIndicator, StatusBar,
+  StyleSheet, Alert, ActivityIndicator, StatusBar, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -71,35 +71,42 @@ export default function ProfileScreen() {
   };
 
   return (
-    <ScrollView
+    <KeyboardAvoidingView
       style={styles.container}
-      contentContainerStyle={{ paddingBottom: 60 }}
-      showsVerticalScrollIndicator={false}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
     >
-      <StatusBar barStyle="light-content" backgroundColor={C.brandDeep} translucent={false} />
-
-      {/* ── Header ────────────────────────────────────────── */}
-      <LinearGradient
-        colors={C.brandGradient}
-        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={[styles.header, { paddingTop: headerTopPad }]}
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + 36, 60) }}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentInsetAdjustmentBehavior="never"
       >
-        <View style={styles.headerDeco} pointerEvents="none" />
-        <View style={styles.avatarWrap}>
-          <Text style={styles.avatarText}>{initials}</Text>
-        </View>
-        <Text style={styles.nameText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-          {user?.first_name} {user?.last_name}
-        </Text>
-        <View style={styles.roleBadge}>
-          <Text style={styles.roleText}>{ROLE_LABELS[user?.role] || user?.role}</Text>
-        </View>
-        {school && <Text style={styles.schoolText}>{school.name}</Text>}
-      </LinearGradient>
+        <StatusBar barStyle="light-content" backgroundColor={C.brandDeep} translucent={false} />
 
-      {/* ── Account Info ──────────────────────────────────── */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Account Info</Text>
+        {/* ── Header ────────────────────────────────────────── */}
+        <LinearGradient
+          colors={C.brandGradient}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+          style={[styles.header, { paddingTop: headerTopPad }]}
+        >
+          <View style={styles.headerDeco} pointerEvents="none" />
+          <View style={styles.avatarWrap}>
+            <Text style={styles.avatarText}>{initials}</Text>
+          </View>
+          <Text style={styles.nameText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+            {user?.first_name} {user?.last_name}
+          </Text>
+          <View style={styles.roleBadge}>
+            <Text style={styles.roleText}>{ROLE_LABELS[user?.role] || user?.role}</Text>
+          </View>
+          {school && <Text style={styles.schoolText}>{school.name}</Text>}
+        </LinearGradient>
+
+        {/* ── Account Info ──────────────────────────────────── */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Account Info</Text>
 
         <View style={styles.infoRow}>
           <View style={styles.infoIcon}><Ionicons name="mail-outline" size={16} color={C.primary} /></View>
@@ -138,11 +145,11 @@ export default function ProfileScreen() {
             </View>
           </View>
         ) : null}
-      </View>
+        </View>
 
-      {/* ── Change Password ───────────────────────────────── */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Change Password</Text>
+        {/* ── Change Password ───────────────────────────────── */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Change Password</Text>
 
         {/* Current password */}
         <View style={styles.inputWrap}>
@@ -209,20 +216,21 @@ export default function ProfileScreen() {
             : <Text style={styles.saveBtnText}>Update Password</Text>
           }
         </Pressable>
-      </View>
+        </View>
 
-      {/* ── Sign Out ──────────────────────────────────────── */}
-      <Pressable
-        onPress={() => Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Sign Out', style: 'destructive', onPress: logout },
-        ])}
-        style={({ pressed }) => [styles.signOutBtn, pressed && { opacity: 0.7 }]}
-      >
-        <Ionicons name="log-out-outline" size={20} color="#EF4444" />
-        <Text style={styles.signOutText}>Sign Out</Text>
-      </Pressable>
-    </ScrollView>
+        {/* ── Sign Out ──────────────────────────────────────── */}
+        <Pressable
+          onPress={() => Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Sign Out', style: 'destructive', onPress: logout },
+          ])}
+          style={({ pressed }) => [styles.signOutBtn, pressed && { opacity: 0.7 }]}
+        >
+          <Ionicons name="log-out-outline" size={20} color="#EF4444" />
+          <Text style={styles.signOutText}>Sign Out</Text>
+        </Pressable>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

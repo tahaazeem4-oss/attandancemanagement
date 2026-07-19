@@ -179,11 +179,6 @@ export default function StudentAiAnalyticsScreen() {
                   limit={quota.daily_requests}
                 />
                 <QuotaBar
-                  label="This week"
-                  used={quota.used_week_requests}
-                  limit={quota.weekly_requests}
-                />
-                <QuotaBar
                   label="This month"
                   used={quota.used_month_requests}
                   limit={quota.monthly_requests}

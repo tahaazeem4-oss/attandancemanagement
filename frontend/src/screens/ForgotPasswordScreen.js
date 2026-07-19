@@ -138,8 +138,17 @@ export default function ForgotPasswordScreen({ navigation, route }) {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <KeyboardAvoidingView
+      style={styles.root}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
+    >
+      <ScrollView
+        contentContainerStyle={[styles.content, step === 'reset' && styles.contentExpanded]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        contentInsetAdjustmentBehavior="never"
+      >
         <View style={styles.card}>
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.subtitle}>
@@ -262,7 +271,8 @@ export default function ForgotPasswordScreen({ navigation, route }) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#2563EB' },
-  content: { flexGrow: 1, justifyContent: 'center', padding: 20 },
+  content: { flexGrow: 1, justifyContent: 'center', padding: 20, paddingVertical: 28 },
+  contentExpanded: { justifyContent: 'flex-start' },
   card: {
     backgroundColor: '#fff',
     borderRadius: 16,

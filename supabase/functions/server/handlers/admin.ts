@@ -4,8 +4,7 @@ import {
   getDb,
   verifyToken,
   hashPassword,
-  sendPush,
-  tokensForStudents,
+  notifyStudentAndParents,
 } from "../_shared.ts";
 import {
   archiveClass,
@@ -566,16 +565,51 @@ export async function handleAdmin(
     const classId = parseInt(adminClassSectionsMatch[1]);
     try {
       const { section_name } = await req.json();
+      const name = String(section_name || "").trim();
+      if (!name) return json({ message: "Section name is required" }, 400);
+
+      const { data: existing } = await db.from("sections").select("id, section_name").eq("class_id", classId);
+      if ((existing || []).some((s) => String(s.section_name).trim().toLowerCase() === name.toLowerCase())) {
+        return json({ message: `A section named "${name}" already exists in this class.` }, 409);
+      }
+
       const { data, error } = await db
         .from("sections")
-        .insert({ class_id: classId, section_name })
+        .insert({ class_id: classId, section_name: name })
         .select()
         .single();
       if (error) throw error;
       return json({ message: "Section created", id: data.id }, 201);
     } catch (err) {
       console.error("[admin/classes/:id/sections POST]", err);
-      return json({ message: "Server error" }, 500);
+      return json({ message: err instanceof Error ? err.message : "Could not create section" }, 500);
+    }
+  }
+
+  // ── PUT /admin/sections/:id ───────────────────────────────────
+  // Also previously missing — the shared ClassesManagerScreen already
+  // called this to rename a section, so renaming always 404'd.
+  const adminSectionMatch = path.match(/^\/admin\/sections\/(\d+)$/);
+  if (adminSectionMatch && method === "PUT") {
+    const id = parseInt(adminSectionMatch[1]);
+    try {
+      const { section_name } = await req.json();
+      const name = String(section_name || "").trim();
+      if (!name) return json({ message: "Section name is required" }, 400);
+
+      const { data: sec } = await db.from("sections").select("class_id").eq("id", id).maybeSingle();
+      if (sec?.class_id) {
+        const { data: siblings } = await db.from("sections").select("id, section_name").eq("class_id", sec.class_id).neq("id", id);
+        if ((siblings || []).some((s) => String(s.section_name).trim().toLowerCase() === name.toLowerCase())) {
+          return json({ message: `A section named "${name}" already exists in this class.` }, 409);
+        }
+      }
+
+      await db.from("sections").update({ section_name: name }).eq("id", id);
+      return json({ message: "Section updated" });
+    } catch (err) {
+      console.error("[admin/sections PUT]", err);
+      return json({ message: err instanceof Error ? err.message : "Could not update section" }, 500);
     }
   }
 
@@ -763,13 +797,9 @@ export async function handleAdmin(
             { onConflict: "student_id,date" },
           );
         }
-        tokensForStudents(db, [studentId]).then((tokens) =>
-          sendPush(tokens, "Leave Approved", "Your leave request has been approved by the admin.", { type: "leave" })
-        );
+        notifyStudentAndParents(db, studentId, "Leave Approved", "Your leave request has been approved by the admin.", { type: "leave" });
       } else {
-        tokensForStudents(db, [studentId]).then((tokens) =>
-          sendPush(tokens, "Leave Rejected", "Your leave request has been rejected by the admin.", { type: "leave" })
-        );
+        notifyStudentAndParents(db, studentId, "Leave Rejected", "Your leave request has been rejected by the admin.", { type: "leave" });
       }
 
       return json({ message: "Status updated", count: leaves.length });
@@ -827,9 +857,7 @@ export async function handleAdmin(
             return json({ message: "Could not unlock attendance" }, 500);
           }
         }
-        tokensForStudents(db, [studentId]).then((tokens) =>
-          sendPush(tokens, "Withdrawal Approved", "Your leave withdrawal request has been approved by the admin.", { type: "withdrawal_decision", action })
-        );
+        notifyStudentAndParents(db, studentId, "Withdrawal Approved", "Your leave withdrawal request has been approved by the admin.", { type: "withdrawal_decision", action });
       } else {
         const { error: rejectErr } = await db.from("leave_applications")
           .update({ withdrawal_status: "rejected" })
@@ -839,9 +867,7 @@ export async function handleAdmin(
           console.error("[admin/leaves/group/withdrawal] reject error", rejectErr);
           return json({ message: "Could not update withdrawal status" }, 500);
         }
-        tokensForStudents(db, [studentId]).then((tokens) =>
-          sendPush(tokens, "Withdrawal Rejected", "Your leave withdrawal request has been rejected by the admin.", { type: "withdrawal_decision", action })
-        );
+        notifyStudentAndParents(db, studentId, "Withdrawal Rejected", "Your leave withdrawal request has been rejected by the admin.", { type: "withdrawal_decision", action });
       }
 
       return json({ message: action === "approve" ? "Withdrawal approved" : "Withdrawal rejected" });

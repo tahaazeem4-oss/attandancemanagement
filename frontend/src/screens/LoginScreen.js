@@ -114,7 +114,6 @@ export default function LoginScreen({ navigation }) {
 
         <Animated.View style={[styles.card, { opacity: cardFade, transform: [{ translateY: cardY }] }]}>
           <View style={styles.cardInner}>
-          <Text style={styles.heading}>Track. Teach. Transform.</Text>
           <Text style={styles.sub}>Sign in to continue to your dashboard</Text>
 
           {!!formError && (

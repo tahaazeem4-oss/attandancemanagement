@@ -3874,7 +3874,7 @@ export function PortalAiMaterialsPage({ session, request }) {
     ]);
     return {
       materials: safeArray(materials?.documents || materials),
-      subjects: safeArray(subjectsData),
+      subjects: safeArray(subjectsData).filter((item) => item?.id != null),
       classes: safeArray(classesData),
     };
   }, [request, subjectId, classId, session.school?.id]);
@@ -3977,7 +3977,7 @@ export function PortalAiMaterialsPage({ session, request }) {
         )}
       </section>
       <section className="panel accent-panel">
-        <SectionIntro title="Upload material" description="Upload PDF, DOCX, PPTX, PPT, or TXT files so AI Tutor can ingest them for retrieval." />
+        <SectionIntro title="Upload material" description="Upload PDF, DOCX, PPTX, or TXT files so AI Tutor can ingest them for retrieval." />
         <form className="stack-form" onSubmit={upload}>
           <label>
             <span>Title</span>
@@ -4012,7 +4012,7 @@ export function PortalAiMaterialsPage({ session, request }) {
           </div>
           <label>
             <span>File</span>
-            <input type="file" accept=".pdf,.docx,.pptx,.ppt,.txt" onChange={(event) => setFile(event.target.files?.[0] || null)} required />
+            <input type="file" accept=".pdf,.docx,.pptx,.txt" onChange={(event) => setFile(event.target.files?.[0] || null)} required />
           </label>
           <div className="button-row">
             <button className="primary-button" disabled={uploading}>{uploading ? 'Uploading...' : 'Upload AI Material'}</button>
@@ -4756,9 +4756,11 @@ export function PortalAiAnalyticsPage({ request }) {
   );
 }
 
-function timetableEntryKey(dayKey, slotId) {
-  return `${dayKey}:${slotId}`;
-}
+const TIMETABLE_DAY_ORDER = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+const TIMETABLE_DAY_LABEL = {
+  monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday',
+  friday: 'Friday', saturday: 'Saturday', sunday: 'Sunday',
+};
 
 function buildSectionSelection(classes, selectedClass, selectedSection) {
   const classList = safeArray(classes);
@@ -4772,331 +4774,244 @@ function buildSectionSelection(classes, selectedClass, selectedSection) {
   };
 }
 
+function timetableToEditablePeriod(period) {
+  return {
+    key: `${period.id || Math.random().toString(36).slice(2)}`,
+    subject_id: period.subject_id ? String(period.subject_id) : '',
+    teacher_id: period.teacher_id ? String(period.teacher_id) : '',
+    start_time: String(period.start_time || '').slice(0, 5),
+    end_time: String(period.end_time || '').slice(0, 5),
+  };
+}
+
+function emptyTimetablePeriod() {
+  return { key: Math.random().toString(36).slice(2), subject_id: '', teacher_id: '', start_time: '', end_time: '' };
+}
+
+function isValidTimetableTime(v) {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(v || ''));
+}
+
+// New timetable module: one row per class period (subject/teacher/start/end),
+// saved immediately per day — no shared bell-schedule structure and no
+// draft/publish versioning. Friday can optionally get its own override
+// schedule; when absent, Friday just uses the normal weekly periods.
 export function PortalTimetablePage({ session, request }) {
-  const role = session?.user?.role;
-  const [selectedCampus, setSelectedCampus] = useState('');
-  const [selectedClass, setSelectedClass] = useState('');
-  const [selectedSection, setSelectedSection] = useState('');
-  const [days, setDays] = useState([]);
-  const [slots, setSlots] = useState([]);
-  const [entriesMap, setEntriesMap] = useState({});
+  const role = session.user.role;
+  const isOrg = role === 'org_admin';
+
+  const [campusId, setCampusId] = useState('');
+  const [classId, setClassId] = useState('');
+  const [sectionId, setSectionId] = useState('');
+  const [dayKey, setDayKey] = useState('monday');
+  const [fridayOverrideOn, setFridayOverrideOn] = useState(false);
+  const [periods, setPeriods] = useState([]);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState({});
   const [message, setMessage] = useState('');
   const [messageTone, setMessageTone] = useState('neutral');
-  const [savingStructure, setSavingStructure] = useState(false);
-  const [savingDraft, setSavingDraft] = useState(false);
-  const [publishing, setPublishing] = useState(false);
-  const [teacherBusy, setTeacherBusy] = useState({});
-  const [teacherSubjects, setTeacherSubjects] = useState({});
-  const [holidays, setHolidays] = useState([]);
-  const [newHoliday, setNewHoliday] = useState({ date: '', label: '' });
-  const [savingHoliday, setSavingHoliday] = useState(false);
-  const [savingTeacherSubject, setSavingTeacherSubject] = useState(null);
+  const [copyTargetClass, setCopyTargetClass] = useState('');
+  const [copyTargetSection, setCopyTargetSection] = useState('');
+  const [copyIncludeFriday, setCopyIncludeFriday] = useState(true);
+  const [copying, setCopying] = useState(false);
 
-  const campusParam = role === 'org_admin' && selectedCampus ? { school_id: selectedCampus } : {};
-  const { loading: metaLoading, error: metaError, data: meta, reload: reloadMeta } = useRemoteResource(async () => {
-    return request('GET', '/timetable/meta', { params: campusParam });
-  }, [request, role, selectedCampus]);
-
-  const classes = safeArray(meta?.classes);
-  const campuses = safeArray(meta?.campuses);
-  const teachers = safeArray(meta?.teachers);
-  const subjects = safeArray(meta?.subjects);
+  const { data: campusesData } = useRemoteResource(async () => (isOrg ? request('GET', '/org-admin/campuses') : []), [request, isOrg]);
+  const campuses = safeArray(campusesData);
 
   useEffect(() => {
-    if (!meta) return;
-    if (role === 'org_admin' && meta.school_id && !selectedCampus) {
-      setSelectedCampus(String(meta.school_id));
+    if (isOrg && !campusId && campuses.length) setCampusId(String(campuses[0].id));
+  }, [isOrg, campuses, campusId]);
+
+  const campusParam = isOrg && campusId ? { school_id: campusId } : {};
+
+  const { loading: metaLoading, error: metaError, data: metaData } = useRemoteResource(async () => {
+    if (isOrg && !campusId) return { classes: [], subjects: [], teachers: [] };
+    const [classesRes, subjectsRes, teachersRes] = await Promise.all([
+      isOrg ? request('GET', '/org-admin/classes', { params: { campus_id: campusId } }) : request('GET', '/admin/classes'),
+      isOrg ? request('GET', '/org-admin/subjects', { params: { campus_id: campusId } }) : request('GET', '/subjects'),
+      isOrg ? request('GET', '/org-admin/teachers', { params: { campus_id: campusId } }) : request('GET', '/admin/teachers'),
+    ]);
+    return { classes: safeArray(classesRes), subjects: safeArray(subjectsRes), teachers: safeArray(teachersRes) };
+  }, [request, isOrg, campusId]);
+
+  const classes = metaData?.classes || [];
+  const subjects = metaData?.subjects || [];
+  const teachers = metaData?.teachers || [];
+
+  useEffect(() => {
+    const selection = buildSectionSelection(classes, classId, sectionId);
+    if (selection.classId !== classId) setClassId(selection.classId);
+    if (selection.sectionId !== sectionId) setSectionId(selection.sectionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [classes]);
+
+  const sections = useMemo(() => buildSectionSelection(classes, classId, sectionId).sections, [classes, classId, sectionId]);
+
+  const { data: weekData, loading: weekLoading, reload: reloadWeek } = useRemoteResource(async () => {
+    if (!classId || !sectionId) return null;
+    return request('GET', '/timetable/class', { params: { class_id: classId, section_id: sectionId, ...campusParam } });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request, classId, sectionId, campusId]);
+
+  useEffect(() => {
+    if (!weekData) { setPeriods([]); return; }
+    if (dayKey === 'friday' && fridayOverrideOn) setPeriods(safeArray(weekData.fridayOverride).map(timetableToEditablePeriod));
+    else setPeriods(safeArray(weekData.days?.[dayKey]).map(timetableToEditablePeriod));
+    setDirty(false);
+  }, [weekData, dayKey, fridayOverrideOn]);
+
+  useEffect(() => {
+    setFridayOverrideOn(dayKey === 'friday' ? !!weekData?.hasFridayOverride : false);
+  }, [dayKey, weekData?.hasFridayOverride]);
+
+  useEffect(() => {
+    if (!classId || !sectionId) { setBusy({}); return; }
+    request('GET', '/timetable/teacher-busy', { params: { day_key: dayKey, exclude_class_id: classId, exclude_section_id: sectionId, ...campusParam } })
+      .then((data) => setBusy(data?.busy || {}))
+      .catch(() => setBusy({}));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [classId, sectionId, dayKey, campusId]);
+
+  const updatePeriod = (key, patch) => {
+    setPeriods((prev) => prev.map((p) => (p.key === key ? { ...p, ...patch } : p)));
+    setDirty(true);
+  };
+  const removePeriod = (key) => { setPeriods((prev) => prev.filter((p) => p.key !== key)); setDirty(true); };
+  const addPeriod = () => { setPeriods((prev) => [...prev, emptyTimetablePeriod()]); setDirty(true); };
+  const movePeriod = (index, dir) => {
+    setPeriods((prev) => {
+      const next = [...prev];
+      const target = index + dir;
+      if (target < 0 || target >= next.length) return prev;
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+    setDirty(true);
+  };
+
+  const switchDay = (nextDay) => {
+    if (dirty && !window.confirm('Discard unsaved changes to this day?')) return;
+    setDayKey(nextDay);
+  };
+
+  const saveDay = async () => {
+    for (const [idx, p] of periods.entries()) {
+      if (!isValidTimetableTime(p.start_time) || !isValidTimetableTime(p.end_time) || p.start_time >= p.end_time) {
+        setMessage(`Period ${idx + 1} needs a valid start/end time (HH:MM), ending after it starts.`);
+        setMessageTone('danger');
+        return;
+      }
     }
-    setDays(safeArray(meta.days).map((day) => ({
-      day_key: day.day_key,
-      day_label: day.day_label,
-      is_active: day.is_active !== false,
-    })));
-    setSlots(safeArray(meta.slots).map((slot, index) => ({
-      id: slot.id,
-      slot_name: slot.slot_name,
-      start_time: String(slot.start_time || '').slice(0, 5),
-      end_time: String(slot.end_time || '').slice(0, 5),
-      slot_type: slot.slot_type || 'instruction',
-      is_active: slot.is_active !== false,
-      display_order: index + 1,
-      day_keys: Array.isArray(slot.day_keys) && slot.day_keys.length ? slot.day_keys : null,
-    })));
+    setSaving(true);
+    setMessage('');
+    try {
+      const scheduleType = dayKey === 'friday' && fridayOverrideOn ? 'friday' : 'default';
+      await request('PUT', '/timetable/class/day', {
+        data: {
+          ...campusParam,
+          class_id: classId,
+          section_id: sectionId,
+          day_key: dayKey,
+          schedule_type: scheduleType,
+          periods: periods.map((p) => ({ subject_id: p.subject_id || null, teacher_id: p.teacher_id || null, start_time: p.start_time, end_time: p.end_time })),
+        },
+      });
+      setMessage(`${TIMETABLE_DAY_LABEL[dayKey]}'s schedule has been updated.`);
+      setMessageTone('neutral');
+      setDirty(false);
+      await reloadWeek();
+    } catch (error) {
+      setMessage(error.message || 'Could not save — check for teacher conflicts and try again.');
+      setMessageTone('danger');
+    } finally {
+      setSaving(false);
+    }
+  };
 
-    // Initialise teacher→subject map from meta (subject_ids already joined by backend)
-    const tSubjects = {};
-    safeArray(meta.teachers).forEach((t) => { tSubjects[String(t.id)] = safeArray(t.subject_ids).map(Number); });
-    setTeacherSubjects(tSubjects);
+  const removeFridayOverride = async () => {
+    if (!window.confirm('Remove the Friday override? Friday will go back to the normal weekly schedule.')) return;
+    try {
+      await request('DELETE', '/timetable/class/day', { params: { ...campusParam, class_id: classId, section_id: sectionId, day_key: 'friday', schedule_type: 'friday' } });
+      await reloadWeek();
+      setFridayOverrideOn(false);
+    } catch (error) {
+      setMessage(error.message || 'Could not remove the Friday override.');
+      setMessageTone('danger');
+    }
+  };
 
-    const selection = buildSectionSelection(classes, selectedClass, selectedSection);
-    setSelectedClass(selection.classId);
-    setSelectedSection(selection.sectionId);
-  }, [classes, meta, role, selectedCampus, selectedClass, selectedSection]);
+  const deleteTimetable = async () => {
+    if (!window.confirm('Delete this class’s entire timetable, including any Friday override? This cannot be undone.')) return;
+    try {
+      await request('DELETE', '/timetable/class', { params: { ...campusParam, class_id: classId, section_id: sectionId } });
+      await reloadWeek();
+      setMessage('Timetable deleted.');
+      setMessageTone('neutral');
+    } catch (error) {
+      setMessage(error.message || 'Could not delete the timetable.');
+      setMessageTone('danger');
+    }
+  };
 
-  const { sections } = useMemo(
-    () => buildSectionSelection(classes, selectedClass, selectedSection),
-    [classes, selectedClass, selectedSection],
+  const copyTargetSectionOptions = useMemo(
+    () => buildSectionSelection(classes, copyTargetClass, copyTargetSection).sections,
+    [classes, copyTargetClass, copyTargetSection],
   );
 
-  const activeDays = useMemo(() => days.filter((day) => day.is_active !== false), [days]);
-  const activeSlots = useMemo(() => slots.filter((slot) => slot.is_active !== false), [slots]);
-
-  const { loading: sectionLoading, error: sectionError, data: sectionData, reload: reloadSection } = useRemoteResource(async () => {
-    if (!selectedClass || !selectedSection) return { entries: [] };
-    return request('GET', '/timetable/section', {
-      params: {
-        class_id: selectedClass,
-        section_id: selectedSection,
-        ...campusParam,
-        status: 'draft',
-      },
-    });
-  }, [request, selectedClass, selectedSection, selectedCampus]);
-
-  useEffect(() => {
-    if (sectionLoading || sectionError) return;
-    setEntriesMap(safeArray(sectionData?.entries).reduce((acc, entry) => ({
-      ...acc,
-      [timetableEntryKey(entry.day_key, entry.slot_id)]: {
-        subject_id: entry.subject_id ? String(entry.subject_id) : '',
-        teacher_id: entry.teacher_id ? String(entry.teacher_id) : '',
-        note: entry.note || '',
-      },
-    }), {}));
-  }, [sectionData, sectionError, sectionLoading]);
-
-  const updateEntry = (dayKey, slotId, field, value) => {
-    const key = timetableEntryKey(dayKey, slotId);
-    setEntriesMap((current) => ({
-      ...current,
-      [key]: {
-        ...(current[key] || { subject_id: '', teacher_id: '', note: '' }),
-        [field]: value,
-      },
-    }));
-  };
-
-  const updateSlot = (index, field, value) => {
-    setSlots((current) => current.map((slot, slotIndex) => slotIndex === index ? { ...slot, [field]: value } : slot));
-  };
-
-  const toggleDay = (dayKey) => {
-    setDays((current) => current.map((day) => day.day_key === dayKey ? { ...day, is_active: !day.is_active } : day));
-  };
-
-  const addSlot = () => {
-    setSlots((current) => ([
-      ...current,
-      {
-        slot_name: `Slot ${current.length + 1}`,
-        start_time: '08:00',
-        end_time: '08:45',
-        slot_type: 'instruction',
-        is_active: true,
-        display_order: current.length + 1,
-        day_keys: null,
-      },
-    ]));
-  };
-
-  const toggleSlotDay = (index, dayKey) => {
-    setSlots((current) => current.map((slot, slotIndex) => {
-      if (slotIndex !== index) return slot;
-      const cur = Array.isArray(slot.day_keys) && slot.day_keys.length ? slot.day_keys : [];
-      const next = cur.includes(dayKey) ? cur.filter((k) => k !== dayKey) : [...cur, dayKey];
-      return { ...slot, day_keys: next.length ? next : null };
-    }));
-  };
-
-  const removeSlot = (index) => {
-    setSlots((current) => current.filter((_, slotIndex) => slotIndex !== index).map((slot, slotIndex) => ({ ...slot, display_order: slotIndex + 1 })));
-  };
-
-  const saveStructure = async () => {
-    setSavingStructure(true);
+  const runCopyTimetable = async () => {
+    if (!copyTargetClass || !copyTargetSection) {
+      setMessage('Choose a target class and section to copy into.');
+      setMessageTone('danger');
+      return;
+    }
+    setCopying(true);
     setMessage('');
     try {
-      const data = await request('PUT', '/timetable/structure', {
+      const data = await request('POST', '/timetable/copy', {
         data: {
           ...campusParam,
-          days,
-          slots: slots.map((slot, index) => ({ ...slot, display_order: index + 1 })),
+          from_class_id: classId,
+          from_section_id: sectionId,
+          to_class_id: copyTargetClass,
+          to_section_id: copyTargetSection,
+          include_friday: copyIncludeFriday,
         },
       });
-      setDays(safeArray(data.days).map((day) => ({
-        day_key: day.day_key,
-        day_label: day.day_label,
-        is_active: day.is_active !== false,
-      })));
-      setSlots(safeArray(data.slots).map((slot, index) => ({
-        id: slot.id,
-        slot_name: slot.slot_name,
-        start_time: String(slot.start_time || '').slice(0, 5),
-        end_time: String(slot.end_time || '').slice(0, 5),
-        slot_type: slot.slot_type || 'instruction',
-        is_active: slot.is_active !== false,
-        display_order: index + 1,
-        day_keys: Array.isArray(slot.day_keys) && slot.day_keys.length ? slot.day_keys : null,
-      })));
-      setMessage('Timetable structure updated.');
-      setMessageTone('neutral');
-      reloadMeta();
-      reloadSection();
+      setCopyTargetClass(''); setCopyTargetSection('');
+      if (safeArray(data.conflicts).length) {
+        setMessage(`Copied — ${data.conflicts.length} period(s) had a teacher conflict and were copied without a teacher assigned.`);
+        setMessageTone('danger');
+      } else {
+        setMessage('Timetable copied.');
+        setMessageTone('neutral');
+      }
+      if (String(copyTargetClass) === String(classId) && String(copyTargetSection) === String(sectionId)) await reloadWeek();
     } catch (error) {
-      setMessage(error.message || 'Could not save timetable structure.');
+      setMessage(error.message || 'Could not copy the timetable.');
       setMessageTone('danger');
     } finally {
-      setSavingStructure(false);
+      setCopying(false);
     }
   };
 
-  const saveDraft = async () => {
-    if (!selectedClass || !selectedSection) return;
-    setSavingDraft(true);
-    setMessage('');
-    try {
-      const entries = [];
-      activeDays.forEach((day) => {
-        activeSlots.forEach((slot) => {
-          if (slot.slot_type !== 'instruction') return;
-          // Respect per-slot day_keys: skip this slot if it doesn't apply to the current day
-          const slotDayKeys = Array.isArray(slot.day_keys) && slot.day_keys.length ? slot.day_keys : null;
-          if (slotDayKeys && !slotDayKeys.includes(day.day_key)) return;
-          const row = entriesMap[timetableEntryKey(day.day_key, slot.id)] || {};
-          if (!row.subject_id && !row.teacher_id && !String(row.note || '').trim()) return;
-          entries.push({
-            day_key: day.day_key,
-            slot_id: slot.id,
-            subject_id: row.subject_id || null,
-            teacher_id: row.teacher_id || null,
-            note: String(row.note || '').trim(),
-          });
-        });
-      });
-
-      await request('PUT', '/timetable/section', {
-        data: {
-          ...campusParam,
-          class_id: selectedClass,
-          section_id: selectedSection,
-          entries,
-        },
-      });
-      setMessage('Draft timetable saved.');
-      setMessageTone('neutral');
-      reloadSection();
-      // Refresh conflict data after saving
-      try {
-        const busyData = await request('GET', '/timetable/teacher-busy', {
-          params: { exclude_class_id: selectedClass, exclude_section_id: selectedSection, status: 'draft', ...campusParam },
-        });
-        setTeacherBusy(busyData?.busy || {});
-      } catch { /* non-critical */ }
-    } catch (error) {
-      setMessage(error.message || 'Could not save draft timetable.');
-      setMessageTone('danger');
-    } finally {
-      setSavingDraft(false);
-    }
-  };
-
-  const publishDraft = async () => {
-    if (!selectedClass || !selectedSection) return;
-    if (!window.confirm('Publish this timetable? Students and parents will immediately see the published version.')) return;
-    setPublishing(true);
-    setMessage('');
-    try {
-      await request('POST', '/timetable/section/publish', {
-        data: {
-          ...campusParam,
-          class_id: selectedClass,
-          section_id: selectedSection,
-        },
-      });
-      setMessage('Published timetable is now live.');
-      setMessageTone('neutral');
-    } catch (error) {
-      setMessage(error.message || 'Could not publish timetable.');
-      setMessageTone('danger');
-    } finally {
-      setPublishing(false);
-    }
-  };
-
-  // Load teacher conflict data whenever class/section changes
-  useEffect(() => {
-    if (!selectedClass || !selectedSection) { setTeacherBusy({}); return; }
-    request('GET', '/timetable/teacher-busy', {
-      params: { exclude_class_id: selectedClass, exclude_section_id: selectedSection, status: 'draft', ...campusParam },
-    }).then((data) => setTeacherBusy(data?.busy || {})).catch(() => setTeacherBusy({}));
-  }, [selectedClass, selectedSection, selectedCampus]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Load holidays on mount / campus change
-  useEffect(() => {
-    request('GET', '/timetable/holidays', { params: campusParam })
-      .then((data) => setHolidays(safeArray(data?.holidays)))
-      .catch(() => setHolidays([]));
-  }, [selectedCampus]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const addHoliday = async () => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(newHoliday.date)) {
-      setMessage('Holiday date must be in YYYY-MM-DD format.'); setMessageTone('danger'); return;
-    }
-    setSavingHoliday(true);
-    try {
-      await request('POST', '/timetable/holidays', {
-        data: { ...campusParam, holiday_date: newHoliday.date, label: newHoliday.label || null },
-      });
-      setNewHoliday({ date: '', label: '' });
-      const data = await request('GET', '/timetable/holidays', { params: campusParam });
-      setHolidays(safeArray(data?.holidays));
-      setMessage('Holiday added.'); setMessageTone('neutral');
-    } catch (error) {
-      setMessage(error.message || 'Could not add holiday.'); setMessageTone('danger');
-    } finally {
-      setSavingHoliday(false);
-    }
-  };
-
-  const removeHoliday = async (id) => {
-    try {
-      await request('DELETE', `/timetable/holidays/${id}`, { params: campusParam });
-      const data = await request('GET', '/timetable/holidays', { params: campusParam });
-      setHolidays(safeArray(data?.holidays));
-    } catch (error) {
-      setMessage(error.message || 'Could not remove holiday.'); setMessageTone('danger');
-    }
-  };
-
-  const toggleSubjectForTeacher = async (teacherId, subjectId, currentlyAssigned) => {
-    const tid = String(teacherId);
-    const sid = Number(subjectId);
-    setSavingTeacherSubject(`${tid}:${sid}`);
-    try {
-      const current = teacherSubjects[tid] || [];
-      const next = currentlyAssigned ? current.filter((s) => s !== sid) : [...current, sid];
-      await request('PUT', '/timetable/teacher-subjects', {
-        data: { teacher_id: teacherId, subject_ids: next, ...campusParam },
-      });
-      setTeacherSubjects((prev) => ({ ...prev, [tid]: next }));
-    } catch (error) {
-      setMessage(error.message || 'Could not update subject assignment.'); setMessageTone('danger');
-    } finally {
-      setSavingTeacherSubject(null);
-    }
-  };
+  const canEdit = !!(classId && sectionId);
 
   return (
     <div className="page-grid page-grid-2">
       <section className="panel">
-        <SectionIntro title="Timetable" description="Use the same backend timetable rules for campus structure, draft editing, and published calendar visibility across web and mobile." action={<button className="secondary-button" onClick={() => { reloadMeta(); reloadSection(); }}>Refresh</button>} />
-        <Banner message={metaError || sectionError || message} tone={messageTone === 'danger' || metaError || sectionError ? 'danger' : 'neutral'} />
+        <SectionIntro
+          title="Timetable"
+          description="Pick a class and section, then edit one day at a time. Changes save immediately — there's no draft or publish step."
+          action={<button className="secondary-button" onClick={reloadWeek}>Refresh</button>}
+        />
+        <Banner message={metaError || message} tone={messageTone === 'danger' || metaError ? 'danger' : 'neutral'} />
 
         <div className="stack-form stack-form-compact">
-          {role === 'org_admin' ? (
+          {isOrg ? (
             <label>
               <span>Campus</span>
-              <select value={selectedCampus} onChange={(event) => { setSelectedCampus(event.target.value); setSelectedClass(''); setSelectedSection(''); }}>
+              <select value={campusId} onChange={(event) => { setCampusId(event.target.value); setClassId(''); setSectionId(''); }}>
                 {campuses.map((campus) => <option key={campus.id} value={campus.id}>{campus.name}</option>)}
               </select>
             </label>
@@ -5105,241 +5020,137 @@ export function PortalTimetablePage({ session, request }) {
           <div className="form-grid-2">
             <label>
               <span>Class</span>
-              <select value={selectedClass} onChange={(event) => { setSelectedClass(event.target.value); setSelectedSection(''); }}>
+              <select value={classId} onChange={(event) => { setClassId(event.target.value); setSectionId(''); }}>
+                <option value="">Select class</option>
                 {classes.map((item) => <option key={item.id} value={item.id}>{item.class_name}</option>)}
               </select>
             </label>
             <label>
               <span>Section</span>
-              <select value={selectedSection} onChange={(event) => setSelectedSection(event.target.value)}>
+              <select value={sectionId} onChange={(event) => setSectionId(event.target.value)} disabled={!classId}>
+                <option value="">Select section</option>
                 {sections.map((item) => <option key={item.id} value={item.id}>{item.section_name}</option>)}
               </select>
             </label>
           </div>
 
-          <div className="selection-banner">
-            <strong>Draft editor</strong>
-            <span>Admins edit draft timetable first, then publish it for students and parents.</span>
-          </div>
+          {metaLoading ? <LoadingCard /> : null}
 
-          {metaLoading ? <LoadingCard /> : (
+          {canEdit ? (
             <>
-              {activeDays.map((day) => (
-                <div key={day.day_key} className="timetable-day-card">
-                  <h3>{day.day_label}</h3>
-                  <div className="timetable-slot-list">
-                    {activeSlots.map((slot) => {
-                      const row = entriesMap[timetableEntryKey(day.day_key, slot.id)] || {};
-                      return (
-                        <div key={`${day.day_key}-${slot.id}`} className="timetable-slot-row">
-                          <div className="timetable-slot-meta">
-                            <strong>{slot.slot_name}</strong>
-                            <span>{String(slot.start_time || '').slice(0, 5)} - {String(slot.end_time || '').slice(0, 5)}</span>
-                          </div>
-                          {slot.slot_type !== 'instruction' ? (
-                            <span className="chip chip-active">{String(slot.slot_type || '').replace(/_/g, ' ')}</span>
-                          ) : (
-                            <div className="timetable-editor-grid">
-                              <select value={row.subject_id || ''} onChange={(event) => updateEntry(day.day_key, slot.id, 'subject_id', event.target.value)}>
-                                <option value="">Select subject</option>
-                                {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
-                              </select>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <select
-                                  style={{ flex: 1 }}
-                                  value={row.teacher_id || ''}
-                                  onChange={(event) => updateEntry(day.day_key, slot.id, 'teacher_id', event.target.value)}
-                                >
-                                  <option value="">Not assigned</option>
-                                  {/* Filter to teachers assigned to the selected subject; show all if no subject picked */}
-                                  {(row.subject_id
-                                    ? teachers.filter((t) => (teacherSubjects[String(t.id)] || []).includes(Number(row.subject_id)))
-                                    : teachers
-                                  ).map((teacher) => {
-                                    const isBusy = !!(teacherBusy[String(teacher.id)] || {})[timetableEntryKey(day.day_key, slot.id)];
-                                    return (
-                                      <option key={teacher.id} value={teacher.id}>
-                                        {isBusy ? '⚠ ' : ''}{teacher.full_name || `${teacher.first_name || ''} ${teacher.last_name || ''}`.trim()}
-                                      </option>
-                                    );
-                                  })}
-                                </select>
-                                {row.teacher_id && (teacherBusy[String(row.teacher_id)] || {})[timetableEntryKey(day.day_key, slot.id)] ? (
-                                  <span title="Teacher already assigned to another class at this slot" style={{ color: '#EF4444', fontWeight: 700, fontSize: 14 }}>⚠</span>
-                                ) : null}
-                              </div>
-                              <input value={row.note || ''} onChange={(event) => updateEntry(day.day_key, slot.id, 'note', event.target.value)} placeholder="Optional note" />
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </>
-          )}
-
-          <div className="button-row">
-            <button className="primary-button" type="button" onClick={saveDraft} disabled={savingDraft || !selectedClass || !selectedSection}>{savingDraft ? 'Saving...' : 'Save Draft'}</button>
-            <button className="secondary-button" type="button" onClick={publishDraft} disabled={publishing || !selectedClass || !selectedSection}>{publishing ? 'Publishing...' : 'Publish'}</button>
-          </div>
-
-          {/* ── Teacher → Subject mapping ─────────────────────────────── */}
-          {teachers.length > 0 ? (
-            <>
-              <div className="selection-banner" style={{ marginTop: 16 }}>
-                <strong>Teacher → Subject mapping</strong>
-                <span>Toggle which subjects each teacher can teach. Only mapped teachers appear in the filtered dropdown above.</span>
+              <div className="button-row">
+                <button type="button" className="secondary-button" onClick={deleteTimetable}>Delete Timetable</button>
               </div>
-              {teachers.map((teacher) => {
-                const tid = String(teacher.id);
-                const assignedIds = teacherSubjects[tid] || [];
-                const name = teacher.full_name || `${teacher.first_name || ''} ${teacher.last_name || ''}`.trim();
-                return (
-                  <div key={tid} className="assignment-block">
-                    <div className="toolbar toolbar-inline">
-                      <strong>{name}</strong>
-                      <span className="field-caption">{String(teacher.teacher_role || 'teacher').replace(/_/g, ' ')}</span>
-                    </div>
-                    <div className="chip-group">
-                      {subjects.map((subject) => {
-                        const assigned = assignedIds.includes(Number(subject.id));
-                        const isSaving = savingTeacherSubject === `${tid}:${subject.id}`;
-                        return (
-                          <button
-                            key={subject.id}
-                            type="button"
-                            className={assigned ? 'chip chip-active' : 'chip'}
-                            disabled={isSaving}
-                            onClick={() => toggleSubjectForTeacher(teacher.id, subject.id, assigned)}
-                          >
-                            {isSaving ? '…' : subject.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-            </>
-          ) : null}
 
-          {/* ── Holidays / non-teaching days ──────────────────────────── */}
-          <div className="selection-banner" style={{ marginTop: 16 }}>
-            <strong>Holidays</strong>
-            <span>Non-teaching dates are respected by the timetable view. Format: YYYY-MM-DD.</span>
-          </div>
-          <div className="form-grid-2">
-            <label>
-              <span>Date</span>
-              <input
-                type="date"
-                value={newHoliday.date}
-                onChange={(e) => setNewHoliday((h) => ({ ...h, date: e.target.value }))}
-                placeholder="YYYY-MM-DD"
-              />
-            </label>
-            <label>
-              <span>Label (optional)</span>
-              <input
-                value={newHoliday.label}
-                onChange={(e) => setNewHoliday((h) => ({ ...h, label: e.target.value }))}
-                placeholder="e.g. Eid ul-Fitr"
-              />
-            </label>
-          </div>
-          <button className="secondary-button" type="button" onClick={addHoliday} disabled={savingHoliday || !newHoliday.date}>
-            {savingHoliday ? 'Adding…' : 'Add Holiday'}
-          </button>
-          {holidays.length > 0 ? (
-            <div className="stack-form stack-form-compact" style={{ marginTop: 8 }}>
-              {holidays.map((h) => (
-                <div key={h.id} className="toolbar toolbar-inline">
-                  <span><strong>{h.holiday_date}</strong>{h.label ? ` — ${h.label}` : ''}</span>
-                  <button type="button" className="secondary-button" onClick={() => removeHoliday(h.id)}>Remove</button>
+              <div className="chip-group">
+                {TIMETABLE_DAY_ORDER.map((key) => {
+                  const active = key === dayKey;
+                  const hasOverride = key === 'friday' && weekData?.hasFridayOverride;
+                  return (
+                    <button key={key} type="button" className={active ? 'chip chip-active' : 'chip'} onClick={() => switchDay(key)}>
+                      {TIMETABLE_DAY_LABEL[key]}{hasOverride ? ' •' : ''}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {dayKey === 'friday' ? (
+                <div className="selection-banner">
+                  <strong>Custom Friday schedule</strong>
+                  <span>{fridayOverrideOn ? 'Editing a Friday-only schedule.' : 'Off uses the normal weekly Friday schedule.'}</span>
+                  <label style={{ marginTop: 6 }}>
+                    <input
+                      type="checkbox"
+                      checked={fridayOverrideOn}
+                      onChange={(event) => {
+                        if (!event.target.checked && weekData?.hasFridayOverride) { removeFridayOverride(); return; }
+                        setFridayOverrideOn(event.target.checked);
+                      }}
+                    />{' '}Use a different schedule for Friday
+                  </label>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="field-caption">No holidays added yet.</p>
-          )}
-        </div>
-      </section>
+              ) : null}
 
-      <section className="panel accent-panel">
-        <SectionIntro title="Campus Structure" description="Keep slot times, working days, and non-teaching periods consistent with the current mobile behavior." action={<button type="button" className="secondary-button" onClick={addSlot}>Add Slot</button>} />
-        <div className="stack-form stack-form-compact">
-          <div>
-            <span className="field-caption">Working Days</span>
-            <div className="chip-group">
-              {[
-                { key: 'monday', label: 'Monday' },
-                { key: 'tuesday', label: 'Tuesday' },
-                { key: 'wednesday', label: 'Wednesday' },
-                { key: 'thursday', label: 'Thursday' },
-                { key: 'friday', label: 'Friday' },
-                { key: 'saturday', label: 'Saturday' },
-                { key: 'sunday', label: 'Sunday' },
-              ].map((day) => {
-                const active = days.some((item) => item.day_key === day.key && item.is_active !== false);
-                return <button key={day.key} type="button" className={active ? 'chip chip-active' : 'chip'} onClick={() => toggleDay(day.key)}>{day.label}</button>;
-              })}
-            </div>
-          </div>
+              {weekLoading ? <LoadingCard /> : (
+                <>
+                  {periods.map((p, idx) => (
+                    <div key={p.key} className="assignment-block">
+                      <div className="toolbar toolbar-inline">
+                        <strong>Period {idx + 1}</strong>
+                        <div className="button-row" style={{ margin: 0 }}>
+                          <button type="button" className="ghost-button" disabled={idx === 0} onClick={() => movePeriod(idx, -1)}>Up</button>
+                          <button type="button" className="ghost-button" disabled={idx === periods.length - 1} onClick={() => movePeriod(idx, 1)}>Down</button>
+                          <button type="button" className="ghost-button" onClick={() => removePeriod(p.key)}>Remove</button>
+                        </div>
+                      </div>
+                      <div className="form-grid-2">
+                        <label>
+                          <span>Start Time</span>
+                          <input value={p.start_time} onChange={(event) => updatePeriod(p.key, { start_time: event.target.value })} placeholder="08:00" />
+                        </label>
+                        <label>
+                          <span>End Time</span>
+                          <input value={p.end_time} onChange={(event) => updatePeriod(p.key, { end_time: event.target.value })} placeholder="08:45" />
+                        </label>
+                        <label>
+                          <span>Subject</span>
+                          <select value={p.subject_id} onChange={(event) => updatePeriod(p.key, { subject_id: event.target.value })}>
+                            <option value="">Select subject</option>
+                            {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
+                          </select>
+                        </label>
+                        <label>
+                          <span>Teacher</span>
+                          <select value={p.teacher_id} onChange={(event) => updatePeriod(p.key, { teacher_id: event.target.value })}>
+                            <option value="">Not assigned</option>
+                            {teachers.map((teacher) => {
+                              const busyRanges = busy[String(teacher.id)] || [];
+                              const name = teacher.full_name || `${teacher.first_name || ''} ${teacher.last_name || ''}`.trim();
+                              return (
+                                <option key={teacher.id} value={teacher.id}>
+                                  {busyRanges.length ? '⚠ ' : ''}{name}{busyRanges.length ? ` (busy ${busyRanges[0].start_time}-${busyRanges[0].end_time})` : ''}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </label>
+                      </div>
+                    </div>
+                  ))}
 
-          {slots.map((slot, index) => (
-            <div key={`${slot.id || 'new'}-${index}`} className="assignment-block">
-              <div className="toolbar toolbar-inline">
-                <strong>Slot {index + 1}</strong>
-                <button type="button" className="secondary-button" onClick={() => removeSlot(index)}>Remove</button>
+                  <div className="button-row">
+                    <button type="button" className="secondary-button" onClick={addPeriod}>Add Period</button>
+                    <button type="button" className="primary-button" onClick={saveDay} disabled={saving}>{saving ? 'Saving...' : `Save ${TIMETABLE_DAY_LABEL[dayKey]}`}</button>
+                  </div>
+                </>
+              )}
+
+              <div className="selection-banner" style={{ marginTop: 16 }}>
+                <strong>Copy to another class</strong>
+                <span>Copies this class's timetable (subject, teacher, times) into another class/section, replacing what's there.</span>
               </div>
               <div className="form-grid-2">
                 <label>
-                  <span>Name</span>
-                  <input value={slot.slot_name} onChange={(event) => updateSlot(index, 'slot_name', event.target.value)} placeholder="Slot name" />
-                </label>
-                <label>
-                  <span>Type</span>
-                  <select value={slot.slot_type} onChange={(event) => updateSlot(index, 'slot_type', event.target.value)}>
-                    <option value="instruction">Instruction</option>
-                    <option value="break">Break</option>
-                    <option value="assembly">Assembly</option>
-                    <option value="free_period">Free Period</option>
-                    <option value="other">Other</option>
+                  <span>Target class</span>
+                  <select value={copyTargetClass} onChange={(event) => { setCopyTargetClass(event.target.value); setCopyTargetSection(''); }}>
+                    <option value="">Select class</option>
+                    {classes.map((item) => <option key={item.id} value={item.id}>{item.class_name}</option>)}
                   </select>
                 </label>
                 <label>
-                  <span>Start Time</span>
-                  <input value={slot.start_time} onChange={(event) => updateSlot(index, 'start_time', event.target.value)} placeholder="08:00" />
-                </label>
-                <label>
-                  <span>End Time</span>
-                  <input value={slot.end_time} onChange={(event) => updateSlot(index, 'end_time', event.target.value)} placeholder="08:45" />
+                  <span>Target section</span>
+                  <select value={copyTargetSection} onChange={(event) => setCopyTargetSection(event.target.value)} disabled={!copyTargetClass}>
+                    <option value="">Select section</option>
+                    {copyTargetSectionOptions.map((item) => <option key={item.id} value={item.id}>{item.section_name}</option>)}
+                  </select>
                 </label>
               </div>
-              <div style={{ marginTop: 8 }}>
-                <span className="field-caption">Applies to days (leave all off = every working day)</span>
-                <div className="chip-group" style={{ marginTop: 4 }}>
-                  {activeDays.map((day) => {
-                    const on = Array.isArray(slot.day_keys) && slot.day_keys.includes(day.day_key);
-                    return (
-                      <button
-                        key={day.day_key}
-                        type="button"
-                        className={on ? 'chip chip-active' : 'chip'}
-                        onClick={() => toggleSlotDay(index, day.day_key)}
-                      >
-                        {day.day_label.slice(0, 3)}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          ))}
-
-          <button className="primary-button" type="button" onClick={saveStructure} disabled={savingStructure}>{savingStructure ? 'Saving...' : 'Save Structure'}</button>
+              <label>
+                <input type="checkbox" checked={copyIncludeFriday} onChange={(event) => setCopyIncludeFriday(event.target.checked)} />{' '}Include Friday override
+              </label>
+              <button type="button" className="secondary-button" onClick={runCopyTimetable} disabled={copying}>{copying ? 'Copying...' : 'Copy Timetable'}</button>
+            </>
+          ) : null}
         </div>
       </section>
     </div>

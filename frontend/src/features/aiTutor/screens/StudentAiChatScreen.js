@@ -92,7 +92,6 @@ export default function StudentAiChatScreen({ navigation, route }) {
     if (!quota) return null;
     const checks = [
       [quota.remaining_daily_requests,  quota.daily_requests,  'daily'],
-      [quota.remaining_weekly_requests, quota.weekly_requests, 'weekly'],
       [quota.remaining_monthly_requests,quota.monthly_requests,'monthly'],
     ];
     for (const [rem, lim, period] of checks) {

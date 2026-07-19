@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, Pressable, TextInput, Modal,
-  StyleSheet, Alert, ActivityIndicator, ScrollView, RefreshControl
+  StyleSheet, Alert, ActivityIndicator, ScrollView, RefreshControl,
+  KeyboardAvoidingView, Platform
 } from 'react-native';
 import api from '../../services/api';
 import { C, S } from '../../config/theme';
@@ -257,9 +258,13 @@ export default function StudentLeaveScreen({ navigation, route }) {
 
       {/* ── Apply Modal ── */}
       <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}>
-        <View style={styles.overlay}>
+        <KeyboardAvoidingView
+          style={styles.overlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
+        >
           <View style={styles.modalCard}>
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <Text style={styles.modalTitle}>Apply for Leave</Text>
               <Text style={styles.modalSub}>Tap dates to select (multiple allowed)</Text>
 
@@ -291,7 +296,7 @@ export default function StudentLeaveScreen({ navigation, route }) {
               </View>
             </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
       </View>
     </View>

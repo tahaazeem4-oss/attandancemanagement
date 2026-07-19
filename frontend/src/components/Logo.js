@@ -61,29 +61,21 @@ export function LogoMark({ size = 52, variant = 'blue' }) {
 }
 
 /**
- * Stacked hero block: app icon image + app name + tagline
+ * Stacked hero block: the real EdTrack brand logo (assets/icon.png).
  * Used at the top of LoginScreen and SignUpScreen.
+ *
+ * The image already contains the "EdTrack" wordmark + tagline, so no
+ * extra text is rendered alongside it here.
  */
-export function LogoHero({ markSize = 72, nameColor = '#fff', tagColor = 'rgba(255,255,255,0.60)' }) {
+export function LogoHero({ markSize = 72, nameColor = '#fff' }) {
+  const imgSize = Math.round(markSize * 2.4);
   return (
     <View style={{ alignItems: 'center' }}>
       <Image
         source={require('../../assets/icon.png')}
-        style={{ width: markSize * 1.4, height: markSize * 1.4, borderRadius: markSize * 0.28 }}
+        style={{ width: imgSize, height: imgSize, borderRadius: Math.round(imgSize * 0.22) }}
         resizeMode="contain"
       />
-      <Text style={{
-        fontSize: 28, fontWeight: '800', color: nameColor,
-        marginTop: 14, letterSpacing: 0.3,
-      }}>
-        EdTrack
-      </Text>
-      <Text style={{
-        fontSize: 13, color: tagColor,
-        marginTop: 3, letterSpacing: 0.4, fontWeight: '500',
-      }}>
-        Smart Attendance System
-      </Text>
     </View>
   );
 }

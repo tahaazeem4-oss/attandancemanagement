@@ -1,5 +1,14 @@
 // supabase/functions/server/lib/aiScope.ts
 // Resolves effective access and the tenant scope path for a given user.
+//
+// Resolution model: "closest explicit scope wins." Every level (global →
+// organization → campus → class → section → student) may have its own
+// explicit ai_feature_flags row. We walk from the MOST specific level the
+// caller belongs to down to global and return the first row we find — that
+// single row is authoritative, no merging across levels. No row anywhere
+// means enabled by default. This replaces an older model where only
+// explicit `false` mattered and only broad-to-narrow, which made a child
+// scope unable to ever override a disabled ancestor.
 import { getDb } from "../_shared.ts";
 
 export interface AiScope {
@@ -19,88 +28,60 @@ export interface EffectiveAccess {
   blocked_at?: "global" | "organization" | "campus" | "class" | "section" | "student";
 }
 
-const SCOPE_PRIORITY: Array<EffectiveAccess["blocked_at"]> = [
-  "global",
-  "organization",
-  "campus",
-  "class",
-  "section",
-  "student",
-];
-
 export interface EffectiveAccessWithScope extends EffectiveAccess {
   scope?: AiScope;
 }
 
-/** Load all relevant flag rows for the scope chain in one query. */
+// Ordered most-specific → least-specific. Used everywhere a "closest scope
+// wins" walk is needed (feature flags, quota policies).
+export function buildScopeChain(scope: AiScope): Array<{ type: string; id: number | null }> {
+  const c: Array<{ type: string; id: number | null }> = [];
+  if (scope.student_id)       c.push({ type: "student",      id: scope.student_id });
+  if (scope.section_id)       c.push({ type: "section",      id: scope.section_id });
+  if (scope.class_id)         c.push({ type: "class",        id: scope.class_id });
+  if (scope.campus_id)        c.push({ type: "campus",       id: scope.campus_id });
+  if (scope.organization_id)  c.push({ type: "organization", id: scope.organization_id });
+  c.push({ type: "global", id: null });
+  return c;
+}
+
+function scopeOrFilter(chain: Array<{ type: string; id: number | null }>): string {
+  return chain
+    .map((c) => (c.id === null
+      ? `and(scope_type.eq.global,scope_id.is.null)`
+      : `and(scope_type.eq.${c.type},scope_id.eq.${c.id})`))
+    .join(",");
+}
+
+/** Resolve effective enabled/disabled for a scope: closest explicit row wins. */
 export async function getEffectiveAiAccess(scope: AiScope): Promise<EffectiveAccess> {
   const db = getDb();
-  
-  // Build scope type/id pairs to check
-  const scopePairs: Array<{ type: string; id: number | null }> = [
-    { type: "global", id: null },
-  ];
-  if (scope.organization_id) scopePairs.push({ type: "organization", id: scope.organization_id });
-  if (scope.campus_id)        scopePairs.push({ type: "campus",       id: scope.campus_id });
-  if (scope.class_id)         scopePairs.push({ type: "class",        id: scope.class_id });
-  if (scope.section_id)       scopePairs.push({ type: "section",      id: scope.section_id });
-  if (scope.student_id)       scopePairs.push({ type: "student",      id: scope.student_id });
-
-  console.log("[aiScope] getEffectiveAiAccess called", {
-    role: scope.role,
-    user_id: scope.user_id,
-    scope_pairs: JSON.stringify(scopePairs),
-  });
-
-  // Build OR filter for all (scope_type, scope_id) pairs to fetch only relevant flags
-  const conditions = scopePairs
-    .map(pair => {
-      if (pair.type === "global") {
-        return `and(scope_type.eq.global,scope_id.is.null)`;
-      } else {
-        return `and(scope_type.eq.${pair.type},scope_id.eq.${pair.id})`;
-      }
-    })
-    .join(",");
+  const chain = buildScopeChain(scope);
 
   const { data, error } = await db
     .from("ai_feature_flags")
-    .select("scope_type, scope_id, is_enabled, updated_at")
-    .order("updated_at", { ascending: true })
-    .or(conditions);
+    .select("scope_type, scope_id, is_enabled")
+    .or(scopeOrFilter(chain));
 
   if (error) {
-    console.error("[aiScope] flag lookup FAILED", { error, conditions });
+    console.error("[aiScope] flag lookup failed", error);
     return { enabled: false, blocked_at: "global" };
   }
 
-  console.log("[aiScope] flag query returned", {
-    rows_count: (data || []).length,
-    rows: JSON.stringify(data),
-  });
-
-  // Build map of (scope_type, scope_id) -> is_enabled
   const flagMap = new Map<string, boolean>();
   for (const row of (data || []) as Array<{ scope_type: string; scope_id: number | null; is_enabled: boolean }>) {
-    const key = `${row.scope_type}:${row.scope_id ?? "null"}`;
-    flagMap.set(key, row.is_enabled);
+    flagMap.set(`${row.scope_type}:${row.scope_id ?? "null"}`, row.is_enabled);
   }
 
-  // Check each scope level in priority order
-  for (const pair of scopePairs) {
+  for (const pair of chain) {
     const key = `${pair.type}:${pair.id ?? "null"}`;
-    const flagValue = flagMap.get(key);
-    
-    console.log(`[aiScope] checking scope ${pair.type}:${pair.id ?? "null"}`, { found: flagMap.has(key), value: flagValue });
-    
-    if (flagMap.has(key) && flagValue === false) {
-      console.log("[aiScope] access BLOCKED at scope", pair.type);
-      return { enabled: false, blocked_at: pair.type as EffectiveAccess["blocked_at"] };
+    if (flagMap.has(key)) {
+      const enabled = flagMap.get(key)!;
+      return enabled ? { enabled: true } : { enabled: false, blocked_at: pair.type as EffectiveAccess["blocked_at"] };
     }
   }
-  
-  // No explicit false found, so access enabled
-  console.log("[aiScope] access ENABLED (no explicit false found)");
+
+  // No explicit row anywhere in the chain — enabled by default.
   return { enabled: true };
 }
 
@@ -117,8 +98,6 @@ export async function resolveStudentScope(studentId: number): Promise<AiScope | 
     `)
     .eq("id", studentId)
     .maybeSingle();
-
-  console.log("[aiScope] resolveStudentScope for student", studentId, { data, error });
 
   if (error || !data) return null;
   const row = data as Record<string, unknown> as {
@@ -144,14 +123,6 @@ export async function resolveStudentScope(studentId: number): Promise<AiScope | 
     resolvedOrgId = campus?.org_id ?? resolvedOrgId;
   }
 
-  console.log("[aiScope] resolveStudentScope resolved to", {
-    student_id: row.id,
-    organization_id: resolvedOrgId,
-    campus_id: resolvedCampusId,
-    class_id: row.class_id,
-    section_id: row.section_id,
-  });
-
   return {
     role: "student",
     user_id: row.id,
@@ -172,20 +143,13 @@ async function resolveAdminScope(adminId: number): Promise<AiScope | null> {
     .select("id, school_id")
     .eq("id", adminId)
     .maybeSingle();
-  
-  console.log("[aiScope] resolveAdminScope for admin", adminId, { admin });
-  if (!admin?.school_id) {
-    console.log("[aiScope] resolveAdminScope FAILED: no admin or school_id");
-    return null;
-  }
+  if (!admin?.school_id) return null;
 
   const { data: school } = await db
     .from("schools")
     .select("id, org_id")
     .eq("id", admin.school_id)
     .maybeSingle();
-
-  console.log("[aiScope] resolveAdminScope resolved to", { school_id: admin.school_id, org_id: school?.org_id });
 
   return {
     role: "admin",
@@ -202,14 +166,8 @@ async function resolveOrgAdminScope(orgAdminId: number): Promise<AiScope | null>
     .select("id, org_id")
     .eq("id", orgAdminId)
     .maybeSingle();
-  
-  console.log("[aiScope] resolveOrgAdminScope for org_admin", orgAdminId, { oa });
-  if (!oa?.org_id) {
-    console.log("[aiScope] resolveOrgAdminScope FAILED: no org_admin or org_id");
-    return null;
-  }
-  
-  console.log("[aiScope] resolveOrgAdminScope resolved to", { org_id: oa.org_id });
+  if (!oa?.org_id) return null;
+
   return {
     role: "org_admin",
     user_id: oa.id,
@@ -217,27 +175,20 @@ async function resolveOrgAdminScope(orgAdminId: number): Promise<AiScope | null>
   };
 }
 
-async function resolveTeacherBaseScope(teacherId: number): Promise<AiScope | null> {
+export async function resolveTeacherBaseScope(teacherId: number): Promise<AiScope | null> {
   const db = getDb();
   const { data: teacher } = await db
     .from("teachers")
     .select("id, school_id")
     .eq("id", teacherId)
     .maybeSingle();
-  
-  console.log("[aiScope] resolveTeacherBaseScope for teacher", teacherId, { teacher });
-  if (!teacher?.school_id) {
-    console.log("[aiScope] resolveTeacherBaseScope FAILED: no teacher or school_id");
-    return null;
-  }
+  if (!teacher?.school_id) return null;
 
   const { data: school } = await db
     .from("schools")
     .select("id, org_id")
     .eq("id", teacher.school_id)
     .maybeSingle();
-
-  console.log("[aiScope] resolveTeacherBaseScope resolved to", { school_id: teacher.school_id, org_id: school?.org_id });
 
   return {
     role: "teacher",
@@ -251,57 +202,42 @@ export async function getEffectiveAiAccessForUser(user: Record<string, unknown>)
   const role = String(user.role || "");
   const userId = Number(user.id || 0);
 
-  console.log("[aiScope] getEffectiveAiAccessForUser called", { role, userId });
-
   if (role === "super_admin") {
     const scope: AiScope = { role: "super_admin", user_id: userId };
     const access = await getEffectiveAiAccess(scope);
-    console.log("[aiScope] super_admin access resolved", { enabled: access.enabled, blocked_at: access.blocked_at });
     return { ...access, scope };
   }
 
   if (role === "org_admin") {
     const scope = await resolveOrgAdminScope(userId);
-    if (!scope) {
-      console.log("[aiScope] org_admin scope resolution FAILED");
-      return { enabled: false, blocked_at: "organization" };
-    }
+    if (!scope) return { enabled: false, blocked_at: "organization" };
     const access = await getEffectiveAiAccess(scope);
-    console.log("[aiScope] org_admin access resolved", { enabled: access.enabled, blocked_at: access.blocked_at });
     return { ...access, scope };
   }
 
   if (role === "admin") {
     const scope = await resolveAdminScope(userId);
-    if (!scope) {
-      console.log("[aiScope] admin scope resolution FAILED");
-      return { enabled: false, blocked_at: "campus" };
-    }
+    if (!scope) return { enabled: false, blocked_at: "campus" };
     const access = await getEffectiveAiAccess(scope);
-    console.log("[aiScope] admin access resolved", { enabled: access.enabled, blocked_at: access.blocked_at });
     return { ...access, scope };
   }
 
   if (role === "teacher") {
     const baseScope = await resolveTeacherBaseScope(userId);
-    if (!baseScope) {
-      console.log("[aiScope] teacher scope resolution FAILED");
-      return { enabled: false, blocked_at: "campus" };
-    }
+    if (!baseScope) return { enabled: false, blocked_at: "campus" };
 
     // Base chain check: global -> org -> campus.
     const baseAccess = await getEffectiveAiAccess(baseScope);
-    console.log("[aiScope] teacher baseAccess", { enabled: baseAccess.enabled, blocked_at: baseAccess.blocked_at });
     if (!baseAccess.enabled) return { ...baseAccess, scope: baseScope };
 
-    // Class/section overrides: if any mapped assignment is OFF, teacher loses AI access.
+    // Class/section overrides: if any mapped assignment is explicitly ON,
+    // the teacher has access via that assignment even if another assignment
+    // is explicitly OFF; only block outright if every assignment is OFF.
     const db = getDb();
     const { data: assignments } = await db
       .from("teacher_classes")
       .select("class_id, section_id")
       .eq("teacher_id", userId);
-
-    console.log("[aiScope] teacher assignments found", { count: (assignments || []).length, assignments });
 
     let firstBlocked: EffectiveAccessWithScope | null = null;
     let anyEnabled = false;
@@ -312,7 +248,6 @@ export async function getEffectiveAiAccessForUser(user: Record<string, unknown>)
         section_id: a.section_id ?? undefined,
       };
       const access = await getEffectiveAiAccess(scoped);
-      console.log("[aiScope] teacher assignment access", { class_id: a.class_id, section_id: a.section_id, enabled: access.enabled, blocked_at: access.blocked_at });
       if (access.enabled) {
         anyEnabled = true;
       } else if (!firstBlocked) {
@@ -321,13 +256,10 @@ export async function getEffectiveAiAccessForUser(user: Record<string, unknown>)
     }
 
     if (anyEnabled || !(assignments || []).length) {
-      console.log("[aiScope] teacher ENABLED (anyEnabled or no assignments)");
       return { enabled: true, scope: baseScope };
     }
-    console.log("[aiScope] teacher BLOCKED (all assignments disabled)");
     return firstBlocked || { enabled: false, blocked_at: "class", scope: baseScope };
   }
 
-  console.log("[aiScope] unknown role or not handled");
   return { enabled: false, blocked_at: "global" };
 }

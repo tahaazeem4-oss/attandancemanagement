@@ -10,9 +10,12 @@ import { C } from '../config/theme';
 import PickerField from '../components/PickerField';
 import AppHeader from '../components/AppHeader';
 import { showDestructiveConfirm } from '../lib/confirmDialog';
+import { useAuth } from '../context/AuthContext';
 
 // ── Constants ─────────────────────────────────────────────────
-const TARGETS = [
+// Whole-school broadcasts are Admin-only — a Class Teacher can still notify
+// their own class/section/student, just not the entire school at once.
+const ALL_TARGETS = [
   { value: 'school',  label: '🏫 Whole School',    desc: 'All students see this' },
   { value: 'class',   label: '📚 Entire Class',     desc: 'All sections of a class' },
   { value: 'section', label: '👥 One Section',      desc: 'Specific class & section' },
@@ -41,6 +44,9 @@ function timeAgo(iso) {
 export default function SendNotificationScreen({ navigation, route }) {
   // Prefill from navigation (e.g. from ReportScreen)
   const prefill = route?.params?.prefill || null;
+  const { user } = useAuth();
+  const canBroadcastToSchool = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'org_admin';
+  const TARGETS = canBroadcastToSchool ? ALL_TARGETS : ALL_TARGETS.filter(t => t.value !== 'school');
 
   // Class data for pickers
   const [classes,   setClasses]   = useState([]);
@@ -48,7 +54,7 @@ export default function SendNotificationScreen({ navigation, route }) {
   const [students,  setStudents]  = useState([]);
 
   // Form state — seed from prefill if provided
-  const [target,    setTarget]    = useState(prefill ? 'student' : 'school');
+  const [target,    setTarget]    = useState(prefill ? 'student' : (canBroadcastToSchool ? 'school' : 'class'));
   const [classId,   setClassId]   = useState(prefill ? String(prefill.class_id) : '');
   const [sectionId, setSectionId] = useState(prefill ? String(prefill.section_id) : '');
   const [studentId, setStudentId] = useState(prefill ? String(prefill.student_id) : '');
@@ -68,6 +74,12 @@ export default function SendNotificationScreen({ navigation, route }) {
   const [sent,        setSent]        = useState([]);
   const [loadingSent, setLoadingSent] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
+  const toggleExpand = (id) => setExpandedIds((prev) => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
   const [editingNotif, setEditingNotif] = useState(null);
   const [editCategory, setEditCategory] = useState('general');
   const [editTitle, setEditTitle] = useState('');
@@ -275,7 +287,12 @@ export default function SendNotificationScreen({ navigation, route }) {
                           </Pressable>
                         </View>
                         <Text style={styles.histTitle}>{n.title}</Text>
-                        <Text style={styles.histMsg} numberOfLines={2}>{n.message}</Text>
+                        <Pressable onPress={() => toggleExpand(n.id)}>
+                          <Text style={styles.histMsg} numberOfLines={expandedIds.has(n.id) ? undefined : 2}>{n.message}</Text>
+                          {n.message?.length > 90 && (
+                            <Text style={styles.histMore}>{expandedIds.has(n.id) ? 'Show less' : 'Show more'}</Text>
+                          )}
+                        </Pressable>
                         <Text style={styles.histTarget}>{targetLabel}</Text>
                       </View>
                     );
@@ -567,6 +584,7 @@ const styles = StyleSheet.create({
   delBtnTxt:     { fontSize: 16 },
   histTitle:     { fontSize: 15, fontWeight: '800', color: C.text, marginBottom: 3 },
   histMsg:       { fontSize: 13, color: C.textMed },
+  histMore:      { fontSize: 12, color: C.primary, fontWeight: '700', marginTop: 3 },
   histTarget:    { fontSize: 12, color: C.primary, fontWeight: '600', marginTop: 6 },
 
   modalOverlay: {

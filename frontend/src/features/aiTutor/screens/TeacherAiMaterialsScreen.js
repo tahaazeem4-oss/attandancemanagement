@@ -1,8 +1,9 @@
 // frontend/src/features/aiTutor/screens/TeacherAiMaterialsScreen.js
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, FlatList, TextInput, StyleSheet, Alert, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, TextInput, StyleSheet, Alert, ActivityIndicator, ScrollView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import api from '../../../services/api';
 import { deleteMaterial, listMaterials, uploadMaterial } from '../api/aiTutorApi';
 import ScreenIntroCard from '../../../components/ScreenIntroCard';
@@ -11,6 +12,64 @@ import { C, S } from '../../../config/theme';
 const STATUS_COLORS = {
   uploaded: '#9CA3AF', processing: '#F59E0B', ready: '#10B981', failed: '#EF4444', archived: '#6B7280',
 };
+const ALLOWED_EXT = new Set(['pdf', 'docx', 'pptx', 'txt']);
+const MAX_SIZE_BYTES = 25 * 1024 * 1024;
+
+function getUploadErrorMessage(error) {
+  const message = error?.response?.data?.message || error?.message || 'Upload failed. Please try again.';
+
+  if (/Network request failed/i.test(message)) {
+    return 'The file could not be sent. Please pick the file again and retry.';
+  }
+  if (/unsupported file extension|unsupported mime type/i.test(message)) {
+    return 'Use a PDF, DOCX, PPTX, or TXT file.';
+  }
+  if (/file too large/i.test(message)) {
+    return 'The selected file is larger than 25 MB.';
+  }
+  if (/subject_id required/i.test(message)) {
+    return 'Select a subject before uploading.';
+  }
+  if (/campus_id required|invalid campus|subject does not belong to campus/i.test(message)) {
+    return 'Your school scope could not be verified. Sign in again and retry.';
+  }
+
+  return message;
+}
+
+async function normalizePickedAsset(asset) {
+  const name = asset?.name || 'material-upload';
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  const type = asset?.mimeType || 'application/octet-stream';
+  const size = typeof asset?.size === 'number' ? asset.size : null;
+
+  if (!ALLOWED_EXT.has(ext)) {
+    throw new Error('Use a PDF, DOCX, PPTX, or TXT file.');
+  }
+  if (size && size > MAX_SIZE_BYTES) {
+    throw new Error('The selected file is larger than 25 MB.');
+  }
+
+  if (Platform.OS === 'web' && asset?.file) {
+    return { filePart: asset.file, ext, size: asset.file.size || size };
+  }
+
+  let uri = asset?.uri;
+  if (!uri) throw new Error('The selected file is missing a usable URI.');
+
+  if (!String(uri).startsWith('file://')) {
+    const safeName = name.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    const cachedUri = `${FileSystem.cacheDirectory}ai_material_${Date.now()}_${safeName}`;
+    await FileSystem.copyAsync({ from: uri, to: cachedUri });
+    uri = cachedUri;
+  }
+
+  return {
+    filePart: { uri, name, type },
+    ext,
+    size,
+  };
+}
 
 export default function TeacherAiMaterialsScreen({ navigation, route }) {
   const paramCampus = route?.params?.campusId;
@@ -30,6 +89,7 @@ export default function TeacherAiMaterialsScreen({ navigation, route }) {
   const [title, setTitle] = useState('');
   const [topic, setTopic] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState(null);
 
   useEffect(() => {
     api.get('/subjects')
@@ -59,39 +119,61 @@ export default function TeacherAiMaterialsScreen({ navigation, route }) {
   useEffect(() => { refresh(); }, [refresh]);
 
   const pickAndUpload = async () => {
-    if (!title.trim()) { Alert.alert('Title required'); return; }
-    if (!subjectId)   { Alert.alert('Please pick a subject'); return; }
-    const res = await DocumentPicker.getDocumentAsync({
-      type: [
-        'application/pdf',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-        'application/vnd.ms-powerpoint', // legacy PPT
-        'text/plain',
-      ],
-      copyToCacheDirectory: true, multiple: false,
-    });
-    if (res.canceled || !res.assets?.length) return;
-    const asset = res.assets[0];
+    if (!title.trim()) {
+      setUploadMessage({ tone: 'error', text: 'Add a title before uploading.' });
+      return;
+    }
+    if (!subjectId) {
+      setUploadMessage({ tone: 'error', text: 'Select a subject before choosing a file.' });
+      return;
+    }
 
-    const form = new FormData();
-    form.append('file', { uri: asset.uri, name: asset.name, type: asset.mimeType || 'application/octet-stream' });
-    form.append('title', title.trim());
-    if (topic.trim()) form.append('topic', topic.trim());
-    form.append('subject_id', String(subjectId));
-    if (classSel?.class_id) form.append('class_id', String(classSel.class_id));
-    if (classSel?.section_id) form.append('section_id', String(classSel.section_id));
-    if (paramCampus) form.append('campus_id', String(paramCampus));
+    setUploadMessage(null);
 
-    setUploading(true);
     try {
-      await uploadMaterial(form);
-      setTitle(''); setTopic('');
+      const res = await DocumentPicker.getDocumentAsync({
+        type: [
+          'application/pdf',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          'text/plain',
+        ],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (res.canceled || !res.assets?.length) return;
+
+      const asset = res.assets[0];
+      const normalized = await normalizePickedAsset(asset);
+
+      const form = new FormData();
+      form.append('file', normalized.filePart);
+      form.append('title', title.trim());
+      if (topic.trim()) form.append('topic', topic.trim());
+      form.append('subject_id', String(subjectId));
+      if (classSel?.class_id) form.append('class_id', String(classSel.class_id));
+      if (classSel?.section_id) form.append('section_id', String(classSel.section_id));
+      if (paramCampus) form.append('campus_id', String(paramCampus));
+
+      setUploading(true);
+      setUploadMessage({ tone: 'info', text: `Uploading ${asset.name || 'file'}...` });
+
+      const { data } = await uploadMaterial(form);
+      const uploadedDoc = data?.document;
+      if (uploadedDoc) {
+        setItems((prev) => [uploadedDoc, ...prev.filter((item) => item.id !== uploadedDoc.id)]);
+      }
+      setTitle('');
+      setTopic('');
+      setUploadMessage({ tone: 'success', text: 'Material uploaded and queued for ingestion. It should appear below immediately.' });
       await refresh();
-      Alert.alert('Uploaded', 'The file is queued for ingestion. It will become "ready" shortly.');
     } catch (e) {
-      Alert.alert('Upload failed', e?.response?.data?.message || 'Try again');
-    } finally { setUploading(false); }
+      const message = getUploadErrorMessage(e);
+      setUploadMessage({ tone: 'error', text: message });
+      Alert.alert('Upload failed', message);
+    } finally {
+      setUploading(false);
+    }
   };
 
   const subjectName = useMemo(
@@ -111,6 +193,12 @@ export default function TeacherAiMaterialsScreen({ navigation, route }) {
         ? `${classes.find((c) => c.class_id === classSel.class_id && c.section_id === classSel.section_id).class_name} · ${classes.find((c) => c.class_id === classSel.class_id && c.section_id === classSel.section_id).section_name}`
         : 'Selected')
     : 'All classes (campus-wide)';
+
+  const uploadMessageStyle = uploadMessage?.tone === 'error'
+    ? styles.messageError
+    : uploadMessage?.tone === 'success'
+      ? styles.messageSuccess
+      : styles.messageInfo;
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
@@ -167,10 +255,16 @@ export default function TeacherAiMaterialsScreen({ navigation, route }) {
               <Text style={styles.supportingText}>Use a clear title and optional topic so students can quickly find the right file in AI Tutor.</Text>
               <TextInput style={styles.input} placeholder="Title (e.g. Chapter 4 Summary)" placeholderTextColor={C.textLight} value={title} onChangeText={setTitle} />
               <TextInput style={styles.input} placeholder="Topic / Chapter (optional)" placeholderTextColor={C.textLight} value={topic} onChangeText={setTopic} />
+              {uploadMessage ? (
+                <View style={[styles.messageBox, uploadMessageStyle]}>
+                  {uploading ? <ActivityIndicator size="small" color={uploadMessage.tone === 'error' ? '#B91C1C' : C.primary} /> : null}
+                  <Text style={[styles.messageText, uploadMessage.tone === 'error' && styles.messageTextError]}>{uploadMessage.text}</Text>
+                </View>
+              ) : null}
               <TouchableOpacity style={[styles.btn, uploading && styles.btnDisabled]} onPress={pickAndUpload} disabled={uploading}>
                 <Text style={styles.btnText}>{uploading ? 'Uploading...' : 'Choose File and Upload'}</Text>
               </TouchableOpacity>
-              <Text style={styles.hint}>PDF, DOCX, PPTX, PPT, TXT · up to 25 MB</Text>
+              <Text style={styles.hint}>PDF, DOCX, PPTX, TXT · up to 25 MB</Text>
             </View>
 
             <View style={styles.sectionHeadRow}>
@@ -235,6 +329,21 @@ const styles = StyleSheet.create({
   btn: { ...S.btn },
   btnDisabled: { opacity: 0.65 },
   btnText: { ...S.btnText },
+  messageBox: {
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  messageInfo: { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' },
+  messageSuccess: { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' },
+  messageError: { backgroundColor: '#FEF2F2', borderColor: '#FECACA' },
+  messageText: { flex: 1, fontSize: 12, color: C.textDark, lineHeight: 18, fontWeight: '600' },
+  messageTextError: { color: '#B91C1C' },
   hint: { fontSize: 12, color: C.textMed, marginTop: 8, lineHeight: 18 },
   rowCard: { ...S.card, padding: 16, borderWidth: 1, borderColor: C.border, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 },
   rowMain: { flex: 1 },

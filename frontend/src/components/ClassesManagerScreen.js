@@ -112,9 +112,11 @@ export default function ClassesManagerScreen({ navigation, mode }) {
         result = Array.isArray(data) ? data : [];
       }
       setClasses(result);
+      return result;
     } catch {
       Alert.alert('Error', 'Could not load classes');
       setClasses([]);
+      return [];
     } finally {
       setLoading(false);
     }
@@ -285,15 +287,16 @@ export default function ClassesManagerScreen({ navigation, mode }) {
         setNewSection('');
       }
 
-      // Reload target
-      const endpoint = isSuper
-        ? `/super-admin/schools/${target.school_id || filterCampus}/classes/${target.id}`
-        : isOrg
-          ? `/org-admin/classes/${target.id}`
-          : `/admin/classes/${target.id}`;
-      const { data } = await api.get(endpoint);
-      setTarget(data);
-      setSections(data.sections || []);
+      // Refresh from the class LIST — there is no single-class GET-by-id
+      // endpoint on the backend (only list endpoints exist for admin/org/
+      // super), so fetching one by id 404'd here even after the section was
+      // saved successfully, surfacing a false "Not Found" error every time.
+      const freshClasses = await loadClasses();
+      const updated = (freshClasses || []).find((c) => String(c.id) === String(target.id));
+      if (updated) {
+        setTarget(updated);
+        setSections(updated.sections || []);
+      }
     } catch (err) {
       Alert.alert('Error', err?.response?.data?.message || 'Could not save section.');
     } finally {
@@ -315,14 +318,14 @@ export default function ClassesManagerScreen({ navigation, mode }) {
               : `/admin/sections/${sec.id}`;
           await api.delete(endpoint);
           if (target?.id) {
-            const reloadEndpoint = isSuper
-              ? `/super-admin/schools/${target.school_id || filterCampus}/classes/${target.id}`
-              : isOrg
-                ? `/org-admin/classes/${target.id}`
-                : `/admin/classes/${target.id}`;
-            const { data } = await api.get(reloadEndpoint);
-            setTarget(data);
-            setSections(data.sections || []);
+            // Same fix as handleSaveSection: refresh from the working list
+            // endpoint instead of a single-class GET that doesn't exist.
+            const freshClasses = await loadClasses();
+            const updated = (freshClasses || []).find((c) => String(c.id) === String(target.id));
+            if (updated) {
+              setTarget(updated);
+              setSections(updated.sections || []);
+            }
           }
         } catch (err) {
           Alert.alert('Error', err?.response?.data?.message || 'Could not delete section.');

@@ -1,21 +1,23 @@
 // supabase/functions/server/lib/aiQuota.ts
-// Resolves effective quotas (most restrictive across scopes) and updates counters atomically.
+// Resolves effective quotas and updates usage counters.
+//
+// Students: daily/monthly requests+tokens are a shared pool (see
+// aiQuotaTree.ts) that divides from the global default down through
+// organization → campus → class → section → student, pro-rata by active
+// (AI-enabled) student count, with manual overrides taken off the top.
+// max_input_tokens/max_output_tokens are per-request caps, not a budget, so
+// they stay "closest explicit scope wins."
+// Teachers: closest explicit ai_quota_policies row wins outright — teacher
+// usage is already pooled by construction (one shared counter per resolved
+// scope in ai_teacher_quota_counters, incremented by every teacher there).
 import { getDb } from "../_shared.ts";
-import type { AiScope } from "./aiScope.ts";
-import {
-  DISTRIBUTABLE,
-  getAllocationMode,
-  minDefined as _unused,
-  numericOrNull,
-  resolveExplicitAllocation,
-} from "./aiQuotaPolicy.ts";
+import { buildScopeChain, type AiScope } from "./aiScope.ts";
+import { loadQuotaTree, POOLED_FIELDS, CAP_FIELDS, type PooledField, type CapField } from "./aiQuotaTree.ts";
 
 export interface QuotaLimits {
   daily_requests: number | null;
-  weekly_requests: number | null;
   monthly_requests: number | null;
   daily_tokens: number | null;
-  weekly_tokens: number | null;
   monthly_tokens: number | null;
   max_input_tokens: number | null;
   max_output_tokens: number | null;
@@ -23,315 +25,101 @@ export interface QuotaLimits {
 
 export interface QuotaState extends QuotaLimits {
   used_today_requests: number;
-  used_week_requests: number;
   used_month_requests: number;
   used_today_tokens: number;
-  used_week_tokens: number;
   used_month_tokens: number;
   remaining_daily_requests: number | null;
-  remaining_weekly_requests: number | null;
   remaining_monthly_requests: number | null;
 }
 
-const PER_REQUEST_CAPS: (keyof QuotaLimits)[] = ["max_input_tokens","max_output_tokens"];
+export const QUOTA_FIELDS: (keyof QuotaLimits)[] = [
+  "daily_requests", "monthly_requests", "daily_tokens", "monthly_tokens",
+  "max_input_tokens", "max_output_tokens",
+];
 
-function minDefined(values: Array<number | null | undefined>): number | null {
-  const nums = values.filter((v): v is number => typeof v === "number" && v >= 0);
-  return nums.length ? Math.min(...nums) : null;
+function numericOrNull(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
-// Build the descending chain of entities for the scope. Includes only levels
-// the student actually belongs to. Each entry is { type, id|null }.
-function buildScopeChain(scope: AiScope): Array<{ type: string; id: number | null }> {
-  const c: Array<{ type: string; id: number | null }> = [{ type: "global", id: null }];
-  if (scope.organization_id) c.push({ type: "organization", id: scope.organization_id });
-  if (scope.campus_id)        c.push({ type: "campus",       id: scope.campus_id });
-  if (scope.class_id)         c.push({ type: "class",        id: scope.class_id });
-  if (scope.section_id)       c.push({ type: "section",      id: scope.section_id });
-  if (scope.student_id)       c.push({ type: "student",      id: scope.student_id });
-  return c;
-}
-
-export async function getEffectiveQuota(scope: AiScope): Promise<QuotaLimits> {
-  const db = getDb();
-  const chain = buildScopeChain(scope);
-
-  // Fetch all policies along the chain in one go.
-  const chainOr = chain
-    .map((c) =>
-      c.id === null
-        ? `and(scope_type.eq.global,scope_id.is.null)`
-        : `and(scope_type.eq.${c.type},scope_id.eq.${c.id})`,
-    )
-    .join(",");
-  const { data: chainRows } = await db
-    .from("ai_quota_policies")
-    .select("*")
-    .order("updated_at", { ascending: true })
-    .or(chainOr);
-
-  const chainPolicyBy = new Map<string, Partial<QuotaLimits>>();
-  for (const r of (chainRows || []) as Array<Partial<QuotaLimits> & { scope_type: string; scope_id: number | null }>) {
-    const k = r.scope_id === null ? `${r.scope_type}#null` : `${r.scope_type}#${r.scope_id}`;
-    chainPolicyBy.set(k, r);
-  }
-  const keyOf = (t: string, id: number | null) => (id === null ? `${t}#null` : `${t}#${id}`);
-  const ownOf = (t: string, id: number | null) => chainPolicyBy.get(keyOf(t, id)) || {};
-
-  // Per-request caps: strictest along chain (min).
-  const merged: QuotaLimits = {
-    daily_requests: null, weekly_requests: null, monthly_requests: null,
-    daily_tokens: null, weekly_tokens: null, monthly_tokens: null,
+function emptyLimits(): QuotaLimits {
+  return {
+    daily_requests: null, monthly_requests: null,
+    daily_tokens: null, monthly_tokens: null,
     max_input_tokens: null, max_output_tokens: null,
   };
-  for (const f of PER_REQUEST_CAPS) {
-    const vals = chain.map((c) => numericOrNull(ownOf(c.type, c.id)[f] as number | null | undefined));
-    (merged as Record<string, number | null>)[f] = minDefined(vals);
-  }
-
-  // Distributable fields: pool walk top-down, dividing parent's pool among
-  // siblings by student count after subtracting manually-allocated shares.
-  // To do this we need sibling lists + per-sibling manual values + student counts.
-
-  // Identify the sibling set at each level along the chain (levels 1..len-1).
-  type SibKey = { level: number; parentType: string; parentId: number | null; childType: string };
-  const sibKeysByLevel: SibKey[] = [];
-  for (let i = 1; i < chain.length; i++) {
-    sibKeysByLevel.push({
-      level: i,
-      parentType: chain[i - 1].type,
-      parentId: chain[i - 1].id,
-      childType: chain[i].type,
-    });
-  }
-
-  // Fetch sibling entity sets and their manual policies for distributable fields.
-  // siblings: map level -> Array<{ id, students }>
-  const siblingsByLevel = new Map<number, Array<{ id: number; students: number }>>();
-  for (const sk of sibKeysByLevel) {
-    let entityRows: Array<{ id: number }> = [];
-    if (sk.childType === "organization") {
-      const { data } = await db.from("organizations").select("id");
-      entityRows = (data || []) as Array<{ id: number }>;
-    } else if (sk.childType === "campus") {
-      const { data } = await db.from("schools").select("id").eq("org_id", sk.parentId);
-      entityRows = (data || []) as Array<{ id: number }>;
-    } else if (sk.childType === "class") {
-      const { data } = await db.from("classes").select("id").eq("school_id", sk.parentId);
-      entityRows = (data || []) as Array<{ id: number }>;
-    } else if (sk.childType === "section") {
-      const { data } = await db.from("sections").select("id").eq("class_id", sk.parentId);
-      entityRows = (data || []) as Array<{ id: number }>;
-    } else if (sk.childType === "student") {
-      const { data } = await db.from("students").select("id").eq("section_id", sk.parentId);
-      entityRows = (data || []) as Array<{ id: number }>;
-    }
-    const enriched: Array<{ id: number; students: number }> = [];
-    if (sk.childType === "student") {
-      // Pool at student level is divided across AI-ENABLED siblings only.
-      // A disabled student takes no share. (Caller is always enabled, since
-      // the feature flag is checked upstream of quota resolution.)
-      const enabled = await enabledStudentIdsInSection(sk.parentId as number);
-      for (const r of entityRows) {
-        enriched.push({ id: r.id, students: enabled.has(r.id) ? 1 : 0 });
-      }
-    } else {
-      for (const r of entityRows) {
-        const n = await countStudentsForEntity(sk.childType, r.id);
-        enriched.push({ id: r.id, students: n });
-      }
-    }
-    siblingsByLevel.set(sk.level, enriched);
-  }
-
-  const sibPoliciesByLevel = new Map<number, Map<number, Partial<QuotaLimits>>>();
-  for (const sk of sibKeysByLevel) {
-    const sibs = siblingsByLevel.get(sk.level) || [];
-    if (!sibs.length) { sibPoliciesByLevel.set(sk.level, new Map()); continue; }
-    const ids = sibs.map((s) => s.id);
-    const { data } = await db
-      .from("ai_quota_policies")
-      .select("*")
-      .order("updated_at", { ascending: true })
-      .eq("scope_type", sk.childType)
-      .in("scope_id", ids);
-    const map = new Map<number, Partial<QuotaLimits>>();
-    for (const r of (data || []) as Array<Partial<QuotaLimits> & { scope_id: number }>) {
-      map.set(Number(r.scope_id), r);
-    }
-    sibPoliciesByLevel.set(sk.level, map);
-  }
-
-  for (const F of DISTRIBUTABLE) {
-    let pool: number | null = numericOrNull(ownOf("global", null)[F] as number | null | undefined) ?? null;
-
-    for (let i = 1; i < chain.length; i++) {
-      const here = chain[i];
-      const sibs = siblingsByLevel.get(i) || [];
-      const mySibling = sibs.find((s) => s.id === here.id);
-      const myStudents = mySibling?.students ?? 0;
-      const explicitOwn = resolveExplicitAllocation(ownOf(here.type, here.id), F, pool);
-      if (explicitOwn) {
-        pool = myStudents > 0 ? explicitOwn.value : 0;
-        continue;
-      }
-      if (pool === null) continue;
-      const sibPol = sibPoliciesByLevel.get(i) || new Map();
-      let manualSum = 0;
-      let nonManualStudents = 0;
-      for (const s of sibs) {
-        const explicitSibling = resolveExplicitAllocation(sibPol.get(s.id) || null, F, pool);
-        if (explicitSibling && s.students > 0) {
-          manualSum += explicitSibling.value ?? 0;
-        } else {
-          nonManualStudents += s.students;
-        }
-      }
-      const remaining = Math.max(0, pool - manualSum);
-      // Disabled scopes (0 enabled students beneath them) get 0 share.
-      // The pool is only divided among enabled siblings.
-      if (myStudents <= 0 || nonManualStudents <= 0) {
-        pool = 0;
-      } else {
-        pool = Math.floor(remaining * myStudents / nonManualStudents);
-      }
-    }
-    (merged as Record<string, number | null>)[F] = pool;
-  }
-
-  return merged;
 }
 
-// Count of AI-enabled students under any entity. A student is enabled iff
-// the effective AI feature flag along its chain resolves to TRUE.
-async function countStudentsForEntity(type: string, id: number): Promise<number> {  const db = getDb();
-  // Gather candidate students for the entity.
-  let candidates: Array<{ id: number; section_id: number; class_id: number; school_id: number }> = [];
-  if (type === "section") {
-    const { data } = await db.from("students").select("id, section_id, class_id, school_id").eq("section_id", id);
-    candidates = (data || []) as typeof candidates;
-  } else if (type === "class") {
-    const { data } = await db.from("students").select("id, section_id, class_id, school_id").eq("class_id", id);
-    candidates = (data || []) as typeof candidates;
-  } else if (type === "campus") {
-    const { data } = await db.from("students").select("id, section_id, class_id, school_id").eq("school_id", id);
-    candidates = (data || []) as typeof candidates;
-  } else if (type === "organization") {
-    const { data: sData } = await db.from("schools").select("id").eq("org_id", id);
-    const schoolIds = ((sData || []) as Array<{ id: number }>).map((r) => r.id);
-    if (!schoolIds.length) return 0;
-    const { data } = await db.from("students").select("id, section_id, class_id, school_id").in("school_id", schoolIds);
-    candidates = (data || []) as typeof candidates;
-  }
-  if (!candidates.length) return 0;
-
-  // Build the set of scope keys we need flags for.
-  const studentIds = candidates.map((c) => c.id);
-  const sectionIds = Array.from(new Set(candidates.map((c) => c.section_id)));
-  const classIds   = Array.from(new Set(candidates.map((c) => c.class_id)));
-  const schoolIds  = Array.from(new Set(candidates.map((c) => c.school_id)));
-  // Fetch org ids for schools.
-  const { data: schoolRows } = await db.from("schools").select("id, org_id").in("id", schoolIds);
-  const orgBySchool = new Map<number, number | null>();
-  for (const r of (schoolRows || []) as Array<{ id: number; org_id: number | null }>) orgBySchool.set(r.id, r.org_id);
-  const orgIds = Array.from(new Set(Array.from(orgBySchool.values()).filter((x): x is number => x !== null)));
-
-  // Fetch flags for global + each affected scope.
-  const orFilters: string[] = [`and(scope_type.eq.global,scope_id.is.null)`];
-  if (orgIds.length)     orFilters.push(`and(scope_type.eq.organization,scope_id.in.(${orgIds.join(",")}))`);
-  if (schoolIds.length)  orFilters.push(`and(scope_type.eq.campus,scope_id.in.(${schoolIds.join(",")}))`);
-  if (classIds.length)   orFilters.push(`and(scope_type.eq.class,scope_id.in.(${classIds.join(",")}))`);
-  if (sectionIds.length) orFilters.push(`and(scope_type.eq.section,scope_id.in.(${sectionIds.join(",")}))`);
-  if (studentIds.length) orFilters.push(`and(scope_type.eq.student,scope_id.in.(${studentIds.join(",")}))`);
-
-  const { data: flagRows } = await db
-    .from("ai_feature_flags")
-    .select("scope_type, scope_id, is_enabled, updated_at")
-    .order("updated_at", { ascending: true })
-    .or(orFilters.join(","));
-  const flagBy = new Map<string, boolean>();
-  for (const r of (flagRows || []) as Array<{ scope_type: string; scope_id: number | null; is_enabled: boolean }>) {
-    const k = r.scope_id === null ? `${r.scope_type}#null` : `${r.scope_type}#${r.scope_id}`;
-    flagBy.set(k, Boolean(r.is_enabled));
-  }
-  const globalEnabled = flagBy.get("global#null") ?? false;
-
-  let n = 0;
-  for (const st of candidates) {
-    const orgId = orgBySchool.get(st.school_id) ?? null;
-    let on = globalEnabled;
-    if (orgId !== null && flagBy.has(`organization#${orgId}`))  on = flagBy.get(`organization#${orgId}`)!;
-    if (flagBy.has(`campus#${st.school_id}`))                    on = flagBy.get(`campus#${st.school_id}`)!;
-    if (flagBy.has(`class#${st.class_id}`))                      on = flagBy.get(`class#${st.class_id}`)!;
-    if (flagBy.has(`section#${st.section_id}`))                  on = flagBy.get(`section#${st.section_id}`)!;
-    if (flagBy.has(`student#${st.id}`))                          on = flagBy.get(`student#${st.id}`)!;
-    if (on) n++;
-  }
-  return n;
+/** The most specific (type, id) pair present on a scope — the node whose
+ * quota we're resolving. */
+function mostSpecificNode(scope: AiScope): { type: "global" | "organization" | "campus" | "class" | "section" | "student"; id: number | null } {
+  const chain = buildScopeChain(scope); // most-specific first
+  return chain[0] as { type: "global" | "organization" | "campus" | "class" | "section" | "student"; id: number | null };
 }
 
-// Returns the set of student ids in a section whose effective AI feature
-// flag resolves to TRUE. Used for fair pool-division at the student level.
-async function enabledStudentIdsInSection(sectionId: number): Promise<Set<number>> {
+/** Resolve the effective quota for a scope. */
+export async function getEffectiveQuota(
+  scope: AiScope,
+  actorType: "student" | "teacher" = "student",
+): Promise<QuotaLimits> {
+  if (actorType === "teacher") {
+    const resolved = await resolveQuotaRow(scope, "teacher");
+    return resolved.limits;
+  }
+
+  const { type, id } = mostSpecificNode(scope);
+  const tree = await loadQuotaTree();
+  const limits = emptyLimits();
+  for (const F of POOLED_FIELDS as readonly PooledField[]) limits[F] = tree.effectivePooled(type, id, F).value;
+  for (const F of CAP_FIELDS as readonly CapField[]) limits[F] = tree.effectiveCap(type, id, F).value;
+  return limits;
+}
+
+/** Closest-explicit-row resolver — teacher-only now (students are pooled,
+ * see getEffectiveQuota above). Also reports which scope the row came from,
+ * needed for teacher usage, which is pooled per resolved scope, not per teacher. */
+export async function resolveQuotaRow(
+  scope: AiScope,
+  actorType: "teacher" = "teacher",
+): Promise<{ limits: QuotaLimits; scope_type: string; scope_id: number | null }> {
   const db = getDb();
-  const { data: students } = await db
-    .from("students")
-    .select("id, section_id, class_id, school_id")
-    .eq("section_id", sectionId);
-  const rows = (students || []) as Array<{ id: number; section_id: number; class_id: number; school_id: number }>;
-  const out = new Set<number>();
-  if (!rows.length) return out;
+  const chain = buildScopeChain(scope).filter((c) => c.type === "global" || c.type === "organization" || c.type === "campus");
 
-  const studentIds = rows.map((r) => r.id);
-  const classIds = Array.from(new Set(rows.map((r) => r.class_id)));
-  const schoolIds = Array.from(new Set(rows.map((r) => r.school_id)));
-  const { data: schoolRows } = await db.from("schools").select("id, org_id").in("id", schoolIds);
-  const orgBySchool = new Map<number, number | null>();
-  for (const r of (schoolRows || []) as Array<{ id: number; org_id: number | null }>) orgBySchool.set(r.id, r.org_id);
-  const orgIds = Array.from(new Set(Array.from(orgBySchool.values()).filter((x): x is number => x !== null)));
+  const orFilter = chain
+    .map((c) => (c.id === null
+      ? `and(scope_type.eq.global,scope_id.is.null)`
+      : `and(scope_type.eq.${c.type},scope_id.eq.${c.id})`))
+    .join(",");
 
-  const orFilters: string[] = [`and(scope_type.eq.global,scope_id.is.null)`];
-  if (orgIds.length)     orFilters.push(`and(scope_type.eq.organization,scope_id.in.(${orgIds.join(",")}))`);
-  if (schoolIds.length)  orFilters.push(`and(scope_type.eq.campus,scope_id.in.(${schoolIds.join(",")}))`);
-  if (classIds.length)   orFilters.push(`and(scope_type.eq.class,scope_id.in.(${classIds.join(",")}))`);
-  orFilters.push(`and(scope_type.eq.section,scope_id.eq.${sectionId})`);
-  if (studentIds.length) orFilters.push(`and(scope_type.eq.student,scope_id.in.(${studentIds.join(",")}))`);
+  const { data } = await db
+    .from("ai_quota_policies")
+    .select("*")
+    .eq("actor_type", actorType)
+    .or(orFilter);
 
-  const { data: flagRows } = await db
-    .from("ai_feature_flags")
-    .select("scope_type, scope_id, is_enabled, updated_at")
-    .order("updated_at", { ascending: true })
-    .or(orFilters.join(","));
-  const flagBy = new Map<string, boolean>();
-  for (const r of (flagRows || []) as Array<{ scope_type: string; scope_id: number | null; is_enabled: boolean }>) {
-    const k = r.scope_id === null ? `${r.scope_type}#null` : `${r.scope_type}#${r.scope_id}`;
-    flagBy.set(k, Boolean(r.is_enabled));
+  const rowByKey = new Map<string, Record<string, unknown>>();
+  for (const r of (data || []) as Array<Record<string, unknown>>) {
+    rowByKey.set(`${r.scope_type}:${r.scope_id ?? "null"}`, r);
   }
-  const globalEnabled = flagBy.get("global#null") ?? false;
 
-  for (const st of rows) {
-    const orgId = orgBySchool.get(st.school_id) ?? null;
-    let on = globalEnabled;
-    if (orgId !== null && flagBy.has(`organization#${orgId}`)) on = flagBy.get(`organization#${orgId}`)!;
-    if (flagBy.has(`campus#${st.school_id}`))                   on = flagBy.get(`campus#${st.school_id}`)!;
-    if (flagBy.has(`class#${st.class_id}`))                     on = flagBy.get(`class#${st.class_id}`)!;
-    if (flagBy.has(`section#${st.section_id}`))                 on = flagBy.get(`section#${st.section_id}`)!;
-    if (flagBy.has(`student#${st.id}`))                         on = flagBy.get(`student#${st.id}`)!;
-    if (on) out.add(st.id);
+  for (const pair of chain) {
+    const row = rowByKey.get(`${pair.type}:${pair.id ?? "null"}`);
+    if (row) {
+      const limits = emptyLimits();
+      for (const F of QUOTA_FIELDS) limits[F] = numericOrNull(row[F]);
+      return { limits, scope_type: pair.type, scope_id: pair.id };
+    }
   }
-  return out;
+
+  // No policy anywhere in the chain — unlimited by default.
+  return { limits: emptyLimits(), scope_type: "global", scope_id: null };
 }
 
-function periodStart(type: "daily" | "weekly" | "monthly"): string {
+function periodStart(type: "daily" | "monthly"): string {
   const d = new Date();
   d.setUTCHours(0, 0, 0, 0);
   if (type === "daily") return d.toISOString().slice(0, 10);
-  if (type === "weekly") {
-    const day = d.getUTCDay();
-    const diff = (day === 0 ? 6 : day - 1); // Monday-start week
-    d.setUTCDate(d.getUTCDate() - diff);
-    return d.toISOString().slice(0, 10);
-  }
   d.setUTCDate(1);
   return d.toISOString().slice(0, 10);
 }
@@ -342,10 +130,12 @@ async function currentPolicyEpoch(): Promise<number> {
   return Number(data?.policy_epoch || 1);
 }
 
+// ── Student usage (per-student counters, unchanged shape minus weekly) ──
+
 export async function loadQuotaState(scope: AiScope, limits: QuotaLimits): Promise<QuotaState> {
   const db = getDb();
   const policyEpoch = await currentPolicyEpoch();
-  const periods = (["daily","weekly","monthly"] as const).map((p) => ({ p, start: periodStart(p) }));
+  const periods = (["daily", "monthly"] as const).map((p) => ({ p, start: periodStart(p) }));
   const { data } = await db
     .from("ai_quota_counters")
     .select("period_type, period_start, used_requests, used_tokens")
@@ -358,34 +148,27 @@ export async function loadQuotaState(scope: AiScope, limits: QuotaLimits): Promi
   for (const r of (data || []) as Array<{ period_type: string; period_start: string; used_requests: number; used_tokens: number }>) {
     byKey.set(`${r.period_type}:${r.period_start}`, { used_requests: r.used_requests, used_tokens: r.used_tokens });
   }
-  const get = (p: "daily" | "weekly" | "monthly") => byKey.get(`${p}:${periodStart(p)}`) || { used_requests: 0, used_tokens: 0 };
-  const d = get("daily"), w = get("weekly"), m = get("monthly");
-
+  const get = (p: "daily" | "monthly") => byKey.get(`${p}:${periodStart(p)}`) || { used_requests: 0, used_tokens: 0 };
+  const d = get("daily"), m = get("monthly");
   const rem = (lim: number | null, used: number) => (lim === null ? null : Math.max(0, lim - used));
 
   return {
     ...limits,
     used_today_requests: d.used_requests,
-    used_week_requests:  w.used_requests,
     used_month_requests: m.used_requests,
-    used_today_tokens:   d.used_tokens,
-    used_week_tokens:    w.used_tokens,
-    used_month_tokens:   m.used_tokens,
-    remaining_daily_requests:   rem(limits.daily_requests,   d.used_requests),
-    remaining_weekly_requests:  rem(limits.weekly_requests,  w.used_requests),
+    used_today_tokens: d.used_tokens,
+    used_month_tokens: m.used_tokens,
+    remaining_daily_requests: rem(limits.daily_requests, d.used_requests),
     remaining_monthly_requests: rem(limits.monthly_requests, m.used_requests),
   };
 }
 
-/** Pre-check before calling OpenAI. */
 export function assertCanQuery(state: QuotaState): { ok: boolean; reason?: string } {
   const checks: Array<[number | null, number, string]> = [
-    [state.daily_requests,   state.used_today_requests, "Daily request quota reached"],
-    [state.weekly_requests,  state.used_week_requests,  "Weekly request quota reached"],
+    [state.daily_requests, state.used_today_requests, "Daily request quota reached"],
     [state.monthly_requests, state.used_month_requests, "Monthly request quota reached"],
-    [state.daily_tokens,     state.used_today_tokens,   "Daily token quota reached"],
-    [state.weekly_tokens,    state.used_week_tokens,    "Weekly token quota reached"],
-    [state.monthly_tokens,   state.used_month_tokens,   "Monthly token quota reached"],
+    [state.daily_tokens, state.used_today_tokens, "Daily token quota reached"],
+    [state.monthly_tokens, state.used_month_tokens, "Monthly token quota reached"],
   ];
   for (const [lim, used, msg] of checks) {
     if (lim !== null && used >= lim) return { ok: false, reason: msg };
@@ -393,11 +176,10 @@ export function assertCanQuery(state: QuotaState): { ok: boolean; reason?: strin
   return { ok: true };
 }
 
-/** Increment current-period counters by 1 request and the tokens used. */
 export async function incrementUsage(studentId: number, totalTokens: number): Promise<void> {
   const db = getDb();
   const policyEpoch = await currentPolicyEpoch();
-  for (const p of ["daily","weekly","monthly"] as const) {
+  for (const p of ["daily", "monthly"] as const) {
     const start = periodStart(p);
     const { data: existing } = await db
       .from("ai_quota_counters")
@@ -411,7 +193,7 @@ export async function incrementUsage(studentId: number, totalTokens: number): Pr
       await db.from("ai_quota_counters")
         .update({
           used_requests: (existing.used_requests || 0) + 1,
-          used_tokens:   (existing.used_tokens   || 0) + totalTokens,
+          used_tokens: (existing.used_tokens || 0) + totalTokens,
           updated_at: new Date().toISOString(),
         })
         .eq("id", existing.id);
@@ -422,6 +204,101 @@ export async function incrementUsage(studentId: number, totalTokens: number): Pr
         period_type: p,
         period_start: start,
         used_requests: 1,
+        used_tokens: totalTokens,
+      });
+    }
+  }
+}
+
+// ── Teacher usage (pooled per resolved scope — one shared counter for
+// every teacher governed by the same policy row, not per-teacher). ──────
+
+export interface TeacherQuotaState extends QuotaLimits {
+  scope_type: string;
+  scope_id: number | null;
+  used_today_requests: number;
+  used_month_requests: number;
+  used_today_tokens: number;
+  used_month_tokens: number;
+}
+
+export async function loadTeacherQuotaState(scope: AiScope): Promise<TeacherQuotaState> {
+  const db = getDb();
+  const { limits, scope_type, scope_id } = await resolveQuotaRow(scope, "teacher");
+  const policyEpoch = await currentPolicyEpoch();
+  const periods = (["daily", "monthly"] as const).map((p) => ({ p, start: periodStart(p) }));
+  let counterQ = db
+    .from("ai_teacher_quota_counters")
+    .select("period_type, period_start, used_requests, used_tokens")
+    .eq("scope_type", scope_type)
+    .eq("policy_epoch", policyEpoch)
+    .in("period_type", periods.map((x) => x.p))
+    .in("period_start", periods.map((x) => x.start));
+  counterQ = scope_id === null ? counterQ.is("scope_id", null) : counterQ.eq("scope_id", scope_id);
+  const { data } = await counterQ;
+
+  const byKey = new Map<string, { used_requests: number; used_tokens: number }>();
+  for (const r of (data || []) as Array<{ period_type: string; period_start: string; used_requests: number; used_tokens: number }>) {
+    byKey.set(`${r.period_type}:${r.period_start}`, { used_requests: r.used_requests, used_tokens: r.used_tokens });
+  }
+  const get = (p: "daily" | "monthly") => byKey.get(`${p}:${periodStart(p)}`) || { used_requests: 0, used_tokens: 0 };
+  const d = get("daily"), m = get("monthly");
+
+  return {
+    ...limits,
+    scope_type, scope_id,
+    used_today_requests: d.used_requests,
+    used_month_requests: m.used_requests,
+    used_today_tokens: d.used_tokens,
+    used_month_tokens: m.used_tokens,
+  };
+}
+
+export function assertCanQueryTeacher(state: TeacherQuotaState): { ok: boolean; reason?: string } {
+  const checks: Array<[number | null, number, string]> = [
+    [state.daily_requests, state.used_today_requests, "Daily AI usage limit reached for this school"],
+    [state.monthly_requests, state.used_month_requests, "Monthly AI usage limit reached for this school"],
+    [state.daily_tokens, state.used_today_tokens, "Daily AI usage limit reached for this school"],
+    [state.monthly_tokens, state.used_month_tokens, "Monthly AI usage limit reached for this school"],
+  ];
+  for (const [lim, used, msg] of checks) {
+    if (lim !== null && used >= lim) return { ok: false, reason: msg };
+  }
+  return { ok: true };
+}
+
+export async function incrementTeacherUsage(
+  scopeType: string, scopeId: number | null, totalTokens: number, requests = 1,
+): Promise<void> {
+  const db = getDb();
+  const policyEpoch = await currentPolicyEpoch();
+  for (const p of ["daily", "monthly"] as const) {
+    const start = periodStart(p);
+    let q = db
+      .from("ai_teacher_quota_counters")
+      .select("id, used_requests, used_tokens")
+      .eq("scope_type", scopeType)
+      .eq("policy_epoch", policyEpoch)
+      .eq("period_type", p)
+      .eq("period_start", start);
+    q = scopeId === null ? q.is("scope_id", null) : q.eq("scope_id", scopeId);
+    const { data: existing } = await q.maybeSingle();
+    if (existing) {
+      await db.from("ai_teacher_quota_counters")
+        .update({
+          used_requests: (existing.used_requests || 0) + requests,
+          used_tokens: (existing.used_tokens || 0) + totalTokens,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existing.id);
+    } else {
+      await db.from("ai_teacher_quota_counters").insert({
+        scope_type: scopeType,
+        scope_id: scopeId,
+        policy_epoch: policyEpoch,
+        period_type: p,
+        period_start: start,
+        used_requests: requests,
         used_tokens: totalTokens,
       });
     }

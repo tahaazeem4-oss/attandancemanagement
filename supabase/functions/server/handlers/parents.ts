@@ -399,6 +399,116 @@ export async function handleParent(
     }
   }
 
+  // GET /parent/notifications — alerts across every linked child, so a parent
+  // with more than one child can open "School Alerts" without picking one first.
+  if (path === "/parent/notifications" && method === "GET") {
+    try {
+      const user = parentUser;
+      const { data: links } = await db.from("parent_student").select("student_id").eq("parent_id", user.id);
+      const studentIds = [...new Set((links || []).map((l: any) => l.student_id as number))];
+      if (!studentIds.length) return json({ notifications: [] }, 200);
+
+      const { data: students } = await db
+        .from("students")
+        .select("id, first_name, last_name, class_id, section_id, school_id")
+        .in("id", studentIds);
+
+      const byId = new Map<number, any>();
+      const merged = new Map<number, any>();
+      for (const student of students || []) {
+        const s = student as any;
+        byId.set(s.id, s);
+        const { data: notifs } = await db
+          .from("notifications")
+          .select("*")
+          .eq("school_id", s.school_id)
+          .or(
+            `target_type.eq.school,` +
+            `and(target_type.eq.class,class_id.eq.${s.class_id}),` +
+            `and(target_type.eq.section,class_id.eq.${s.class_id},section_id.eq.${s.section_id}),` +
+            `and(target_type.eq.student,student_id.eq.${s.id})`,
+          );
+        for (const n of notifs || []) {
+          const row = n as any;
+          if (!merged.has(row.id)) merged.set(row.id, { ...row, child_ids: [] });
+          merged.get(row.id).child_ids.push(s.id);
+        }
+      }
+
+      const notifIds = [...merged.keys()];
+      const { data: reads } = notifIds.length
+        ? await db.from("notification_reads").select("notification_id, student_id").in("notification_id", notifIds).in("student_id", studentIds)
+        : { data: [] as any[] };
+      const readByNotif: Record<number, Set<number>> = {};
+      for (const r of reads || []) {
+        const row = r as any;
+        if (!readByNotif[row.notification_id]) readByNotif[row.notification_id] = new Set();
+        readByNotif[row.notification_id].add(row.student_id);
+      }
+
+      const notifications = [...merged.values()]
+        .map((n) => ({
+          ...n,
+          child_names: n.child_ids.map((id: number) => {
+            const s = byId.get(id);
+            return s ? `${s.first_name} ${s.last_name}` : null;
+          }).filter(Boolean),
+          // A parent has "read" an alert once they've read it for at least one linked child.
+          is_read: n.child_ids.some((id: number) => readByNotif[n.id]?.has(id)),
+        }))
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      return json({ notifications }, 200);
+    } catch (err) {
+      console.error("[parent/notifications]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
+  // GET /parent/leaves — pending/upcoming leave groups across every linked child.
+  if (path === "/parent/leaves" && method === "GET") {
+    try {
+      const user = parentUser;
+      const { data: links } = await db.from("parent_student").select("student_id").eq("parent_id", user.id);
+      const studentIds = [...new Set((links || []).map((l: any) => l.student_id as number))];
+      if (!studentIds.length) return json({ leaves: [] }, 200);
+
+      const { data: students } = await db.from("students").select("id, first_name, last_name").in("id", studentIds);
+      const nameById = new Map((students || []).map((s: any) => [s.id, `${s.first_name} ${s.last_name}`]));
+
+      const { data: leaves } = await db
+        .from("leave_applications")
+        .select("id, group_id, student_id, date, reason, status, withdrawal_status, applied_at")
+        .in("student_id", studentIds)
+        .order("applied_at", { ascending: false });
+
+      const grouped: Record<string, any> = {};
+      for (const row of leaves || []) {
+        const r = row as any;
+        const gid = `${r.student_id}:${r.group_id || r.id}`;
+        if (!grouped[gid]) {
+          grouped[gid] = {
+            group_id: r.group_id || r.id,
+            student_id: r.student_id,
+            student_name: nameById.get(r.student_id) || null,
+            reason: r.reason,
+            status: r.status,
+            withdrawal_status: r.withdrawal_status,
+            dates: [],
+            applied_at: r.applied_at,
+          };
+        }
+        grouped[gid].dates.push(r.date);
+        const priority: Record<string, number> = { rejected: 0, approved: 1, pending: 2 };
+        if ((priority[r.status] ?? 99) < (priority[grouped[gid].status] ?? 99)) grouped[gid].status = r.status;
+      }
+      return json({ leaves: Object.values(grouped) }, 200);
+    } catch (err) {
+      console.error("[parent/leaves]", err);
+      return json({ message: "Server error" }, 500);
+    }
+  }
+
   // GET /parent/children/:studentId/leaves
   if (path.match(/^\/parent\/children\/\d+\/leaves$/) && method === "GET") {
     try {

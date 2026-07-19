@@ -1,7 +1,18 @@
 // frontend/src/features/aiTutor/screens/AdminAiHierarchyScreen.js
-// Drill-down hierarchy view for AI Tutor feature flag + quota distribution.
-// Walk org → campus → class → section → student. Each level shows what it
-// inherits from its parent and can override per child.
+// Drill-down hierarchy view for AI Tutor access + quota.
+// Walk org → campus → class → section → student (students only — teacher
+// policy stops at campus, since teachers share one pooled limit per school).
+// Each level is either "Inherit" (uses whatever the closest parent with an
+// explicit setting has) or "Custom" (its own enabled flag + limits).
+//
+// For STUDENTS, daily/monthly requests+tokens are a shared pool: the global
+// number is the system-wide total, and it divides down org → campus → class
+// → section → student, pro-rata by active student count. Setting a number
+// on a scope reserves that amount off the top of its parent's pool; leaving
+// it blank means "auto share of whatever's left." Per-message caps
+// (max input/output tokens) are NOT pooled — they're a flat ceiling per
+// question, closest explicit scope wins. Teacher limits are already one
+// shared counter per campus/org (not per-teacher), so they stay flat too.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert,
@@ -10,36 +21,24 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import ScreenIntroCard from '../../../components/ScreenIntroCard';
-import {
-  fetchHierarchy, setFeatureFlag, setFeatureFlagsBulk,
-  setQuotaPolicy, deleteScopeConfig, cascadeFeatureFlag,
-} from '../api/aiTutorApi';
+import { fetchHierarchy, setFeatureFlag, setQuotaPolicy, deleteScopeConfig } from '../api/aiTutorApi';
 import { useAuth } from '../../../context/AuthContext';
 import { C, S } from '../../../config/theme';
 
-const POLICY_FIELDS = [
+const POOLED_FIELDS = [
   { key: 'daily_requests',    label: 'Requests / day' },
-  { key: 'weekly_requests',   label: 'Requests / week' },
   { key: 'monthly_requests',  label: 'Requests / month' },
   { key: 'daily_tokens',      label: 'Tokens / day' },
-  { key: 'weekly_tokens',     label: 'Tokens / week' },
   { key: 'monthly_tokens',    label: 'Tokens / month' },
-  { key: 'max_input_tokens',  label: 'Max input tokens / request' },
-  { key: 'max_output_tokens', label: 'Max output tokens / request' },
 ];
-
-const DISTRIBUTABLE_KEYS = new Set([
-  'daily_requests', 'weekly_requests', 'monthly_requests',
-  'daily_tokens', 'weekly_tokens', 'monthly_tokens',
-]);
+const CAP_FIELDS = [
+  { key: 'max_input_tokens',  label: 'Max input tokens / message' },
+  { key: 'max_output_tokens', label: 'Max output tokens / message' },
+];
+const POLICY_FIELDS = [...POOLED_FIELDS, ...CAP_FIELDS];
+const POOLED_KEYS = new Set(POOLED_FIELDS.map((f) => f.key));
 
 const numericOnly = (v) => v.replace(/[^0-9]/g, '');
-const percentInput = (v) => v.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
-const percentFromBps = (bps) => {
-  if (bps === null || bps === undefined || Number.isNaN(Number(bps))) return '';
-  const pct = Number(bps) / 100;
-  return Number.isInteger(pct) ? String(pct) : String(pct.toFixed(2)).replace(/\.0+$/, '').replace(/(\.\d*[1-9])0+$/, '$1');
-};
 
 const TYPE_LABEL = {
   global: 'Global', organization: 'Org', campus: 'Campus',
@@ -52,24 +51,17 @@ const CHILD_LABEL_PLURAL = {
   class: 'sections',
   section: 'students',
 };
-const CHILD_LABEL_SINGULAR = {
-  root: 'item',
-  organization: 'campus',
-  campus: 'class',
-  class: 'section',
-  section: 'student',
-};
 
 export default function AdminAiHierarchyScreen() {
   const { user } = useAuth();
-  const role = user?.role;
   const navigation = useNavigation();
 
+  const [actorType, setActorType] = useState('student'); // 'student' | 'teacher'
   const [stack, setStack] = useState([{ type: 'root', id: null, name: 'Level 1' }]);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [busyId, setBusyId] = useState(null);     // child currently being toggled
+  const [busyId, setBusyId] = useState(null);
   const [showQuotaEditor, setShowQuotaEditor] = useState(false);
   const [quotaDraft, setQuotaDraft] = useState({});
   const [quotaTarget, setQuotaTarget] = useState(null);
@@ -77,26 +69,24 @@ export default function AdminAiHierarchyScreen() {
   const [filter, setFilter] = useState('');
 
   const current = stack[stack.length - 1];
+  // Teacher policies only go global → organization → campus.
+  const childHasChildren = (childType) => actorType === 'student' || childType !== 'campus';
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const res = await fetchHierarchy(current.type, current.id);
+      const res = await fetchHierarchy(current.type, current.id, actorType);
       setData(res.data || res);
     } catch (e) {
       setError(e?.response?.data?.message || e?.message || 'Failed to load');
     } finally {
       setLoading(false);
     }
-  }, [current.type, current.id]);
+  }, [current.type, current.id, actorType]);
 
   useEffect(() => { load(); }, [load]);
 
-  // Hijack the header back button (and Android hardware back): if we are
-  // deeper than the root of the hierarchy, walk one breadcrumb up instead of
-  // leaving the screen. Only at the top of the stack does it actually
-  // navigate back out of this screen.
   useEffect(() => {
     const unsub = navigation.addListener('beforeRemove', (e) => {
       if (stack.length > 1) {
@@ -107,34 +97,26 @@ export default function AdminAiHierarchyScreen() {
     return unsub;
   }, [navigation, stack.length]);
 
-  const goInto = (child) => {
-    if (!child.has_children) return;
-    setStack([...stack, { type: child.type, id: child.id, name: child.name }]);
-  };
-  const goUp = (index) => {
-    setStack(stack.slice(0, index + 1));
+  const switchActor = (next) => {
+    if (next === actorType) return;
+    setActorType(next);
+    setStack([{ type: 'root', id: null, name: 'Level 1' }]);
   };
 
-  // ── Per-child tri-state toggle ─────────────────────────────────
-  const setChildFlag = async (child, value /* true | false | null */) => {
-    setBusyId(`${child.type}#${child.id}`);
+  const goInto = (child) => {
+    if (!childHasChildren(child.type) || !child.has_children) return;
+    setStack([...stack, { type: child.type, id: child.id, name: child.name }]);
+  };
+  const goUp = (index) => setStack(stack.slice(0, index + 1));
+
+  // ── Enable / disable / inherit for a node ──────────────────────
+  const setNodeFlag = async (targetType, targetId, value /* true | false | null */, busyKey) => {
+    setBusyId(busyKey);
     try {
       if (value === null) {
-        if (child.has_children) {
-          await cascadeFeatureFlag({
-            scope_type: child.type, scope_id: child.id,
-            is_enabled: null, mode: 'inherit', clear_subtree: true,
-          });
-        } else {
-          await deleteScopeConfig(child.type, child.id, 'flag');
-        }
+        await deleteScopeConfig(targetType, targetId, 'flag', actorType);
       } else {
-        // Cascade so any conflicting overrides in this child's subtree are cleared
-        // and everyone below truly inherits the new decision.
-        await cascadeFeatureFlag({
-          scope_type: child.type, scope_id: child.id,
-          is_enabled: value, clear_subtree: true,
-        });
+        await setFeatureFlag({ scope_type: targetType, scope_id: targetId, is_enabled: value });
       }
       await load();
     } catch (e) {
@@ -144,94 +126,22 @@ export default function AdminAiHierarchyScreen() {
     }
   };
 
-  // ── Current node's flag override ───────────────────────────────
-  const setCurrentFlag = async (value) => {
-    if (data?.is_root) return;
-    if (value === null) {
-      Alert.alert(
-        `Set ${current.name} to inherit?`,
-        `This will clear the explicit AI flag on ${current.name} and clear any ON/OFF overrides below it so the whole subtree inherits from the parent above. Per-child quota allocations are kept.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Clear & inherit',
-            style: 'destructive',
-            onPress: async () => {
-              setBusyId('node');
-              try {
-                await cascadeFeatureFlag({
-                  scope_type: current.type, scope_id: current.id,
-                  is_enabled: null, mode: 'inherit', clear_subtree: true,
-                });
-                await load();
-              } catch (e) {
-                Alert.alert('Failed', e?.response?.data?.message || e?.message || 'Could not update');
-              } finally {
-                setBusyId(null);
-              }
-            },
-          },
-        ]
-      );
-      return;
-    }
-    // For ON / OFF we cascade so any conflicting child overrides are cleared
-    // and the subtree truly inherits this node's decision. Otherwise an
-    // earlier OFF on a campus could prevent enabling its org from giving
-    // anyone the token share.
-    const verb = value ? 'enable' : 'disable';
-    Alert.alert(
-      `${value ? 'Enable' : 'Disable'} ${current.name}?`,
-      `This will ${verb} AI Tutor for everyone under ${current.name} and clear any conflicting ON/OFF overrides on classes, sections, and students inside it. Their per-child custom token allocations (if any) are kept.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: value ? 'Enable & cascade' : 'Disable & cascade',
-          style: value ? 'default' : 'destructive',
-          onPress: async () => {
-            setBusyId('node');
-            try {
-              await cascadeFeatureFlag({
-                scope_type: current.type, scope_id: current.id,
-                is_enabled: value, clear_subtree: true,
-              });
-              await load();
-            } catch (e) {
-              Alert.alert('Failed', e?.response?.data?.message || e?.message || 'Could not update');
-            } finally {
-              setBusyId(null);
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  // ── Quota allocation for current node ──────────────────────────
-  const openQuotaEditorFor = (target, effectivePolicy = {}) => {
+  // ── Quota editor ────────────────────────────────────────────────
+  const openQuotaEditorFor = (target) => {
     if (!target) return;
     const own = target?.own_policy || {};
     const draft = {};
     POLICY_FIELDS.forEach((f) => {
       draft[f.key] = own[f.key] !== null && own[f.key] !== undefined ? String(own[f.key]) : '';
-      if (DISTRIBUTABLE_KEYS.has(f.key)) {
-        draft[`${f.key}_mode`] = own[`${f.key}_mode`] || (own[f.key] !== null && own[f.key] !== undefined ? 'fixed' : 'inherit');
-        draft[`${f.key}_percent`] = percentFromBps(own[`${f.key}_percent_bps`]);
-      }
     });
-    setQuotaTarget({ ...target, effective_policy: effectivePolicy || {} });
+    setQuotaTarget(target);
     setQuotaDraft(draft);
     setShowQuotaEditor(true);
   };
 
   const openQuotaEditor = () => {
     if (data?.is_root || !data?.node) return;
-    openQuotaEditorFor(data.node, data.node.effective_policy || {});
-  };
-
-  const openChildQuotaEditor = (child) => {
-    if (!child) return;
-    openQuotaEditorFor(child, child.allocation || {});
+    openQuotaEditorFor(data.node);
   };
 
   const saveQuota = async () => {
@@ -239,39 +149,17 @@ export default function AdminAiHierarchyScreen() {
     try {
       const target = quotaTarget || data?.node;
       if (!target?.type || target?.id === undefined) throw new Error('No quota target selected');
-      const body = { scope_type: target.type, scope_id: target.id };
+      const body = { actor_type: actorType, scope_type: target.type, scope_id: target.id };
       let anySet = false;
       POLICY_FIELDS.forEach((f) => {
-        if (DISTRIBUTABLE_KEYS.has(f.key)) {
-          const mode = quotaDraft[`${f.key}_mode`] || (quotaDraft[f.key] ? 'fixed' : 'inherit');
-          body[`${f.key}_mode`] = mode;
-          if (mode === 'fixed') {
-            const v = quotaDraft[f.key];
-            if (v && v.trim() !== '') {
-              const n = Number(v);
-              if (!Number.isNaN(n)) { body[f.key] = n; anySet = true; }
-            }
-          } else if (mode === 'percent') {
-            const pctRaw = quotaDraft[`${f.key}_percent`];
-            if (pctRaw && pctRaw.trim() !== '') {
-              const pct = Number(pctRaw);
-              if (!Number.isNaN(pct)) {
-                body[`${f.key}_percent_bps`] = Math.round(pct * 100);
-                anySet = true;
-              }
-            }
-          }
-        } else {
-          const v = quotaDraft[f.key];
-          if (v && v.trim() !== '') {
-            const n = Number(v);
-            if (!Number.isNaN(n)) { body[f.key] = n; anySet = true; }
-          }
+        const v = quotaDraft[f.key];
+        if (v && v.trim() !== '') {
+          const n = Number(v);
+          if (!Number.isNaN(n)) { body[f.key] = n; anySet = true; }
         }
       });
       if (!anySet) {
-        // Treat as "clear all" → inherit from parent
-        await deleteScopeConfig(target.type, target.id, 'policy');
+        await deleteScopeConfig(target.type, target.id, 'policy', actorType);
       } else {
         await setQuotaPolicy(body);
       }
@@ -279,26 +167,11 @@ export default function AdminAiHierarchyScreen() {
       setQuotaTarget(null);
       await load();
     } catch (e) {
-      const data = e?.response?.data;
-      if (Array.isArray(data?.violations) && data.violations.length) {
-        const fieldLabel = (k) => POLICY_FIELDS.find((p) => p.key === k)?.label || k;
-        const fmt = (n) => (n === null || n === undefined ? '—' : Number(n).toLocaleString());
-        const lines = data.violations.map((v) => {
-          if (v.parent_pool === null) {
-            return `• ${fieldLabel(v.field)}: no limit set at any higher level. Set it on a parent first, then split it down here.`;
-          }
-          if (v.max_allowed === null) {
-            return `• ${fieldLabel(v.field)}: cannot exceed parent cap (${fmt(v.parent_pool)}).`;
-          }
-          return `• ${fieldLabel(v.field)}: only ${fmt(v.max_allowed)} available (parent has ${fmt(v.parent_pool)}, other siblings already use ${fmt(v.sibling_sum)}).`;
-        }).join('\n');
-        Alert.alert(
-          'Not enough quota available',
-          `You're trying to allocate more than ${data?.parent?.name || 'the parent'} can give.\n\n${lines}\n\nReduce the values or free up quota by lowering a sibling's allocation.`
-        );
-      } else {
-        Alert.alert("Couldn't save", data?.message || e?.message || 'Please try again.');
-      }
+      const violations = e?.response?.data?.violations;
+      const msg = Array.isArray(violations) && violations.length
+        ? violations.join('\n\n')
+        : e?.response?.data?.message || e?.message || 'Please try again.';
+      Alert.alert("Couldn't save", msg);
     } finally {
       setSavingQuota(false);
     }
@@ -307,45 +180,16 @@ export default function AdminAiHierarchyScreen() {
   const clearQuota = async () => {
     const target = quotaTarget || data?.node;
     if (!target?.type || target?.id === undefined) return;
-    Alert.alert(
-      'Clear allocation?',
-      `This will remove ${target.name}'s own quota allocation. It will inherit from its parent again.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Clear',
-          style: 'destructive',
-          onPress: async () => {
-            setSavingQuota(true);
-            try {
-              await deleteScopeConfig(target.type, target.id, 'policy');
-              setShowQuotaEditor(false);
-              setQuotaTarget(null);
-              await load();
-            } catch (e) {
-              Alert.alert('Failed', e?.response?.data?.message || e?.message || 'Could not clear');
-            } finally {
-              setSavingQuota(false);
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  // ── Bulk on/off for all listed children ────────────────────────
-  const bulkSetChildren = async (value) => {
-    const visibleChildren = (data?.children || []).filter((c) => !filter || c.name.toLowerCase().includes(filter.toLowerCase()));
-    if (!visibleChildren.length) return;
-    const targets = visibleChildren.map((c) => ({ scope_type: c.type, scope_id: c.id }));
-    setBusyId('bulk');
+    setSavingQuota(true);
     try {
-      await setFeatureFlagsBulk({ targets, is_enabled: value });
+      await deleteScopeConfig(target.type, target.id, 'policy', actorType);
+      setShowQuotaEditor(false);
+      setQuotaTarget(null);
       await load();
     } catch (e) {
-      Alert.alert('Failed', e?.response?.data?.message || e?.message || 'Bulk update failed');
+      Alert.alert('Failed', e?.response?.data?.message || e?.message || 'Could not clear');
     } finally {
-      setBusyId(null);
+      setSavingQuota(false);
     }
   };
 
@@ -359,9 +203,6 @@ export default function AdminAiHierarchyScreen() {
   const node = data?.node;
   const effFlag = node?.effective_flag;
   const effPolicy = node?.effective_policy || {};
-  const contextEffFlag = data?.context_effective_flag || effFlag;
-  const modalTarget = quotaTarget || node;
-  const modalEffPolicy = quotaTarget?.effective_policy || effPolicy;
 
   return (
     <SafeAreaView style={styles.root} edges={['left', 'right', 'bottom']}>
@@ -371,125 +212,93 @@ export default function AdminAiHierarchyScreen() {
       >
         <ScreenIntroCard
           title="AI Tutor Policies"
-          description="Manage inheritance, overrides, and quota distribution across organizations, campuses, classes, sections, and students from one hierarchy."
+          description={actorType === 'student'
+            ? "Requests & tokens are one shared pool that splits fairly across active students, top-down from the global total. Set a number to reserve a fixed share; leave it blank to auto-split whatever's left. Per-message caps aren't pooled."
+            : "Every level is either Inherit (uses the closest parent's setting) or Custom (its own on/off + limits)."}
           icon="git-merge-outline"
           tone="violet"
         />
 
+        <View style={styles.actorSwitch}>
+          <TouchableOpacity
+            style={[styles.actorTab, actorType === 'student' && styles.actorTabActive]}
+            onPress={() => switchActor('student')}
+          >
+            <Text style={[styles.actorTabText, actorType === 'student' && styles.actorTabTextActive]}>Students</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actorTab, actorType === 'teacher' && styles.actorTabActive]}
+            onPress={() => switchActor('teacher')}
+          >
+            <Text style={[styles.actorTabText, actorType === 'teacher' && styles.actorTabTextActive]}>Teachers</Text>
+          </TouchableOpacity>
+        </View>
+        {actorType === 'teacher' && (
+          <Text style={styles.actorNote}>
+            Teacher limits are shared by every teacher at that level (e.g. all uploads at a campus count against one pool) — not per-teacher.
+          </Text>
+        )}
+
+        {/* Breadcrumbs */}
+        {stack.length > 1 && (
+          <View style={styles.breadcrumbRow}>
+            {stack.map((s, i) => (
+              <TouchableOpacity key={`${s.type}#${s.id}`} onPress={() => goUp(i)} style={styles.crumb}>
+                <Text style={[styles.crumbText, i === stack.length - 1 && styles.crumbTextActive]}>
+                  {s.name}{i < stack.length - 1 ? '  ›' : ''}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
         {!!error && <Text style={styles.errorBanner}>{error}</Text>}
 
-        {/* Current node card (skip for root) */}
         {data && !data.is_root && node && (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>
-              {TYPE_LABEL[node.type]}: {node.name}
-            </Text>
-            {node.student_count_total !== undefined && (
-              <Text style={styles.subtle}>
-                {node.student_count?.toLocaleString?.() ?? 0} of {node.student_count_total?.toLocaleString?.() ?? 0} students are AI-enabled
-                {node.student_count !== node.student_count_total ? ' — only enabled students share the pool' : ''}
-              </Text>
+            <Text style={styles.cardTitle}>{TYPE_LABEL[node.type]}: {node.name}</Text>
+            {actorType === 'student' && typeof node.student_count === 'number' && (
+              <Text style={styles.subtle}>{node.student_count.toLocaleString()} student{node.student_count === 1 ? '' : 's'} here</Text>
             )}
 
-            {/* AI ON/OFF status + tri-state */}
             <View style={styles.statusRow}>
               <View style={[
                 styles.statusPill,
                 effFlag?.is_enabled === true && styles.statusOn,
                 effFlag?.is_enabled === false && styles.statusOff,
               ]}>
-                <Text style={styles.statusPillText}>
-                  AI is currently {effFlag?.is_enabled ? 'ON' : 'OFF'}
-                </Text>
+                <Text style={styles.statusPillText}>AI is currently {effFlag?.is_enabled ? 'ON' : 'OFF'}</Text>
               </View>
               <Text style={styles.subtle}>
-                {node.own_flag === null
-                  ? `Inherited from ${effFlag?.from_name || 'global default'}`
-                  : 'Set directly on this level'}
+                {node.own_flag === null ? `Inherited from ${effFlag?.from_name || 'global default'}` : 'Set directly on this level'}
               </Text>
             </View>
 
             <View style={styles.triRow}>
-              <TriButton
-                label="Inherit"
-                active={node.own_flag === null}
-                onPress={() => setCurrentFlag(null)}
-                busy={busyId === 'node'}
-              />
-              <TriButton
-                label="ON (cascade)"
-                active={node.own_flag?.is_enabled === true}
-                onPress={() => setCurrentFlag(true)}
-                busy={busyId === 'node'}
-                color="#16a34a"
-              />
-              <TriButton
-                label="OFF (cascade)"
-                active={node.own_flag?.is_enabled === false}
-                onPress={() => setCurrentFlag(false)}
-                busy={busyId === 'node'}
-                color="#dc2626"
-              />
+              <TriButton label="Inherit" active={node.own_flag === null} onPress={() => setNodeFlag(node.type, node.id, null, 'node')} busy={busyId === 'node'} />
+              <TriButton label="ON" active={node.own_flag?.is_enabled === true} onPress={() => setNodeFlag(node.type, node.id, true, 'node')} busy={busyId === 'node'} color="#16a34a" />
+              <TriButton label="OFF" active={node.own_flag?.is_enabled === false} onPress={() => setNodeFlag(node.type, node.id, false, 'node')} busy={busyId === 'node'} color="#dc2626" />
             </View>
-            <Text style={styles.subtleSmall}>
-              ON/OFF clears conflicting overrides below so the whole subtree truly inherits this decision.
-            </Text>
 
-            {/* Effective quota summary */}
-            <Text style={styles.sectionLabel}>Current limits in effect</Text>
+            <Text style={styles.sectionLabel}>{actorType === 'student' ? 'Shared pool (this node\'s share)' : 'Current limits in effect'}</Text>
             <View style={styles.quotaGrid}>
-              {POLICY_FIELDS.map((f) => {
-                const eff = effPolicy[f.key] || { value: null, from_name: 'no limit', source: 'none' };
-                const isOwn = eff.source === 'manual';
-                const isAuto = eff.source === 'auto';
-                const sb = eff.share_basis;
-                return (
-                  <View key={f.key} style={styles.quotaCell}>
-                    <Text style={styles.quotaLabel}>{f.label}</Text>
-                    <Text style={styles.quotaValue}>
-                      {eff.value === null ? 'No limit' : eff.value.toLocaleString()}
-                    </Text>
-                    <Text style={isOwn ? styles.quotaFromOwn : styles.quotaFromInherited}>
-                      {isOwn
-                        ? 'Set here (manual)'
-                        : isAuto && sb
-                          ? `share of ${sb.parent_pool?.toLocaleString?.() ?? '—'} pool (${sb.my_students}/${sb.non_manual_students} students)`
-                          : `from ${eff.from_name}`}
-                    </Text>
-                  </View>
-                );
+              {POOLED_FIELDS.map((f) => {
+                const eff = effPolicy[f.key] || { value: null, from_name: 'unlimited' };
+                return <QuotaCell key={f.key} field={f} eff={eff} pooled={actorType === 'student'} />;
               })}
             </View>
 
-            {/* Distribution preview — how the pool will split among children */}
-            {data?.distribution && Object.values(data.distribution).some((d) => d.parent_pool !== null) && (data?.children?.length || 0) > 0 && (
-              <View style={styles.poolBox}>
-                <Text style={styles.poolTitle}>Pool distribution preview</Text>
-                <Text style={styles.poolHelp}>
-                  Each {CHILD_LABEL_SINGULAR[current.type] || 'child'} gets a share of this node's pool, sized by its student count.
-                  Manual overrides come off the top; the remainder is split pro-rata.
-                </Text>
-                {['daily_tokens','monthly_tokens','daily_requests'].map((F) => {
-                  const d = data.distribution[F];
-                  if (!d || d.parent_pool === null) return null;
-                  return (
-                    <View key={F} style={styles.poolRow}>
-                      <Text style={styles.poolRowLabel}>{POLICY_FIELDS.find((p) => p.key === F)?.label}</Text>
-                      <Text style={styles.poolRowValue}>
-                        pool {d.parent_pool.toLocaleString()} • manual {d.manual_sum.toLocaleString()} • free {d.remaining?.toLocaleString?.() ?? '—'}
-                        {d.per_student !== null ? ` → ~${d.per_student.toLocaleString()} per student` : ''}
-                      </Text>
-                    </View>
-                  );
-                })}
-              </View>
-            )}
+            <Text style={[styles.sectionLabel, { marginTop: 10 }]}>Per-message caps (not pooled)</Text>
+            <View style={styles.quotaGrid}>
+              {CAP_FIELDS.map((f) => {
+                const eff = effPolicy[f.key] || { value: null, from_name: 'unlimited' };
+                return <QuotaCell key={f.key} field={f} eff={eff} pooled={false} />;
+              })}
+            </View>
 
             <View style={styles.btnRow}>
               <TouchableOpacity style={styles.primaryBtn} onPress={openQuotaEditor}>
-                <Text style={styles.primaryBtnText}>
-                  {node.own_policy ? 'Edit allocation' : 'Set custom allocation'}
-                </Text>
+                <Text style={styles.primaryBtnText}>{node.own_policy ? 'Edit limits' : 'Set custom limits'}</Text>
               </TouchableOpacity>
               {node.own_policy && (
                 <TouchableOpacity style={styles.dangerBtn} onPress={clearQuota}>
@@ -501,134 +310,70 @@ export default function AdminAiHierarchyScreen() {
         )}
 
         {/* Children list */}
-        <View style={styles.card}>
-          <View style={styles.childrenHeader}>
-            <Text style={styles.cardTitle}>
-              {CHILD_LABEL_PLURAL[current.type] || 'children'} ({filteredChildren.length})
-            </Text>
-            {filteredChildren.length > 0 && !data?.is_root && (
-              <View style={styles.bulkRow}>
-                <TouchableOpacity
-                  style={[styles.bulkBtn, styles.bulkOn]}
-                  onPress={() => bulkSetChildren(true)}
-                  disabled={busyId === 'bulk'}
-                >
-                  <Text style={styles.bulkBtnText}>All ON</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.bulkBtn, styles.bulkOff]}
-                  onPress={() => bulkSetChildren(false)}
-                  disabled={busyId === 'bulk'}
-                >
-                  <Text style={styles.bulkBtnText}>All OFF</Text>
-                </TouchableOpacity>
-              </View>
+        {(data?.is_root || childHasChildren(current.type)) && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>{CHILD_LABEL_PLURAL[current.type] || 'children'} ({filteredChildren.length})</Text>
+
+            {(data?.children || []).length > 8 && (
+              <TextInput style={styles.search} placeholder="Filter by name…" value={filter} onChangeText={setFilter} />
             )}
+
+            {loading && !data && <ActivityIndicator style={{ marginVertical: 24 }} />}
+
+            {!loading && filteredChildren.length === 0 && (
+              <Text style={styles.empty}>
+                {data?.is_root ? 'Nothing to manage at Level 1.' : `No ${CHILD_LABEL_PLURAL[current.type] || 'children'} under this node.`}
+              </Text>
+            )}
+
+            {filteredChildren.map((child) => (
+              <ChildRow
+                key={`${child.type}#${child.id}`}
+                child={child}
+                canDrillIn={childHasChildren(child.type)}
+                busy={busyId === `${child.type}#${child.id}`}
+                onTriState={(v) => setNodeFlag(child.type, child.id, v, `${child.type}#${child.id}`)}
+                onEditQuota={() => openQuotaEditorFor(child)}
+                onDrillIn={() => goInto(child)}
+              />
+            ))}
           </View>
+        )}
 
-          {(data?.children || []).length > 8 && (
-            <TextInput
-              style={styles.search}
-              placeholder="Filter by name…"
-              value={filter}
-              onChangeText={setFilter}
-            />
-          )}
-
-          {loading && !data && (
-            <ActivityIndicator style={{ marginVertical: 24 }} />
-          )}
-
-          {!loading && filteredChildren.length === 0 && (
-            <Text style={styles.empty}>
-              {data?.is_root
-                ? 'Nothing to manage at Level 1.'
-                : `No ${CHILD_LABEL_PLURAL[current.type] || 'children'} under this node.`}
-            </Text>
-          )}
-
-          {filteredChildren.map((child) => (
-            <ChildRow
-              key={`${child.type}#${child.id}`}
-              child={child}
-              parentEffFlag={contextEffFlag?.is_enabled ?? null}
-              currentNodeName={node?.name || 'global default'}
-              busy={busyId === `${child.type}#${child.id}`}
-              onTriState={(v) => setChildFlag(child, v)}
-              onEditQuota={() => openChildQuotaEditor(child)}
-              onDrillIn={() => goInto(child)}
-            />
-          ))}
-        </View>
-
-        {/* Footer link to system-defaults editor — super_admin only */}
         {user?.role === 'super_admin' && (
-          <TouchableOpacity
-            style={styles.advancedLink}
-            onPress={() => navigation.navigate('AdminAiPolicyAdvanced')}
-          >
+          <TouchableOpacity style={styles.advancedLink} onPress={() => navigation.navigate('AdminAiPolicyAdvanced')}>
             <Text style={styles.advancedLinkText}>Edit system-wide defaults →</Text>
           </TouchableOpacity>
         )}
       </ScrollView>
 
-      {/* Quota editor modal-ish overlay */}
-      {showQuotaEditor && (
+      {showQuotaEditor && (() => {
+        const modalTarget = quotaTarget || node;
+        const modalEffPolicy = modalTarget?.effective_policy || effPolicy;
+        return (
         <View style={styles.modalBackdrop} pointerEvents="auto">
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>
-              Allocation for {modalTarget?.name}
-            </Text>
+            <Text style={styles.modalTitle}>Limits for {modalTarget?.name}</Text>
             <Text style={styles.modalHelp}>
-              Use inherit for auto pro-rata distribution, fixed for a hard reserved amount,
-              or percent to scale with the parent pool. Request limits and token pools support
-              all three modes; per-request caps stay fixed only.
+              {actorType === 'student'
+                ? 'Pooled fields: leave blank to auto-share the parent pool by active student count, or set a number to reserve that exact amount off the top. Per-message caps: leave blank for unlimited, or set a flat ceiling.'
+                : 'Leave a field blank for unlimited, or set a fixed number for this level.'}
             </Text>
             <ScrollView style={{ maxHeight: 380 }}>
               {POLICY_FIELDS.map((f) => {
                 const eff = modalEffPolicy[f.key];
-                const mode = quotaDraft[`${f.key}_mode`] || (DISTRIBUTABLE_KEYS.has(f.key) ? 'inherit' : 'fixed');
-                const placeholder = eff?.value === null || eff?.value === undefined
-                  ? 'No limit'
-                  : `${eff.value} (from ${eff.from_name})`;
+                const placeholder = !eff || eff.value === null ? 'Unlimited' : `${eff.value} (${actorType === 'student' && POOLED_KEYS.has(f.key) && eff.source !== 'manual' ? 'auto share' : 'from'} ${eff.from_name})`;
                 return (
                   <View key={f.key} style={styles.modalField}>
                     <Text style={styles.modalFieldLabel}>{f.label}</Text>
-                    {DISTRIBUTABLE_KEYS.has(f.key) && (
-                      <View style={styles.modeRow}>
-                        {['inherit', 'fixed', 'percent'].map((option) => (
-                          <TouchableOpacity
-                            key={option}
-                            style={[styles.modeChip, mode === option && styles.modeChipActive]}
-                            onPress={() => setQuotaDraft({ ...quotaDraft, [`${f.key}_mode`]: option })}
-                          >
-                            <Text style={[styles.modeChipText, mode === option && styles.modeChipTextActive]}>
-                              {option}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    )}
-                    {(!DISTRIBUTABLE_KEYS.has(f.key) || mode === 'fixed') && (
-                      <TextInput
-                        style={styles.modalInput}
-                        keyboardType="numeric"
-                        placeholder={placeholder}
-                        placeholderTextColor="#9ca3af"
-                        value={quotaDraft[f.key] ?? ''}
-                        onChangeText={(v) => setQuotaDraft({ ...quotaDraft, [f.key]: numericOnly(v) })}
-                      />
-                    )}
-                    {DISTRIBUTABLE_KEYS.has(f.key) && mode === 'percent' && (
-                      <TextInput
-                        style={styles.modalInput}
-                        keyboardType="decimal-pad"
-                        placeholder="Percent of parent pool"
-                        placeholderTextColor="#9ca3af"
-                        value={quotaDraft[`${f.key}_percent`] ?? ''}
-                        onChangeText={(v) => setQuotaDraft({ ...quotaDraft, [`${f.key}_percent`]: percentInput(v) })}
-                      />
-                    )}
+                    <TextInput
+                      style={styles.modalInput}
+                      keyboardType="numeric"
+                      placeholder={placeholder}
+                      placeholderTextColor="#9ca3af"
+                      value={quotaDraft[f.key] ?? ''}
+                      onChangeText={(v) => setQuotaDraft({ ...quotaDraft, [f.key]: numericOnly(v) })}
+                    />
                   </View>
                 );
               })}
@@ -636,39 +381,47 @@ export default function AdminAiHierarchyScreen() {
             <View style={styles.modalBtnRow}>
               <TouchableOpacity
                 style={[styles.modalBtn, styles.modalBtnGhost]}
-                onPress={() => {
-                  setShowQuotaEditor(false);
-                  setQuotaTarget(null);
-                }}
+                onPress={() => { setShowQuotaEditor(false); setQuotaTarget(null); }}
                 disabled={savingQuota}
               >
                 <Text style={styles.modalBtnGhostText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnPrimary]}
-                onPress={saveQuota}
-                disabled={savingQuota}
-              >
-                {savingQuota
-                  ? <ActivityIndicator color="#fff" />
-                  : <Text style={styles.modalBtnPrimaryText}>Save</Text>}
+              <TouchableOpacity style={[styles.modalBtn, styles.modalBtnPrimary]} onPress={saveQuota} disabled={savingQuota}>
+                {savingQuota ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalBtnPrimaryText}>Save</Text>}
               </TouchableOpacity>
             </View>
           </View>
         </View>
-      )}
+        );
+      })()}
     </SafeAreaView>
   );
 }
 
 // ── Helpers ──────────────────────────────────────────────────
+function QuotaCell({ field, eff, pooled }) {
+  const sb = eff.share_basis;
+  return (
+    <View style={styles.quotaCell}>
+      <Text style={styles.quotaLabel}>{field.label}</Text>
+      <Text style={styles.quotaValue}>{eff.value === null ? 'Unlimited' : eff.value.toLocaleString()}</Text>
+      {eff.is_override ? (
+        <Text style={styles.quotaFromOwn}>Reserved here</Text>
+      ) : pooled && sb ? (
+        <Text style={styles.quotaFromInherited}>
+          auto share: {sb.my_students}/{sb.non_manual_students} active students of {sb.parent_pool?.toLocaleString?.() ?? '—'} from {eff.from_name}
+        </Text>
+      ) : (
+        <Text style={styles.quotaFromInherited}>from {eff.from_name}</Text>
+      )}
+    </View>
+  );
+}
+
 function TriButton({ label, active, onPress, busy, color }) {
   return (
     <TouchableOpacity
-      style={[
-        styles.triBtn,
-        active && { backgroundColor: color || '#2563eb', borderColor: color || '#2563eb' },
-      ]}
+      style={[styles.triBtn, active && { backgroundColor: color || '#2563eb', borderColor: color || '#2563eb' }]}
       onPress={onPress}
       disabled={busy}
     >
@@ -679,86 +432,39 @@ function TriButton({ label, active, onPress, busy, color }) {
   );
 }
 
-function ChildRow({ child, parentEffFlag, currentNodeName, busy, onTriState, onEditQuota, onDrillIn }) {
-  // Determine effective for this child: own_flag if set else inherit parentEffFlag.
+function ChildRow({ child, canDrillIn, busy, onTriState, onEditQuota, onDrillIn }) {
   const ownFlag = child.own_flag;
   const isOwn = ownFlag !== null;
-  const effective = isOwn ? ownFlag.is_enabled : parentEffFlag;
+  const isCustomQuota = !!child.own_policy;
+  const canGoIn = canDrillIn && child.has_children;
 
-  // Use server-computed allocation. Pick a representative distributable field
-  // (monthly_tokens; fall back to daily_tokens) for the summary line.
-  const alloc = child.allocation || {};
-  const pick = alloc.monthly_tokens?.value !== null && alloc.monthly_tokens?.value !== undefined
-    ? { key: 'monthly_tokens', label: 'tok/mo', data: alloc.monthly_tokens }
-    : alloc.daily_tokens?.value !== null && alloc.daily_tokens?.value !== undefined
-      ? { key: 'daily_tokens', label: 'tok/day', data: alloc.daily_tokens }
-      : null;
-
-  let allocLine = null;
-  if (pick && pick.data) {
-    const v = pick.data.value;
-    const src = pick.data.source;
-    if (src === 'manual') {
-      allocLine = `MANUAL ${Number(v).toLocaleString()} ${pick.label}`;
-    } else if (src === 'auto') {
-      const sb = pick.data.share_basis;
-      allocLine = sb
-        ? `auto ${Number(v).toLocaleString()} ${pick.label}  •  ${sb.my_students}/${sb.non_manual_students} students share ${sb.remaining?.toLocaleString?.() ?? '—'}`
-        : `auto ${Number(v).toLocaleString()} ${pick.label}`;
-    } else if (src === 'none' || v === null) {
-      allocLine = `no limit (${pick.label})`;
-    }
-  }
-
-  const studentLine = child.has_children
-    ? (child.student_count_total !== undefined && child.student_count !== child.student_count_total
-        ? `${child.student_count?.toLocaleString?.() ?? '0'} / ${child.student_count_total?.toLocaleString?.() ?? '0'} students AI-enabled`
-        : `${child.student_count?.toLocaleString?.() ?? '0'} students`)
+  const monthlyTokens = child.effective_policy?.monthly_tokens;
+  const shareLine = monthlyTokens
+    ? (monthlyTokens.value === null
+        ? null
+        : `${monthlyTokens.is_override ? 'Reserved' : 'Auto share'}: ${monthlyTokens.value.toLocaleString()} tok/mo`)
     : null;
 
   return (
     <View style={styles.childRow}>
-      <TouchableOpacity style={styles.childMain} onPress={onDrillIn} disabled={!child.has_children}>
+      <TouchableOpacity style={styles.childMain} onPress={onDrillIn} disabled={!canGoIn}>
         <View style={styles.childNameRow}>
           <Text style={styles.childName} numberOfLines={1}>{child.name}</Text>
-          <View style={[styles.dot, effective ? styles.dotOn : styles.dotOff]} />
-          <Text style={styles.childStatusText}>
-            {effective ? 'ON' : 'OFF'}{isOwn ? '' : ' (inh)'}
-          </Text>
+          <View style={[styles.dot, (isOwn ? ownFlag.is_enabled : true) ? styles.dotOn : styles.dotOff]} />
+          <Text style={styles.childStatusText}>{isOwn ? (ownFlag.is_enabled ? 'ON' : 'OFF') : 'inherit'}</Text>
         </View>
-        {studentLine && <Text style={styles.childMetaMuted}>{studentLine}</Text>}
-        {allocLine && (
-          <Text style={pick?.data?.source === 'manual' ? styles.childMetaManual : styles.childMeta}>
-            {allocLine}
-          </Text>
-        )}
+        {!!child.student_count && <Text style={styles.childMetaMuted}>{child.student_count.toLocaleString()} student{child.student_count === 1 ? '' : 's'}</Text>}
+        {!!shareLine && <Text style={isCustomQuota ? styles.childMetaManual : styles.childMetaMuted}>{shareLine}</Text>}
       </TouchableOpacity>
 
       <View style={styles.childActions}>
         <TouchableOpacity style={styles.quotaBtn} onPress={onEditQuota}>
-          <Text style={styles.quotaBtnText}>Quota</Text>
+          <Text style={styles.quotaBtnText}>Limits</Text>
         </TouchableOpacity>
-        <SmallTri
-          label="Inh"
-          active={!isOwn}
-          onPress={() => onTriState(null)}
-          busy={busy}
-        />
-        <SmallTri
-          label="ON"
-          active={ownFlag?.is_enabled === true}
-          onPress={() => onTriState(true)}
-          busy={busy}
-          color="#16a34a"
-        />
-        <SmallTri
-          label="OFF"
-          active={ownFlag?.is_enabled === false}
-          onPress={() => onTriState(false)}
-          busy={busy}
-          color="#dc2626"
-        />
-        {child.has_children && (
+        <SmallTri label="Inh" active={!isOwn} onPress={() => onTriState(null)} busy={busy} />
+        <SmallTri label="ON" active={ownFlag?.is_enabled === true} onPress={() => onTriState(true)} busy={busy} color="#16a34a" />
+        <SmallTri label="OFF" active={ownFlag?.is_enabled === false} onPress={() => onTriState(false)} busy={busy} color="#dc2626" />
+        {canGoIn && (
           <TouchableOpacity style={styles.drillBtn} onPress={onDrillIn}>
             <Text style={styles.drillBtnText}>›</Text>
           </TouchableOpacity>
@@ -771,10 +477,7 @@ function ChildRow({ child, parentEffFlag, currentNodeName, busy, onTriState, onE
 function SmallTri({ label, active, onPress, busy, color }) {
   return (
     <TouchableOpacity
-      style={[
-        styles.smallTri,
-        active && { backgroundColor: color || '#2563eb', borderColor: color || '#2563eb' },
-      ]}
+      style={[styles.smallTri, active && { backgroundColor: color || '#2563eb', borderColor: color || '#2563eb' }]}
       onPress={onPress}
       disabled={busy}
     >
@@ -789,6 +492,18 @@ const styles = StyleSheet.create({
 
   errorBanner: { backgroundColor: '#fee2e2', color: '#991b1b', padding: 10, borderRadius: 10, marginBottom: 8, marginHorizontal: 16 },
 
+  actorSwitch: { flexDirection: 'row', marginHorizontal: 16, marginBottom: 6, backgroundColor: '#eef2ff', borderRadius: 12, padding: 4, gap: 4 },
+  actorTab: { flex: 1, paddingVertical: 8, borderRadius: 9, alignItems: 'center' },
+  actorTabActive: { backgroundColor: '#fff', elevation: 1, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 3 },
+  actorTabText: { fontSize: 13, fontWeight: '700', color: '#6366f1' },
+  actorTabTextActive: { color: '#1e3a8a' },
+  actorNote: { fontSize: 11, color: C.textMed, fontStyle: 'italic', marginHorizontal: 16, marginBottom: 10, lineHeight: 16 },
+
+  breadcrumbRow: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: 16, marginBottom: 8 },
+  crumb: { marginRight: 2 },
+  crumbText: { fontSize: 12, color: C.textLight },
+  crumbTextActive: { color: C.primary, fontWeight: '700' },
+
   card: { ...S.card, padding: 16, marginHorizontal: 16, marginBottom: 14, borderWidth: 1, borderColor: C.border },
   cardTitle: { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 8 },
 
@@ -798,9 +513,8 @@ const styles = StyleSheet.create({
   statusOff: { backgroundColor: '#fee2e2' },
   statusPillText: { fontSize: 12, fontWeight: '700', color: '#111827' },
   subtle: { fontSize: 12, color: C.textMed, lineHeight: 18 },
-  subtleSmall: { fontSize: 11, color: C.textLight, marginTop: -4, marginBottom: 10, fontStyle: 'italic', lineHeight: 16 },
 
-  triRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  triRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
   triBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: C.border, alignItems: 'center', backgroundColor: '#fff' },
   triBtnText: { fontSize: 13, fontWeight: '600', color: '#374151' },
   triBtnTextActive: { color: '#fff' },
@@ -812,26 +526,13 @@ const styles = StyleSheet.create({
   quotaValue: { fontSize: 15, fontWeight: '700', color: C.textDark },
   quotaFromOwn: { fontSize: 10, color: '#2563eb', fontWeight: '600' },
   quotaFromInherited: { fontSize: 10, color: C.textLight, fontStyle: 'italic' },
-
-  poolBox: { backgroundColor: '#eff6ff', borderColor: '#bfdbfe', borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 4, marginBottom: 10 },
-  poolTitle: { fontSize: 12, fontWeight: '700', color: '#1d4ed8', marginBottom: 4 },
-  poolHelp: { fontSize: 11, color: '#1e40af', marginBottom: 6, lineHeight: 17 },
-  poolRow: { marginBottom: 4 },
-  poolRowLabel: { fontSize: 11, fontWeight: '700', color: '#1e3a8a' },
-  poolRowValue: { fontSize: 11, color: '#1e3a8a', lineHeight: 17 },
+  perStudentNote: { fontSize: 11, color: C.textMed, lineHeight: 16, marginTop: 6, fontStyle: 'italic' },
 
   btnRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
   primaryBtn: { flex: 1, backgroundColor: '#2563eb', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
   primaryBtnText: { color: '#fff', fontWeight: '700' },
   dangerBtn: { flex: 1, backgroundColor: '#fff', borderWidth: 1, borderColor: '#fca5a5', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
   dangerBtnText: { color: '#b91c1c', fontWeight: '700' },
-
-  childrenHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 },
-  bulkRow: { flexDirection: 'row', gap: 6 },
-  bulkBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
-  bulkOn: { backgroundColor: '#dcfce7' },
-  bulkOff: { backgroundColor: '#fee2e2' },
-  bulkBtnText: { fontSize: 12, fontWeight: '700', color: '#111827' },
 
   search: { ...S.input, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 8, backgroundColor: '#fff' },
   empty: { padding: 16, color: C.textMed, textAlign: 'center', fontSize: 12 },
@@ -844,9 +545,8 @@ const styles = StyleSheet.create({
   dotOn: { backgroundColor: '#16a34a' },
   dotOff: { backgroundColor: '#dc2626' },
   childStatusText: { fontSize: 11, color: C.textMed },
-  childMeta: { fontSize: 11, color: '#2563eb', marginTop: 2, lineHeight: 17 },
   childMetaManual: { fontSize: 11, color: '#b45309', marginTop: 2, fontWeight: '700' },
-  childMetaMuted: { fontSize: 11, color: C.textLight, marginTop: 2, fontStyle: 'italic', lineHeight: 17 },
+  childMetaMuted: { fontSize: 11, color: C.textLight, marginTop: 2, fontStyle: 'italic' },
 
   childActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   quotaBtn: { paddingHorizontal: 8, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: '#bfdbfe', backgroundColor: '#eff6ff', minWidth: 48, alignItems: 'center' },
@@ -860,7 +560,6 @@ const styles = StyleSheet.create({
   advancedLink: { paddingTop: 8, paddingBottom: 10, alignItems: 'center' },
   advancedLinkText: { color: C.primary, fontSize: 12, textDecorationLine: 'underline' },
 
-  // modal
   modalBackdrop: {
     position: 'absolute', left: 0, right: 0, top: 0, bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', alignItems: 'center', padding: 12,
@@ -870,11 +569,6 @@ const styles = StyleSheet.create({
   modalHelp: { fontSize: 12, color: C.textMed, marginBottom: 10, lineHeight: 18 },
   modalField: { marginBottom: 8 },
   modalFieldLabel: { fontSize: 12, color: C.textMed, marginBottom: 4, fontWeight: '600' },
-  modeRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
-  modeChip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: '#e5e7eb' },
-  modeChipActive: { backgroundColor: '#dbeafe' },
-  modeChipText: { color: '#475569', fontSize: 12, fontWeight: '700', textTransform: 'capitalize' },
-  modeChipTextActive: { color: '#1d4ed8' },
   modalInput: { ...S.input, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: '#fff', color: C.textDark, marginBottom: 0 },
   modalBtnRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
   modalBtn: { flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center' },

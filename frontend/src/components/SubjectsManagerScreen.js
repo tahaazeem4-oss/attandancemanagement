@@ -12,6 +12,7 @@ import {
   Platform,
   Modal,
   RefreshControl,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
@@ -376,40 +377,50 @@ export default function SubjectsManagerScreen({ navigation, mode }) {
       )}
 
       <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}>
-        <View style={styles.overlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{editing ? 'Edit Subject' : 'Add Subject'}</Text>
-            <Text style={styles.modalSubtle}>Use one clean subject name only once. Case and extra spaces are normalized automatically.</Text>
-            <Text style={styles.label}>Subject Name *</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. Mathematics"
-              placeholderTextColor="#94A3B8"
-              value={formName}
-              onChangeText={setFormName}
-              returnKeyType="done"
-              onSubmitEditing={handleSave}
-            />
-            {(isOrg || isSuper) ? (
-              <>
-                <Text style={styles.label}>Campus *</Text>
-                <PickerField
-                  label=""
-                  value={campusId}
-                  onChange={setCampusId}
-                  items={campusItems}
-                  placeholder="Select campus"
-                />
-              </>
-            ) : null}
-            <ModalFooterActions
-              onCancel={() => setModal(false)}
-              onConfirm={handleSave}
-              confirmText={editing ? 'Save' : 'Add'}
-              loading={saving}
-            />
-          </View>
-        </View>
+        <KeyboardAvoidingView
+          style={styles.overlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
+        >
+          <ScrollView
+            contentContainerStyle={styles.modalScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>{editing ? 'Edit Subject' : 'Add Subject'}</Text>
+              <Text style={styles.modalSubtle}>Use one clean subject name only once. Case and extra spaces are normalized automatically.</Text>
+              <Text style={styles.label}>Subject Name *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. Mathematics"
+                placeholderTextColor="#94A3B8"
+                value={formName}
+                onChangeText={setFormName}
+                returnKeyType="done"
+                onSubmitEditing={handleSave}
+              />
+              {(isOrg || isSuper) ? (
+                <>
+                  <Text style={styles.label}>Campus *</Text>
+                  <PickerField
+                    label=""
+                    value={campusId}
+                    onChange={setCampusId}
+                    items={campusItems}
+                    placeholder="Select campus"
+                  />
+                </>
+              ) : null}
+              <ModalFooterActions
+                onCancel={() => setModal(false)}
+                onConfirm={handleSave}
+                confirmText={editing ? 'Save' : 'Add'}
+                loading={saving}
+              />
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
     </KeyboardAvoidingView>
   );
@@ -419,6 +430,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   pickerWrap: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  modalScrollContent: { flexGrow: 1, justifyContent: 'flex-end' },
   modalCard: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20 },
   modalTitle: { fontSize: 18, fontWeight: '700', color: C.textDark, marginBottom: 8 },
   modalSubtle: { fontSize: 12, color: C.textMed, lineHeight: 18, marginBottom: 4 },

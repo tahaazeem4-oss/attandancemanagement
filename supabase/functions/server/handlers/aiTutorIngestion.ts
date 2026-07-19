@@ -5,6 +5,8 @@ import { getDb, json, verifyToken } from "../_shared.ts";
 import { chunkText } from "../lib/aiChunking.ts";
 import { embedBatch, hasEmbeddings } from "../lib/aiOpenAI.ts";
 import { invalidateCacheForSubject } from "../lib/aiCache.ts";
+import { incrementTeacherUsage, resolveQuotaRow } from "../lib/aiQuota.ts";
+import type { AiScope } from "../lib/aiScope.ts";
 
 const MAX_JOBS_PER_RUN = 5;
 
@@ -93,6 +95,20 @@ export async function processDocument(docId: string): Promise<void> {
 
   // Invalidate cached answers for this subject+campus so students get fresh answers
   await invalidateCacheForSubject(db, Number(doc.campus_id), Number(doc.subject_id));
+
+  // Attribute the actual embedding token cost to the uploading teacher's
+  // pooled quota (uploads by admin/org_admin/super_admin aren't metered here).
+  if (doc.uploaded_by_role === "teacher") {
+    const totalTokens = chunks.reduce((sum: number, c: { tokenCount: number }) => sum + (c.tokenCount || 0), 0);
+    const teacherScope: AiScope = {
+      role: "teacher", user_id: Number(doc.uploaded_by_id),
+      organization_id: Number(doc.organization_id), campus_id: Number(doc.campus_id),
+    };
+    const { scope_type, scope_id } = await resolveQuotaRow(teacherScope, "teacher");
+    await incrementTeacherUsage(scope_type, scope_id, totalTokens, 0).catch((err) => {
+      console.error("[aiTutorIngestion] teacher usage increment failed", err);
+    });
+  }
 }
 
 export async function handleAiTutorIngestion(req: Request, path: string, _url: URL): Promise<Response> {

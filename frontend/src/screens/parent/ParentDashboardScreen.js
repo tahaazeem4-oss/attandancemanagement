@@ -262,6 +262,7 @@ export default function ParentDashboardScreen({ navigation }) {
       accent: '#2563EB',
       bg: '#EFF6FF',
       border: '#DBEAFE',
+      onPress: () => navigation.navigate('ParentAlerts'),
     },
     {
       key: 'leaves',
@@ -272,8 +273,9 @@ export default function ParentDashboardScreen({ navigation }) {
       accent: '#D97706',
       bg: '#FFFBEB',
       border: '#FDE68A',
+      onPress: () => navigation.navigate('ParentLeaves'),
     },
-  ]), [overview.pendingLeaves, overview.unreadNotifications]);
+  ]), [overview.pendingLeaves, overview.unreadNotifications, navigation]);
 
   const heroAnimatedStyle = {
     opacity: entrance,
@@ -456,14 +458,22 @@ export default function ParentDashboardScreen({ navigation }) {
               <View style={styles.dashboardBody}>
                 <View style={styles.attentionGrid}>
                   {attentionCards.map((card) => (
-                    <View key={card.key} style={[styles.attentionCard, { backgroundColor: card.bg, borderColor: card.border }]}>
+                    <Pressable
+                      key={card.key}
+                      onPress={card.onPress}
+                      style={({ pressed }) => [
+                        styles.attentionCard,
+                        { backgroundColor: card.bg, borderColor: card.border },
+                        pressed && { opacity: 0.7 },
+                      ]}
+                    >
                       <View style={[styles.attentionIconWrap, { backgroundColor: `${card.accent}18` }] }>
                         <Ionicons name={card.icon} size={18} color={card.accent} />
                       </View>
                       <Text style={styles.attentionLabel}>{card.label}</Text>
                       <Text style={styles.attentionValue}>{card.value}</Text>
                       <Text style={styles.attentionNote}>{card.note}</Text>
-                    </View>
+                    </Pressable>
                   ))}
                 </View>
 

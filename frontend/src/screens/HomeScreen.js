@@ -198,7 +198,7 @@ export default function HomeScreen({ navigation }) {
         return { ...card, onPress: () => navigation.navigate('SendNotification') };
       }
       if (card.key === 'TeacherCirculars') {
-        return { ...card, onPress: () => navigation.navigate('StaffNotifications') };
+        return { ...card, onPress: () => navigation.navigate('Circulars') };
       }
       if (card.key === 'TeacherSubjectsCard') {
         return { ...card, onPress: () => navigation.navigate('TeacherSubjects') };

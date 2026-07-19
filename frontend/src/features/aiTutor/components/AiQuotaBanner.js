@@ -1,5 +1,5 @@
 // frontend/src/features/aiTutor/components/AiQuotaBanner.js
-// Compact daily/weekly/monthly usage summary.
+// Compact daily/monthly usage summary.
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { C } from '../../../config/theme';
@@ -10,12 +10,6 @@ function fmtReset(periodType) {
   if (periodType === 'daily') {
     target = new Date(now);
     target.setHours(24, 0, 0, 0);
-  } else if (periodType === 'weekly') {
-    target = new Date(now);
-    const day = target.getDay(); // 0=Sun..6=Sat; weeks start Monday
-    const daysUntilMonday = ((8 - day) % 7) || 7;
-    target.setDate(target.getDate() + daysUntilMonday);
-    target.setHours(0, 0, 0, 0);
   } else {
     target = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
   }
@@ -47,7 +41,6 @@ export default function AiQuotaBanner({ quota }) {
       <Text style={styles.h}>AI usage</Text>
       <View style={styles.rowWrap}>
         <Row label="Today" periodType="daily" used={quota.used_today_tokens} limit={quota.daily_tokens} />
-        <Row label="Week" periodType="weekly" used={quota.used_week_tokens} limit={quota.weekly_tokens} />
         <Row label="Month" periodType="monthly" used={quota.used_month_tokens} limit={quota.monthly_tokens} />
       </View>
     </View>

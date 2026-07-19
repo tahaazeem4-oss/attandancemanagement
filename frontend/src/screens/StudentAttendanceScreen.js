@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, FlatList, Pressable,
+  View, Text, FlatList, Pressable, useWindowDimensions,
   StyleSheet, Alert, ActivityIndicator, Animated, RefreshControl
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -8,7 +8,6 @@ import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
 import { C } from '../config/theme';
 import AppHeader from '../components/AppHeader';
-import ScreenIntroCard from '../components/ScreenIntroCard';
 
 const STATUS_OPTIONS = ['present', 'absent', 'leave'];
 const STATUS_COLOR   = { present: '#10B981', absent: '#EF4444', leave: '#F59E0B' };
@@ -16,10 +15,16 @@ const STATUS_BG      = { present: '#ECFDF5', absent: '#FEF2F2', leave: '#FFFBEB'
 const STATUS_BORDER  = { present: '#6EE7B7', absent: '#FCA5A5', leave: '#FCD34D' };
 const STATUS_ICON    = { present: 'checkmark',  absent: 'close',  leave: 'calendar-outline' };
 const STATUS_LABEL   = { present: 'Present',    absent: 'Absent', leave: 'Leave' };
+const STATUS_SHORT_LABEL = { present: 'P', absent: 'A', leave: 'L' };
 const STATUS_DARK    = { present: '#059669',    absent: '#DC2626', leave: '#D97706' };
 
 export default function StudentAttendanceScreen({ navigation, route }) {
   const { class_id, section_id, class_name, section_name } = route.params;
+  const { width } = useWindowDimensions();
+  // Always use the compact chip layout on this screen — the roster list is
+  // dense (many rows), so keeping toggles small leaves names room to stay
+  // on one line and keeps more of the screen scrollable.
+  const compactPhone = width < 480;
 
   const [students,       setStudents]       = useState([]);
   const [attendance,     setAttendance]     = useState({});
@@ -113,11 +118,14 @@ export default function StudentAttendanceScreen({ navigation, route }) {
           onPress={handlePress}
           style={[
             styles.chip,
+            compactPhone && styles.chipCompact,
             { backgroundColor: bg, borderColor: border, shadowColor: shadow },
           ]}
         >
-          <Ionicons name={STATUS_ICON[status]} size={14} color={color} />
-          <Text style={[styles.chipText, { color }]}>{STATUS_LABEL[status]}</Text>
+          <Ionicons name={STATUS_ICON[status]} size={compactPhone ? 12 : 14} color={color} />
+          <Text style={[styles.chipText, compactPhone && styles.chipTextCompact, { color }]}>
+            {compactPhone ? STATUS_SHORT_LABEL[status] : STATUS_LABEL[status]}
+          </Text>
         </Pressable>
       </Animated.View>
     );
@@ -158,7 +166,9 @@ export default function StudentAttendanceScreen({ navigation, route }) {
 
           {/* Name */}
           <View style={styles.studentInfo}>
-            <Text style={styles.studentName}>{item.first_name} {item.last_name}</Text>
+            <Text style={styles.studentName} numberOfLines={2} ellipsizeMode="tail">
+              {item.first_name} {item.last_name}
+            </Text>
             {item.roll_no
               ? <Text style={styles.rollNo}>ID: {item.roll_no}</Text>
               : <Text style={[styles.rollNo, { color: status ? STATUS_COLOR[status] : '#CBD5E1' }]}>
@@ -173,7 +183,7 @@ export default function StudentAttendanceScreen({ navigation, route }) {
               <Text style={styles.leaveLockText}>On Leave</Text>
             </View>
           ) : (
-            <View style={styles.toggles}>
+            <View style={[styles.toggles, compactPhone && styles.togglesCompact]}>
               {STATUS_OPTIONS.map(s => (
                 <StatusChip
                   key={s}
@@ -224,43 +234,34 @@ export default function StudentAttendanceScreen({ navigation, route }) {
   return (
     <View style={styles.container}>
       <AppHeader title="Mark Attendance" navigation={navigation} />
-      <ScreenIntroCard
-        title="Attendance Entry"
-        description="Mark each student once for the selected class and section. Review the summary counts before saving so the report and history screens remain accurate."
-        icon="checkbox-outline"
-        tone="emerald"
-      />
 
-      {/* Class info strip */}
       <View style={styles.infoBar}>
-        <Text style={styles.infoText}>{class_name} — Section {section_name}</Text>
-        <Text style={styles.infoSub}>{students.length} students</Text>
+        <View style={styles.infoCopy}>
+          <Text style={styles.infoText} numberOfLines={1}>{class_name} — Section {section_name}</Text>
+          <Text style={styles.infoEyebrow}>{students.length} students</Text>
+        </View>
+        <View style={styles.summaryInline}>
+          {Object.entries(counts).map(([key, val]) => (
+            <View key={key} style={[styles.summaryChip, { backgroundColor: STATUS_BG[key], borderColor: STATUS_BORDER[key] }]}>
+              <Ionicons name={STATUS_ICON[key]} size={11} color={STATUS_COLOR[key]} />
+              <Text style={[styles.summaryNum, { color: STATUS_DARK[key] }]}>{val}</Text>
+            </View>
+          ))}
+          {unmarkedCount > 0 && (
+            <View style={[styles.summaryChip, { backgroundColor: '#F1F5F9', borderColor: '#E2E8F0' }]}>
+              <Ionicons name="ellipse-outline" size={11} color="#94A3B8" />
+              <Text style={[styles.summaryNum, { color: '#94A3B8' }]}>{unmarkedCount}</Text>
+            </View>
+          )}
+        </View>
       </View>
 
-      {/* Summary pills */}
-      <View style={styles.summary}>
-        {Object.entries(counts).map(([key, val]) => (
-          <View key={key} style={[styles.summaryItem, { backgroundColor: STATUS_BG[key], borderColor: STATUS_BORDER[key] }]}>
-            <Ionicons name={STATUS_ICON[key]} size={14} color={STATUS_COLOR[key]} style={{ marginBottom: 2 }} />
-            <Text style={[styles.summaryNum, { color: STATUS_DARK[key] }]}>{val}</Text>
-            <Text style={[styles.summaryLabel, { color: STATUS_DARK[key] }]}>{key.toUpperCase()}</Text>
-          </View>
-        ))}
-        {unmarkedCount > 0 && (
-          <View style={[styles.summaryItem, { backgroundColor: '#F1F5F9', borderColor: '#E2E8F0' }]}>
-            <Ionicons name="ellipse-outline" size={14} color="#94A3B8" style={{ marginBottom: 2 }} />
-            <Text style={[styles.summaryNum, { color: '#94A3B8' }]}>{unmarkedCount}</Text>
-            <Text style={[styles.summaryLabel, { color: '#94A3B8' }]}>PENDING</Text>
-          </View>
-        )}
-      </View>
-
-      {/* Student list */}
       <FlatList
         data={students}
         keyExtractor={item => String(item.id)}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} colors={[C.primary]} />}
-        contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 120, paddingTop: 8 }}
+        style={styles.list}
+        contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 94, paddingTop: 6 }}
         renderItem={({ item, index }) => (
           <StudentRow item={item} index={index} />
         )}
@@ -302,37 +303,35 @@ export default function StudentAttendanceScreen({ navigation, route }) {
 
 const styles = StyleSheet.create({
   container:    { flex: 1, backgroundColor: C.bg },
+  list:         { flex: 1 },
   toast:        { position: 'absolute', bottom: 100, alignSelf: 'center', backgroundColor: '#059669', borderRadius: 14, paddingHorizontal: 24, paddingVertical: 14, elevation: 10, shadowColor: '#059669', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
   toastText:    { color: '#fff', fontSize: 15, fontWeight: '800' },
 
   infoBar:      {
-    paddingHorizontal: 20, paddingVertical: 10,
+    paddingHorizontal: 14, paddingVertical: 8,
     backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.border,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8,
   },
-  infoText:     { color: C.textDark, fontSize: 15, fontWeight: '800' },
-  infoSub:      { color: C.textMed, fontSize: 12, marginTop: 2 },
+  infoCopy:     { flex: 1, minWidth: 0 },
+  infoEyebrow:  { color: C.textMed, fontSize: 10, fontWeight: '700', marginTop: 1 },
+  infoText:     { color: C.textDark, fontSize: 13, fontWeight: '800' },
 
-  summary:      {
-    flexDirection: 'row', justifyContent: 'space-around',
-    paddingVertical: 12, paddingHorizontal: 16,
-    backgroundColor: C.card,
-    borderBottomWidth: 1, borderColor: C.border,
+  summaryInline: { flexDirection: 'row', gap: 5 },
+  summaryChip:  {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    borderRadius: 10, borderWidth: 1,
+    paddingHorizontal: 7, paddingVertical: 4,
   },
-  summaryItem:  {
-    alignItems: 'center', borderRadius: 12, borderWidth: 1,
-    paddingHorizontal: 14, paddingVertical: 8, minWidth: 72,
-  },
-  summaryNum:   { fontSize: 22, fontWeight: '800' },
-  summaryLabel: { fontSize: 9, fontWeight: '700', marginTop: 1, letterSpacing: 0.6 },
+  summaryNum:   { fontSize: 12, fontWeight: '800' },
 
   // ── Student row ────────────────────────────────────────────
   studentRow:   {
-    backgroundColor: C.card, borderRadius: 16, marginVertical: 5,
-    paddingVertical: 12, paddingHorizontal: 14,
+    backgroundColor: C.card, borderRadius: 14, marginVertical: 3,
+    paddingVertical: 7, paddingHorizontal: 10,
     flexDirection: 'row', alignItems: 'center',
-    shadowColor: '#94A3B8', shadowOpacity: 0.08, shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 }, elevation: 2,
-    borderLeftWidth: 4,
+    shadowColor: '#94A3B8', shadowOpacity: 0.08, shadowRadius: 6,
+    shadowOffset: { width: 0, height: 1 }, elevation: 1,
+    borderLeftWidth: 3,
   },
   leaveLockBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
@@ -341,43 +340,46 @@ const styles = StyleSheet.create({
   },
   leaveLockText:  { fontSize: 11, fontWeight: '800', color: '#059669' },
   avatar:       {
-    width: 42, height: 42, borderRadius: 13,
-    justifyContent: 'center', alignItems: 'center', marginRight: 12,
+    width: 32, height: 32, borderRadius: 10,
+    justifyContent: 'center', alignItems: 'center', marginRight: 9,
   },
-  avatarText:   { fontWeight: '800', fontSize: 13 },
-  studentInfo:  { flex: 1 },
-  studentName:  { fontSize: 14, fontWeight: '700', color: C.textDark },
-  rollNo:       { fontSize: 11, color: C.textLight, marginTop: 2 },
-  toggles:      { flexDirection: 'row', gap: 5 },
+  avatarText:   { fontWeight: '800', fontSize: 12 },
+  studentInfo:  { flex: 1, minWidth: 0, paddingRight: 6 },
+  studentName:  { fontSize: 13, fontWeight: '700', color: C.textDark, lineHeight: 16 },
+  rollNo:       { fontSize: 10, color: C.textLight, marginTop: 1 },
+  toggles:      { flexDirection: 'row', gap: 4 },
+  togglesCompact: { gap: 3 },
 
   // ── Status chips ───────────────────────────────────────────
   chip: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 9, paddingVertical: 7,
-    borderRadius: 10, borderWidth: 1.5,
-    shadowOpacity: 0.18, shadowRadius: 5,
-    shadowOffset: { width: 0, height: 2 }, elevation: 2,
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    paddingHorizontal: 7, paddingVertical: 5,
+    borderRadius: 8, borderWidth: 1.5,
+    shadowOpacity: 0.12, shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 }, elevation: 1,
   },
-  chipText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.2 },
+  chipCompact: { paddingHorizontal: 5, paddingVertical: 4, gap: 2, minWidth: 26, justifyContent: 'center' },
+  chipText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.2 },
+  chipTextCompact: { fontSize: 9, minWidth: 7, textAlign: 'center' },
 
   footer:       {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    padding: 16, paddingBottom: 24,
+    paddingHorizontal: 14, paddingTop: 10, paddingBottom: 14,
     backgroundColor: C.card,
     borderTopWidth: 1, borderColor: C.border,
     shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8,
     shadowOffset: { width: 0, height: -3 }, elevation: 8,
   },
   submitBtn:    {
-    borderRadius: 14, paddingVertical: 15, alignItems: 'center',
+    borderRadius: 14, paddingVertical: 13, alignItems: 'center',
     shadowColor: C.present, shadowOpacity: 0.35, shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 }, elevation: 6,
   },
-  submitText:   { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.3 },
+  submitText:   { color: '#fff', fontSize: 15, fontWeight: '800', letterSpacing: 0.3 },
 
   frozenBanner: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#F1F5F9', borderRadius: 14, paddingVertical: 15,
+    backgroundColor: '#F1F5F9', borderRadius: 14, paddingVertical: 13,
     borderWidth: 1.5, borderColor: '#CBD5E1', gap: 8,
   },
   frozenIcon:   { fontSize: 18 },

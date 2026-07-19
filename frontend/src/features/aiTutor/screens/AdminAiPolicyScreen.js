@@ -21,29 +21,27 @@ import { useAuth } from '../../../context/AuthContext';
 
 const FIELD_GROUPS = [
   {
-    title: 'Request pools',
-    description: 'Shared request capacity that inherited branches divide across active students.',
+    title: 'Request pool (total)',
+    description: 'The system-wide daily/monthly request budget. It splits automatically across every active student, proportional to how many are under each organization/campus/class/section — unless you reserve a fixed amount for one of them on the hierarchy screen.',
     fields: [
       { key: 'daily_requests', label: 'Requests / day' },
-      { key: 'weekly_requests', label: 'Requests / week' },
       { key: 'monthly_requests', label: 'Requests / month' },
     ],
   },
   {
-    title: 'Token pools',
-    description: 'Shared token budgets used for scalable pool distribution.',
+    title: 'Token pool (total)',
+    description: 'Same idea as the request pool, but for tokens.',
     fields: [
       { key: 'daily_tokens', label: 'Tokens / day' },
-      { key: 'weekly_tokens', label: 'Tokens / week' },
       { key: 'monthly_tokens', label: 'Tokens / month' },
     ],
   },
   {
-    title: 'Per-request caps',
-    description: 'Hard limits for a single prompt/response. These do not scale down the tree.',
+    title: 'Per-message caps',
+    description: 'Not pooled — a flat ceiling on a single question/answer, the same for every student unless overridden lower down.',
     fields: [
-      { key: 'max_input_tokens', label: 'Max input tokens / request' },
-      { key: 'max_output_tokens', label: 'Max output tokens / request' },
+      { key: 'max_input_tokens', label: 'Max input tokens / message' },
+      { key: 'max_output_tokens', label: 'Max output tokens / message' },
     ],
   },
 ];
@@ -320,9 +318,9 @@ export default function AdminAiPolicyScreen({ navigation }) {
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Scalable defaults</Text>
+            <Text style={styles.cardTitle}>The total shared budget</Text>
             <Text style={styles.cardSubtle}>
-              Set only the root pools and caps here. Child levels should usually stay on Inherit and only override when architecture requires it.
+              Requests and tokens here are the system-wide total (e.g. your real daily quota from the AI provider) — it automatically divides across every active student. E.g. a total of 666 requests/day split evenly across 600 students system-wide gives each roughly 1/day; give one campus a fixed 100 on the hierarchy screen and the remaining 566 splits among everyone else. Per-message caps are the only flat (non-pooled) numbers here.
             </Text>
           </View>
 

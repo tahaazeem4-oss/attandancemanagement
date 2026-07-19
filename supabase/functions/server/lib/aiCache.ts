@@ -70,15 +70,26 @@ export async function getCachedAnswer(
   // Check expiry
   if (data.expires_at && new Date(data.expires_at) < new Date()) {
     // Expired — delete in background, return null
-    db.from("ai_answer_cache").delete().eq("id", data.id).then(() => {});
+    (async () => {
+      try {
+        await db.from("ai_answer_cache").delete().eq("id", data.id);
+      } catch {
+        // ignore cache cleanup failures
+      }
+    })();
     return null;
   }
 
   // Update hit stats in background (don't await — don't slow the response)
-  db.from("ai_answer_cache")
-    .update({ hit_count: (data.hit_count ?? 0) + 1, last_hit_at: new Date().toISOString() })
-    .eq("id", data.id)
-    .then(() => {});
+  (async () => {
+    try {
+      await db.from("ai_answer_cache")
+        .update({ hit_count: (data.hit_count ?? 0) + 1, last_hit_at: new Date().toISOString() })
+        .eq("id", data.id);
+    } catch {
+      // ignore cache update failures
+    }
+  })();
 
   return {
     id: data.id,
@@ -111,27 +122,30 @@ export async function setCachedAnswer(
   },
 ): Promise<void> {
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  await db
-    .from("ai_answer_cache")
-    .upsert(
-      {
-        cache_key:         params.cacheKey,
-        question:          params.question.slice(0, 2000),
-        campus_id:         params.campusId,
-        subject_id:        params.subjectId,
-        answer:            params.answer,
-        citations:         params.citations,
-        model:             params.model,
-        prompt_tokens:     params.promptTokens,
-        completion_tokens: params.completionTokens,
-        total_tokens:      params.totalTokens,
-        hit_count:         0,
-        expires_at:        expiresAt,
-        created_at:        new Date().toISOString(),
-      },
-      { onConflict: "cache_key", ignoreDuplicates: true },
-    )
-    .catch(() => {}); // best-effort
+  try {
+    await db
+      .from("ai_answer_cache")
+      .upsert(
+        {
+          cache_key:         params.cacheKey,
+          question:          params.question.slice(0, 2000),
+          campus_id:         params.campusId,
+          subject_id:        params.subjectId,
+          answer:            params.answer,
+          citations:         params.citations,
+          model:             params.model,
+          prompt_tokens:     params.promptTokens,
+          completion_tokens: params.completionTokens,
+          total_tokens:      params.totalTokens,
+          hit_count:         0,
+          expires_at:        expiresAt,
+          created_at:        new Date().toISOString(),
+        },
+        { onConflict: "cache_key", ignoreDuplicates: true },
+      );
+  } catch {
+    // best-effort
+  }
 }
 
 /**
@@ -143,10 +157,13 @@ export async function invalidateCacheForSubject(
   campusId: number,
   subjectId: number,
 ): Promise<void> {
-  await db
-    .from("ai_answer_cache")
-    .delete()
-    .eq("campus_id", campusId)
-    .eq("subject_id", subjectId)
-    .catch(() => {});
+  try {
+    await db
+      .from("ai_answer_cache")
+      .delete()
+      .eq("campus_id", campusId)
+      .eq("subject_id", subjectId);
+  } catch {
+    // best-effort
+  }
 }

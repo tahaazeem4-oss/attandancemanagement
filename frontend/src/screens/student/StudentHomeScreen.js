@@ -13,7 +13,6 @@ import { C } from '../../config/theme';
 import DashboardCardGrid from '../../components/DashboardCardGrid';
 import { buildDashboardCards } from '../../config/dashboardCards';
 import useAiTutorConfig from '../../features/aiTutor/hooks/useAiTutorConfig';
-import AiUsageCard from '../../features/aiTutor/components/AiUsageCard';
 
 const ACTIONS = buildDashboardCards([
   { type: 'attendanceHistory', key: 'StudentHistory' },
@@ -21,8 +20,9 @@ const ACTIONS = buildDashboardCards([
   { type: 'leaveApplications', key: 'StudentLeaves' },
   { type: 'classWork', key: 'StudentClasswork' },
   { type: 'homework', key: 'StudentHomework' },
-  { type: 'circulars', key: 'StudentNotifications' },
+  { type: 'circulars', key: 'Circulars' },
   { type: 'aiTutor', key: 'StudentAiTutorHome' },
+  { type: 'aiAnalytics', key: 'StudentAiAnalytics', label: 'AI Usage', description: 'Review your AI tutor usage.' },
 ]);
 
 const HIGHLIGHT_TONES = {
@@ -53,7 +53,7 @@ export default function StudentHomeScreen({ navigation, route }) {
   const childData = route?.params?.child;
   const isParentViewing = !!childData;
   const childStudentId = childData?.student_id ?? childData?.id ?? null;
-  const { loading: aiConfigLoading, enabled: aiEnabled, quota: aiQuota, refresh: refreshAiConfig } = useAiTutorConfig({ studentId: childStudentId });
+  const { loading: aiConfigLoading, enabled: aiEnabled, refresh: refreshAiConfig } = useAiTutorConfig({ studentId: childStudentId });
   const displayUser = childData || user;
 
   useEffect(() => {
@@ -223,37 +223,24 @@ export default function StudentHomeScreen({ navigation, route }) {
       },
     ];
 
-    if ((stats?.leave ?? 0) > 0 || (stats?.absent ?? 0) > 0) {
-      cards.push({
-        key: 'attention',
-        label: 'Needs Review',
-        value: (stats?.leave ?? 0) + (stats?.absent ?? 0),
-        note: 'Leaves and absences combined',
-        icon: 'alert-outline',
-        accent: '#D97706',
-        bg: '#FFFBEB',
-        border: '#FDE68A',
-      });
-    } else {
-      cards.push({
-        key: 'profile',
-        label: 'Student Profile',
-        value: 'Open',
-        note: 'School, class, teacher, and campus details',
-        icon: 'person-circle-outline',
-        accent: '#7C3AED',
-        bg: '#F5F3FF',
-        border: '#DDD6FE',
-        onPress: openStudentProfile,
-      });
-    }
+    cards.push({
+      key: 'profile',
+      label: 'Student Profile',
+      value: 'Open',
+      note: 'School, class, teacher, and campus details',
+      icon: 'person-circle-outline',
+      accent: '#7C3AED',
+      bg: '#F5F3FF',
+      border: '#DDD6FE',
+      onPress: openStudentProfile,
+    });
 
     return cards;
-  }, [attendancePct, isParentViewing, openStudentProfile, stats?.absent, stats?.leave, stats?.present, stats?.total]);
+  }, [attendancePct, openStudentProfile, stats?.present, stats?.total]);
 
   const heroTone = HIGHLIGHT_TONES[attendanceSummary.tone] || HIGHLIGHT_TONES.info;
   const quickActions = ACTIONS
-    .filter((card) => !(card.key === 'StudentAiTutorHome' && !aiConfigLoading && !aiEnabled))
+    .filter((card) => !((card.key === 'StudentAiTutorHome' || card.key === 'StudentAiAnalytics') && !aiConfigLoading && !aiEnabled))
     .map((card) => ({
       ...card,
       onPress: () => {
@@ -399,19 +386,6 @@ export default function StudentHomeScreen({ navigation, route }) {
               );
             })}
           </View>
-
-          {aiEnabled && aiQuota ? (
-            <AiUsageCard
-              quota={aiQuota}
-              onPress={() => {
-                if (isParentViewing) {
-                  navigation.navigate('StudentAiAnalytics', { child: childData });
-                } else {
-                  navigation.navigate('StudentAiAnalytics');
-                }
-              }}
-            />
-          ) : null}
 
           <DashboardCardGrid
             cards={quickActions}

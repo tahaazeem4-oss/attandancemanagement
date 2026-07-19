@@ -123,60 +123,13 @@ export async function handleStudents(
     }
   }
 
-  // ── PUT /students/:id ────────────────────────────────────────
+  // Editing/deleting a student is Admin-only — teachers (any role) may view
+  // and add students via this handler, but not modify or remove existing
+  // records. Admin's own student CRUD lives on the separate /admin/students
+  // route, unaffected by this block.
   const updateMatch = path.match(/^\/students\/(\d+)$/);
-  if (updateMatch && method === "PUT") {
-    const id = parseInt(updateMatch[1]);
-    try {
-      const body = await req.json();
-      if (body.roll_no && body.class_id && body.section_id) {
-        const { data: dup } = await db
-          .from("students")
-          .select("id")
-          .eq("school_id", schoolId)
-          .eq("class_id", body.class_id)
-          .eq("section_id", body.section_id)
-          .eq("roll_no", body.roll_no)
-          .neq("id", id);
-        if (dup?.length)
-          return json({ message: `Roll number ${body.roll_no} is already taken in this class/section.` }, 409);
-      }
-
-      const { error } = await db
-        .from("students")
-        .update({
-          first_name: body.first_name,
-          last_name: body.last_name,
-          age: body.age,
-          class_id: body.class_id,
-          section_id: body.section_id,
-          roll_no: body.roll_no || null,
-        })
-        .eq("id", id)
-        .eq("school_id", schoolId);
-      if (error) throw error;
-      return json({ message: "Student updated" });
-    } catch (err) {
-      console.error("[students PUT]", err);
-      return json({ message: "Server error" }, 500);
-    }
-  }
-
-  // ── DELETE /students/:id ─────────────────────────────────────
-  if (updateMatch && method === "DELETE") {
-    const id = parseInt(updateMatch[1]);
-    try {
-      const { error } = await db
-        .from("students")
-        .delete()
-        .eq("id", id)
-        .eq("school_id", schoolId);
-      if (error) throw error;
-      return json({ message: "Student deleted" });
-    } catch (err) {
-      console.error("[students DELETE]", err);
-      return json({ message: "Server error" }, 500);
-    }
+  if (updateMatch && (method === "PUT" || method === "DELETE")) {
+    return json({ message: "Only an admin can edit or delete a student" }, 403);
   }
 
   return json({ message: "Not found" }, 404);

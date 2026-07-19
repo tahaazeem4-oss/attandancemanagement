@@ -3,8 +3,7 @@ import {
   json,
   getDb,
   verifyToken,
-  sendPush,
-  tokensForStudents,
+  notifyStudentAndParents,
   resolveTeacherRole,
 } from "../_shared.ts";
 
@@ -220,14 +219,10 @@ export async function handleTeachers(
             { onConflict: "student_id,date" },
           );
         }
-        tokensForStudents(db, [studentId]).then((tokens) =>
-          sendPush(tokens, "Leave Approved", "Your leave request has been approved.", { type: "leave" })
-        );
+        notifyStudentAndParents(db, studentId, "Leave Approved", "Your leave request has been approved.", { type: "leave" });
       } else {
-        // rejected — notify student
-        tokensForStudents(db, [studentId]).then((tokens) =>
-          sendPush(tokens, "Leave Rejected", "Your leave request has been rejected by your teacher.", { type: "leave" })
-        );
+        // rejected — notify student and parent(s)
+        notifyStudentAndParents(db, studentId, "Leave Rejected", "Your leave request has been rejected by your teacher.", { type: "leave" });
       }
 
       return json({ message: "Status updated", count: leaves.length });
@@ -296,9 +291,7 @@ export async function handleTeachers(
             return json({ message: "Could not unlock attendance" }, 500);
           }
         }
-        tokensForStudents(db, [studentId]).then((tokens) =>
-          sendPush(tokens, "Withdrawal Approved", "Your leave withdrawal has been approved. Attendance unlocked.", { type: "leave" })
-        );
+        notifyStudentAndParents(db, studentId, "Withdrawal Approved", "Your leave withdrawal has been approved. Attendance unlocked.", { type: "leave" });
       } else {
         const { error: rejectErr } = await db
           .from("leave_applications")
@@ -309,9 +302,7 @@ export async function handleTeachers(
           console.error("[teachers/leaves/group/withdrawal] reject error", rejectErr);
           return json({ message: "Could not reject withdrawal" }, 500);
         }
-        tokensForStudents(db, [studentId]).then((tokens) =>
-          sendPush(tokens, "Withdrawal Rejected", "Your leave withdrawal request was declined.", { type: "leave" })
-        );
+        notifyStudentAndParents(db, studentId, "Withdrawal Rejected", "Your leave withdrawal request was declined.", { type: "leave" });
       }
 
       return json({ message: "Withdrawal processed" });

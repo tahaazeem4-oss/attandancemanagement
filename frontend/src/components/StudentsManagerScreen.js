@@ -428,54 +428,78 @@ export default function StudentsManagerScreen({ navigation, mode }) {
               onImportDone={load}
             />
           )}
+          {/* Compact summary row only — never grows, so it can never push
+              or crowd out the student list below it. The actual filter
+              controls live in a bottom-sheet modal (see below) that overlays
+              the screen instead of sharing layout space with the list. */}
           <View style={styles.filterBar}>
             <View style={styles.filterHeaderRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.filterTitle}>Student Filters</Text>
-                <Text style={styles.filterSubTitle}>
+                <Text style={styles.filterSubTitle} numberOfLines={1}>
                   {selectedClassObj?.class_name || 'All Classes'}
                   {selectedSectionObj ? `  -  Section ${selectedSectionObj.section_name}` : '  -  All Sections'}
                 </Text>
               </View>
-              <Pressable style={({ pressed }) => [styles.filterToggleBtn, pressed && { opacity: 0.8 }]} onPress={() => setFiltersOpen(v => !v)}>
-                <Text style={styles.filterToggleTxt}>{filtersOpen ? 'Hide' : 'Filters'}</Text>
+              {(filter.class_id || filter.section_id) ? (
+                <Pressable style={({ pressed }) => [styles.clearFilterBtn, pressed && { opacity: 0.8 }]} onPress={() => setFilter({ class_id: '', section_id: '' })}>
+                  <Text style={styles.clearFilterTxt}>Clear</Text>
+                </Pressable>
+              ) : null}
+              <Pressable style={({ pressed }) => [styles.filterToggleBtn, pressed && { opacity: 0.8 }]} onPress={() => setFiltersOpen(true)}>
+                <Ionicons name="options-outline" size={14} color={C.primary} />
+                <Text style={styles.filterToggleTxt}>Filters</Text>
               </Pressable>
             </View>
-
-            {filtersOpen && (
-              <View style={styles.filterPanel}>
-                <Text style={styles.fieldLabel}>Class</Text>
-                <PickerField
-                  label="Class"
-                  value={filter.class_id}
-                  onChange={v => setFilter({ class_id: v, section_id: '' })}
-                  placeholder="All Classes"
-                  items={[{ label: 'All Classes', value: '' }, ...classes.map(c => ({ label: c.class_name, value: String(c.id) }))]}
-                />
-
-                <Text style={styles.fieldLabel}>Section</Text>
-                <PickerField
-                  label="Section"
-                  value={filter.section_id}
-                  onChange={v => setFilter(p => ({ ...p, section_id: v }))}
-                  placeholder="All Sections"
-                  disabled={!filter.class_id}
-                  items={[{ label: 'All Sections', value: '' }, ...sections.map(s => ({ label: `Section ${s.section_name}`, value: String(s.id) }))]}
-                />
-
-                <Pressable style={({ pressed }) => [styles.clearFilterBtn, pressed && { opacity: 0.8 }]} onPress={() => setFilter({ class_id: '', section_id: '' })}>
-                  <Text style={styles.clearFilterTxt}>Clear Filters</Text>
-                </Pressable>
-              </View>
-            )}
           </View>
         </>
       )}
+
+      {/* Filter bottom sheet — an overlay, so it can never cover or resize
+          the student list underneath it; closing it (backdrop tap, swipe
+          down, or Done) simply dismisses it and the list is exactly as it
+          was, no layout shift. */}
+      <Modal visible={filtersOpen} transparent animationType="slide" onRequestClose={() => setFiltersOpen(false)}>
+        <Pressable style={styles.filterSheetOverlay} onPress={() => setFiltersOpen(false)} />
+        <View style={styles.filterSheet}>
+          <View style={styles.filterSheetHandle} />
+          <Text style={styles.filterSheetTitle}>Filter Students</Text>
+
+          <Text style={styles.fieldLabel}>Class</Text>
+          <PickerField
+            label="Class"
+            value={filter.class_id}
+            onChange={v => setFilter({ class_id: v, section_id: '' })}
+            placeholder="All Classes"
+            items={[{ label: 'All Classes', value: '' }, ...classes.map(c => ({ label: c.class_name, value: String(c.id) }))]}
+          />
+
+          <Text style={styles.fieldLabel}>Section</Text>
+          <PickerField
+            label="Section"
+            value={filter.section_id}
+            onChange={v => setFilter(p => ({ ...p, section_id: v }))}
+            placeholder="All Sections"
+            disabled={!filter.class_id}
+            items={[{ label: 'All Sections', value: '' }, ...sections.map(s => ({ label: `Section ${s.section_name}`, value: String(s.id) }))]}
+          />
+
+          <View style={styles.filterSheetActions}>
+            <Pressable style={({ pressed }) => [styles.clearFilterBtn, styles.filterSheetClearBtn, pressed && { opacity: 0.8 }]} onPress={() => setFilter({ class_id: '', section_id: '' })}>
+              <Text style={styles.clearFilterTxt}>Clear Filters</Text>
+            </Pressable>
+            <Pressable style={({ pressed }) => [styles.modalBtn, styles.saveBtn, { flex: 1 }, pressed && { opacity: 0.85 }]} onPress={() => setFiltersOpen(false)}>
+              <Text style={styles.saveText}>Done</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       {loading ? (
         <ActivityIndicator color={C.primary} style={{ flex: 1 }} />
       ) : (
         <FlatList
+          style={styles.list}
           data={filtered}
           keyExtractor={s => String(s.id)}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={C.primary} colors={[C.primary]} />}
@@ -493,10 +517,12 @@ export default function StudentsManagerScreen({ navigation, mode }) {
                 {!isOrg && !isSuper && item.has_parent && <Text style={styles.accountBadge}>Parent linked</Text>}
                 {(item.campus_name || item.school_name) ? <View style={styles.badge}><Text style={styles.badgeTxt}>{item.campus_name || item.school_name}</Text></View> : null}
               </View>
-              <View style={styles.actionBtns}>
-                <TouchableOpacity onPress={() => openEdit(item)} style={styles.actionBtn}><Ionicons name="pencil-outline" size={17} color="#2563EB" /></TouchableOpacity>
-                <TouchableOpacity onPress={() => handleDelete(item)} style={[styles.actionBtn, styles.actionBtnDanger]}><Ionicons name="trash-outline" size={17} color="#C2410C" /></TouchableOpacity>
-              </View>
+              {!isTeacher && (
+                <View style={styles.actionBtns}>
+                  <TouchableOpacity onPress={() => openEdit(item)} style={styles.actionBtn}><Ionicons name="pencil-outline" size={17} color="#2563EB" /></TouchableOpacity>
+                  <TouchableOpacity onPress={() => handleDelete(item)} style={[styles.actionBtn, styles.actionBtnDanger]}><Ionicons name="trash-outline" size={17} color="#C2410C" /></TouchableOpacity>
+                </View>
+              )}
             </Pressable>
           )}
         />
@@ -506,6 +532,25 @@ export default function StudentsManagerScreen({ navigation, mode }) {
         <View style={styles.overlay}>
           <ScrollView contentContainerStyle={styles.modalScrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <View style={styles.modalCard}>
+            {isTeacher && editing ? (
+              // Teachers can look up a student's details but cannot edit or delete them —
+              // only Admin can, so this renders as a read-only summary, not the edit form.
+              <>
+                <Text style={styles.modalTitle}>Student Details</Text>
+                <View style={styles.idMapBox}>
+                  <Text style={styles.idMapText}>Name: {editing.first_name} {editing.last_name}</Text>
+                  <Text style={styles.idMapText}>Class: {editing.class_name}{editing.section_name ? ` - Sec ${editing.section_name}` : ''}</Text>
+                  {editing.roll_no ? <Text style={styles.idMapText}>Student ID: {editing.roll_no}</Text> : null}
+                  {editing.age ? <Text style={styles.idMapText}>Age: {editing.age}</Text> : null}
+                  <Text style={styles.idMapText}>Parent email: {editing.parent_email || 'No parent linked yet'}</Text>
+                </View>
+                <Text style={styles.readOnlyNote}>Contact an admin to edit or remove this student.</Text>
+                <Pressable style={[styles.modalBtn, styles.saveBtn, { marginTop: 16 }]} onPress={() => setModal(false)}>
+                  <Text style={styles.saveText}>Close</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
               <Text style={styles.modalTitle}>{editing ? 'Edit Student' : 'Add Student'}</Text>
 
               <View style={styles.row}>
@@ -576,6 +621,8 @@ export default function StudentsManagerScreen({ navigation, mode }) {
               )}
 
               <ModalFooterActions onCancel={() => setModal(false)} onConfirm={handleSave} loading={saving} />
+              </>
+            )}
             </View>
           </ScrollView>
         </View>
@@ -586,20 +633,33 @@ export default function StudentsManagerScreen({ navigation, mode }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
+  list: { flex: 1 },
   topRow: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginTop: 12, marginBottom: 4, gap: 8 },
   searchBox: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: '#E2E8F0' },
   searchInput: { flex: 1, fontSize: 14, color: C.textDark },
   addBtn: { backgroundColor: C.primary, borderRadius: 10, padding: 10 },
-  filterBar: { padding: 12, backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.border },
-  filterHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  filterBar: { paddingHorizontal: 12, paddingVertical: 10, backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.border },
+  filterHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   filterTitle: { fontSize: 14, fontWeight: '800', color: C.textDark },
   filterSubTitle: { fontSize: 12, color: C.textMed, marginTop: 2 },
-  filterToggleBtn: { backgroundColor: '#EEF2FF', borderColor: '#BFDBFE', borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  filterToggleBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#EEF2FF', borderColor: '#BFDBFE', borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   filterToggleTxt: { color: C.primary, fontSize: 12, fontWeight: '800' },
-  filterPanel: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: C.border },
   fieldLabel: { fontSize: 12, color: C.textMed, fontWeight: '700', marginBottom: 4, marginTop: 6 },
-  clearFilterBtn: { alignSelf: 'flex-end', marginTop: 10, backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  clearFilterBtn: { backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   clearFilterTxt: { color: '#334155', fontSize: 12, fontWeight: '700' },
+
+  // Filter bottom sheet (overlay — never shares layout space with the list)
+  filterSheetOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' },
+  filterSheet: {
+    position: 'absolute', left: 0, right: 0, bottom: 0,
+    backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingHorizontal: 20, paddingTop: 10, paddingBottom: 28,
+    maxHeight: '80%',
+  },
+  filterSheetHandle: { width: 40, height: 4, backgroundColor: '#CBD5E1', borderRadius: 999, alignSelf: 'center', marginBottom: 14 },
+  filterSheetTitle: { fontSize: 18, fontWeight: '800', color: C.textDark, marginBottom: 6 },
+  filterSheetActions: { flexDirection: 'row', gap: 10, marginTop: 20 },
+  filterSheetClearBtn: { flex: 1, alignItems: 'center' },
   card: { backgroundColor: '#fff', borderRadius: 14, marginBottom: 10, padding: 14, flexDirection: 'row', alignItems: 'center', elevation: 1, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 4, shadowOffset: { width: 0, height: 1 } },
   avatar: { width: 44, height: 44, borderRadius: 13, backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   avatarText: { color: C.primary, fontWeight: '800', fontSize: 14 },
@@ -629,6 +689,8 @@ const styles = StyleSheet.create({
   idMapTitle: { fontSize: 11, color: C.textMed, fontWeight: '800', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.4 },
   idMapRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   idMapText: { fontSize: 12, color: C.textDark, fontWeight: '700' },
+  readOnlyNote: { fontSize: 12, color: C.textMed, marginTop: 12, fontStyle: 'italic' },
+  saveText: { color: '#fff', fontWeight: '700' },
   sectionLabel: { fontSize: 12, fontWeight: '700', color: C.textMed, textTransform: 'uppercase', letterSpacing: 0.5 },
   row: { flexDirection: 'row', gap: 10 },
   modalBtns: { flexDirection: 'row', gap: 12, marginTop: 16 },

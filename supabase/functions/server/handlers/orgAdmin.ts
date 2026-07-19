@@ -5,6 +5,7 @@ import {
   verifyToken,
   hashPassword,
   sendPush,
+  notifyStudentAndParents,
   SUPABASE_URL,
 } from "../_shared.ts";
 import {
@@ -677,16 +678,23 @@ export async function handleOrgAdmin(
   if (path === "/org-admin/sections" && method === "POST") {
     try {
       const { section_name, class_id } = await req.json();
-      if (!section_name || !class_id) return json({ message: "section_name and class_id required" }, 400);
+      const name = String(section_name || "").trim();
+      if (!name || !class_id) return json({ message: "section_name and class_id required" }, 400);
       const campusIds = await getCampusIds();
       const { data: cls } = await db.from("classes").select("id").eq("id", class_id).in("school_id", campusIds).single();
       if (!cls) return json({ message: "Class not in your org" }, 403);
-      const { data, error } = await db.from("sections").insert({ class_id, section_name }).select().single();
+
+      const { data: existing } = await db.from("sections").select("id, section_name").eq("class_id", class_id);
+      if ((existing || []).some((s) => String(s.section_name).trim().toLowerCase() === name.toLowerCase())) {
+        return json({ message: `A section named "${name}" already exists in this class.` }, 409);
+      }
+
+      const { data, error } = await db.from("sections").insert({ class_id, section_name: name }).select().single();
       if (error) throw error;
       return json({ message: "Section created", id: data.id }, 201);
     } catch (err) {
       console.error("[org-admin/sections POST]", err);
-      return json({ message: "Server error" }, 500);
+      return json({ message: err instanceof Error ? err.message : "Could not create section" }, 500);
     }
   }
 
@@ -695,11 +703,22 @@ export async function handleOrgAdmin(
     const id = parseInt(sectionMatch[1]);
     try {
       const { section_name } = await req.json();
-      await db.from("sections").update({ section_name }).eq("id", id);
+      const name = String(section_name || "").trim();
+      if (!name) return json({ message: "Section name is required" }, 400);
+
+      const { data: sec } = await db.from("sections").select("class_id").eq("id", id).maybeSingle();
+      if (sec?.class_id) {
+        const { data: siblings } = await db.from("sections").select("id, section_name").eq("class_id", sec.class_id).neq("id", id);
+        if ((siblings || []).some((s) => String(s.section_name).trim().toLowerCase() === name.toLowerCase())) {
+          return json({ message: `A section named "${name}" already exists in this class.` }, 409);
+        }
+      }
+
+      await db.from("sections").update({ section_name: name }).eq("id", id);
       return json({ message: "Section updated" });
     } catch (err) {
       console.error("[org-admin/sections PUT]", err);
-      return json({ message: "Server error" }, 500);
+      return json({ message: err instanceof Error ? err.message : "Could not update section" }, 500);
     }
   }
 
@@ -805,19 +824,9 @@ export async function handleOrgAdmin(
             { onConflict: "student_id,date" }
           );
         }
-        (async () => {
-          const { data: tokens } = await db.from("push_tokens").select("token")
-            .eq("user_role", "student").eq("user_id", studentId);
-          const toks = (tokens || []).map((t: any) => t.token as string).filter(Boolean);
-          if (toks.length) await sendPush(toks, "Leave Approved", "Your leave request has been approved.", { type: "leave" });
-        })();
+        notifyStudentAndParents(db, studentId, "Leave Approved", "Your leave request has been approved.", { type: "leave" });
       } else {
-        (async () => {
-          const { data: tokens } = await db.from("push_tokens").select("token")
-            .eq("user_role", "student").eq("user_id", studentId);
-          const toks = (tokens || []).map((t: any) => t.token as string).filter(Boolean);
-          if (toks.length) await sendPush(toks, "Leave Rejected", "Your leave request has been rejected.", { type: "leave" });
-        })();
+        notifyStudentAndParents(db, studentId, "Leave Rejected", "Your leave request has been rejected.", { type: "leave" });
       }
 
       return json({ message: "Status updated" });

@@ -1,18 +1,19 @@
 // supabase/functions/server/handlers/aiTutorMaterials.ts
 // Upload AI study material → record document → enqueue ingestion.
 import { getDb, json, verifyToken } from "../_shared.ts";
-import { getEffectiveAiAccess, getEffectiveAiAccessForUser } from "../lib/aiScope.ts";
+import { getEffectiveAiAccess, getEffectiveAiAccessForUser, type AiScope } from "../lib/aiScope.ts";
+import { loadTeacherQuotaState, assertCanQueryTeacher, incrementTeacherUsage, resolveQuotaRow } from "../lib/aiQuota.ts";
+import { enforceRateLimit } from "../lib/aiRateLimit.ts";
 import { processDocument } from "./aiTutorIngestion.ts";
 
 // Deno deploy global for background tasks (defined in Supabase Edge runtime).
 declare const EdgeRuntime: { waitUntil?: (p: Promise<unknown>) => void } | undefined;
 
-const ALLOWED_EXT = new Set(["pdf","docx","pptx","ppt","txt"]);
+const ALLOWED_EXT = new Set(["pdf","docx","pptx","txt"]);
 const ALLOWED_MIME = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.ms-powerpoint", // legacy PPT
   "text/plain",
 ]);
 const MAX_SIZE_BYTES = 25 * 1024 * 1024;
@@ -28,7 +29,7 @@ async function resolveScope(role: string, userId: number, body: Record<string, u
   const section_id = body.section_id ? Number(body.section_id) : null;
   let campus_id    = body.campus_id  ? Number(body.campus_id)  : null;
 
-  if (!subject_id) throw new Error("subject_id required");
+  if (!subject_id || Number.isNaN(subject_id)) throw new Error("subject_id required");
 
   // Resolve campus_id from role context if missing.
   if (!campus_id) {
@@ -88,7 +89,10 @@ export async function handleAiTutorMaterials(req: Request, path: string, _url: U
 
     const ext = (file.name.split(".").pop() || "").toLowerCase();
     if (!ALLOWED_EXT.has(ext)) return json({ message: "Unsupported file extension" }, 400);
-    if (!ALLOWED_MIME.has(file.type) && file.type) return json({ message: "Unsupported MIME type" }, 400);
+
+    const mimeType = String(file.type || '').split(';')[0].trim().toLowerCase();
+    const allowedMimeType = !mimeType || ALLOWED_MIME.has(mimeType) || mimeType === 'application/octet-stream';
+    if (!allowedMimeType) return json({ message: "Unsupported MIME type" }, 400);
     if (file.size > MAX_SIZE_BYTES) return json({ message: "File too large (max 25MB)" }, 400);
 
     let scope;
@@ -113,6 +117,20 @@ export async function handleAiTutorMaterials(req: Request, path: string, _url: U
     });
     if (!targetAccess.enabled) {
       return json({ message: "AI Tutor disabled", blocked_at: targetAccess.blocked_at }, 403);
+    }
+
+    // Teacher uploads were previously ungoverned by any quota — enforce the
+    // same rate-limit + quota checks used for student chat, just pooled per
+    // organization/campus instead of per-teacher.
+    let teacherQuotaScope: AiScope | null = null;
+    if (role === "teacher") {
+      const rl = await enforceRateLimit(`teacher:${userId}`);
+      if (!rl.ok) return json({ message: rl.reason || "Rate limit exceeded" }, 429);
+
+      teacherQuotaScope = { role, user_id: userId, organization_id: scope.organization_id, campus_id: scope.campus_id };
+      const teacherState = await loadTeacherQuotaState(teacherQuotaScope);
+      const check = assertCanQueryTeacher(teacherState);
+      if (!check.ok) return json({ message: check.reason || "AI quota exceeded" }, 429);
     }
 
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -144,6 +162,13 @@ export async function handleAiTutorMaterials(req: Request, path: string, _url: U
       checksum_sha256: checksum,
     }).select().single();
     if (docErr) return json({ message: docErr.message }, 500);
+
+    if (role === "teacher" && teacherQuotaScope) {
+      // Count the upload itself as one request now; actual token usage from
+      // ingestion (embedding the extracted text) is added once it finishes.
+      const { scope_type, scope_id } = await resolveQuotaRow(teacherQuotaScope, "teacher");
+      await incrementTeacherUsage(scope_type, scope_id, 0, 1);
+    }
 
     const { data: jobRow } = await db.from("ai_document_jobs").insert({
       document_id: doc.id,

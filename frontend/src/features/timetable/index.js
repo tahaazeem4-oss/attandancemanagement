@@ -1,17 +1,13 @@
 import React from 'react';
-import TimetableManagerScreen from './TimetableManagerScreen';
-import TimetableSummaryCard from './TimetableSummaryCard';
+import AdminTimetableEditor from './AdminTimetableEditor';
+import TeacherTimetableScreen from './TeacherTimetableScreen';
 
 export function AdminTimetableScreen(props) {
-  return <TimetableManagerScreen {...props} mode="admin" />;
+  return <AdminTimetableEditor {...props} mode="admin" />;
 }
 
 export function OrgAdminTimetableScreen(props) {
-  return <TimetableManagerScreen {...props} mode="orgadmin" />;
+  return <AdminTimetableEditor {...props} mode="orgadmin" />;
 }
 
-export function TeacherTimetableScreen(props) {
-  return <TimetableManagerScreen {...props} mode="teacher" />;
-}
-
-export { TimetableSummaryCard };
+export { TeacherTimetableScreen };

@@ -16,8 +16,12 @@ export async function handlePushToken(
   }
 
   const db = getDb();
-  const userId = user.id as number;
   const role = user.role as string;
+  // Students log in via student_accounts, so the JWT's `id` is the account row's id,
+  // not the roster id (`students.id`). Every push recipient lookup (tokensForStudents,
+  // tokensForClassStudents, the notifications feed, etc.) filters by the roster id, so
+  // student tokens must be stored under `student_id`, not `id`, or they never match.
+  const userId = (role === "student" ? user.student_id : user.id) as number;
 
   // POST /push-token — upsert
   if (path === "/push-token" && method === "POST") {
