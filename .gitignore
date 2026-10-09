@@ -22,3 +22,7 @@ Thumbs.db
 # Expo
 frontend/.expo/
 frontend/dist/
+
+.deploy/
+.dbtemp
+.keytemp
