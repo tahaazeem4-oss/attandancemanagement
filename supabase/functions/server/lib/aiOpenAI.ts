@@ -66,6 +66,55 @@ export interface ChatResult {
   model: string;
 }
 
+// Common Roman Urdu / Hindi words. Their presence means the question is not plain
+// English even though it is written in English letters.
+const ROMAN_URDU_WORDS = new Set([
+  "hai", "hain", "ha", "kya", "kia", "ka", "ki", "ke", "ko", "se", "mein", "mai",
+  "mujhe", "mjhe", "muje", "mujhay", "samjhao", "samjhaye", "samjhain", "smjhao", "batao",
+  "btao", "bataye", "bataen", "kaise", "kese", "kaisay", "kyun", "kyu", "kiun", "ye", "yeh",
+  "wo", "woh", "aur", "nahi", "nai", "nahin", "iska", "uska", "iski", "uski", "matlab",
+  "kaun", "kon", "kab", "kahan", "kitna", "kitne", "karo", "kro", "krdo", "kardo", "dein", "chahiye", "wala", "wali", "sath", "liye", "lie", "tha", "thi", "hota", "hoti",
+]);
+const ENGLISH_WORDS = new Set([
+  "what", "why", "how", "when", "where", "which", "who", "is", "are", "was", "were", "the",
+  "a", "an", "of", "and", "to", "in", "explain", "define", "describe", "tell", "me", "about",
+  "please", "give", "list", "difference", "between", "meaning", "summary", "summarize",
+  "do", "does", "or", "main", "can", "you", "this", "that", "it", "for", "with",
+]);
+
+/** True when the question is plain English, so it can be searched as-is. */
+export function looksLikeEnglish(text: string): boolean {
+  if (/[^\x00-\x7F]/.test(text)) return false; // Urdu script or any other non-Latin script
+  const words = text.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  if (!words.length) return false;
+  let english = 0;
+  let romanUrdu = 0;
+  for (const w of words) {
+    if (ENGLISH_WORDS.has(w)) english++;
+    else if (ROMAN_URDU_WORDS.has(w)) romanUrdu++;
+  }
+  return romanUrdu === 0 && (english > 0 || words.length >= 3);
+}
+
+/**
+ * Turns a question in any language (Urdu, Roman Urdu, ...) into English search
+ * keywords, because the study material search only matches English words.
+ * Falls back to the original question if the model call fails.
+ */
+export async function toEnglishSearchQuery(
+  question: string,
+  rewritePrompt: string,
+): Promise<{ query: string; total_tokens: number }> {
+  try {
+    const r = await chatComplete(rewritePrompt, question, 40);
+    const query = r.text.replace(/["'`\n\r]+/g, " ").trim();
+    return { query: query || question, total_tokens: r.total_tokens };
+  } catch (err) {
+    console.warn("[ai] search query rewrite failed, using original question:", (err as Error).message);
+    return { query: question, total_tokens: 0 };
+  }
+}
+
 export async function chatComplete(system: string, user: string, maxOutputTokens = 700): Promise<ChatResult> {
   const useOR = isOpenRouter();
   const base  = useOR ? OPENROUTER_BASE : OPENAI_BASE;

@@ -4,8 +4,8 @@ import { getDb, json, verifyToken } from "../_shared.ts";
 import { resolveStudentScope, getEffectiveAiAccess, getEffectiveAiAccessForUser } from "../lib/aiScope.ts";
 import { getEffectiveQuota, loadQuotaState, assertCanQuery, incrementUsage, loadTeacherQuotaState } from "../lib/aiQuota.ts";
 import { enforceRateLimit } from "../lib/aiRateLimit.ts";
-import { buildPrompt } from "../lib/aiPrompt.ts";
-import { embedText, chatComplete, hasEmbeddings } from "../lib/aiOpenAI.ts";
+import { buildPrompt, SEARCH_REWRITE_PROMPT } from "../lib/aiPrompt.ts";
+import { embedText, chatComplete, hasEmbeddings, looksLikeEnglish, toEnglishSearchQuery } from "../lib/aiOpenAI.ts";
 
 const MAX_QUESTION_CHARS = 2000;
 
@@ -368,6 +368,17 @@ export async function handleAiTutorChat(req: Request, path: string, url: URL): P
       session_id = s!.id;
     }
 
+    // Study material search only understands English words, so questions in Urdu,
+    // Roman Urdu or other languages are first turned into English keywords. The
+    // answer itself is still written in the student's own language.
+    let searchQuery = question;
+    let rewriteTokens = 0;
+    if (!looksLikeEnglish(question)) {
+      const rewritten = await toEnglishSearchQuery(question, SEARCH_REWRITE_PROMPT);
+      searchQuery = rewritten.query;
+      rewriteTokens = rewritten.total_tokens;
+    }
+
     let usableChunks: RetrievedChunk[] = [];
     if (document_id) {
       try {
@@ -378,7 +389,7 @@ export async function handleAiTutorChat(req: Request, path: string, url: URL): P
           classId: scope.class_id,
           sectionId: scope.section_id,
           subjectId: subject_id,
-          question,
+          question: searchQuery,
         });
       } catch (err) {
         return json({ message: `Search failed: ${(err as Error).message}` }, 500);
@@ -389,7 +400,7 @@ export async function handleAiTutorChat(req: Request, path: string, url: URL): P
       let queryEmbedding: number[] | null = null;
       if (useVectors) {
         try {
-          queryEmbedding = await embedText(question);
+          queryEmbedding = await embedText(searchQuery);
         } catch (err) {
           return json({ message: `Embedding failed: ${(err as Error).message}` }, 502);
         }
@@ -406,7 +417,7 @@ export async function handleAiTutorChat(req: Request, path: string, url: URL): P
             p_match_count: 8,
           })
         : await db.rpc("match_ai_chunks_fts", {
-            p_query: question,
+            p_query: searchQuery,
             p_org_id: scope.organization_id,
             p_campus_id: scope.campus_id,
             p_class_id: scope.class_id ?? null,
@@ -428,7 +439,20 @@ export async function handleAiTutorChat(req: Request, path: string, url: URL): P
     });
 
     if (!usableChunks.length) {
-      const refusal = "I could not find this in your uploaded study material. Please review the relevant chapter or ask your teacher to upload the material.";
+      let refusal = "I could not find this in your uploaded study material. Please review the relevant chapter or ask your teacher to upload the material.";
+      if (searchQuery !== question) {
+        // The student wrote in another language — reply in that language too.
+        try {
+          const t = await chatComplete(
+            "Translate the TEXT into the same language and script as the STUDENT_MESSAGE (e.g. Roman Urdu stays in English letters, Urdu stays in Urdu script). Reply with only the translation.",
+            `STUDENT_MESSAGE: ${question}\n\nTEXT: ${refusal}`,
+            120,
+          );
+          if (t.text.trim()) refusal = t.text.trim();
+          rewriteTokens += t.total_tokens;
+        } catch { /* keep the English message */ }
+      }
+      if (rewriteTokens) await incrementUsage(studentId, rewriteTokens);
       const { data: msg } = await db.from("ai_chat_messages").insert({
         session_id, role: "assistant", content: refusal, citations: [],
       }).select().single();
@@ -472,7 +496,7 @@ export async function handleAiTutorChat(req: Request, path: string, url: URL): P
 
     await db.from("ai_chat_sessions").update({ updated_at: new Date().toISOString() }).eq("id", session_id);
 
-    await incrementUsage(studentId, llm.total_tokens || (llm.prompt_tokens + llm.completion_tokens));
+    await incrementUsage(studentId, (llm.total_tokens || (llm.prompt_tokens + llm.completion_tokens)) + rewriteTokens);
 
     await db.from("ai_usage_logs").insert({
       student_id: studentId, session_id, message_id: aMsg?.id,
