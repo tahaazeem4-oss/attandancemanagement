@@ -31,7 +31,7 @@ router.post('/', protect, async (req, res) => {
     await db.query(
       `INSERT INTO push_tokens (user_role, user_id, token, updated_at)
        VALUES ($1, $2, $3, NOW())
-       ON CONFLICT (user_role, user_id) DO UPDATE SET token = EXCLUDED.token, updated_at = NOW()`,
+       ON CONFLICT (token) DO UPDATE SET user_role = EXCLUDED.user_role, user_id = EXCLUDED.user_id, updated_at = NOW()`,
       [role, userId, token]
     );
     res.json({ message: 'Push token saved' });

@@ -127,31 +127,50 @@ export async function sendPush(
     console.log("[sendPush] No tokens to send to — skipping");
     return;
   }
+  tokens = [...new Set(tokens)];
   console.log(`[sendPush] Sending "${title}" to ${tokens.length} token(s):`, tokens);
-  try {
-    const res = await fetch("https://exp.host/--/api/v2/push/send", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "Accept-Encoding": "gzip, deflate",
-      },
-      body: JSON.stringify(
-        tokens.map((to) => ({
-          to,
-          title,
-          body,
-          data,
-          sound: "default",
-          channelId: "default",
-          priority: "high",
-        })),
-      ),
-    });
-    const json = await res.json().catch(() => null);
-    console.log(`[sendPush] Expo response (${res.status}):`, JSON.stringify(json));
-  } catch (err) {
-    console.error("[sendPush] fetch error:", err);
+  const deadTokens: string[] = [];
+  // Expo accepts at most 100 messages per request.
+  for (let i = 0; i < tokens.length; i += 100) {
+    const chunk = tokens.slice(i, i + 100);
+    try {
+      const res = await fetch("https://exp.host/--/api/v2/push/send", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "Accept-Encoding": "gzip, deflate",
+        },
+        body: JSON.stringify(
+          chunk.map((to) => ({
+            to,
+            title,
+            body,
+            data,
+            sound: "default",
+            channelId: "default",
+            priority: "high",
+          })),
+        ),
+      });
+      const json = await res.json().catch(() => null);
+      console.log(`[sendPush] Expo response (${res.status}):`, JSON.stringify(json));
+      // Tickets come back in the same order as the messages sent.
+      const tickets = Array.isArray(json?.data) ? json.data : [];
+      tickets.forEach((t: { status?: string; details?: { error?: string } }, idx: number) => {
+        if (t?.status === "error" && t.details?.error === "DeviceNotRegistered") {
+          deadTokens.push(chunk[idx]);
+        }
+      });
+    } catch (err) {
+      console.error("[sendPush] fetch error:", err);
+    }
+  }
+  if (deadTokens.length) {
+    // The app was uninstalled or the token rotated — stop sending to it.
+    const { error } = await getDb().from("push_tokens").delete().in("token", deadTokens);
+    if (error) console.error("[sendPush] failed to prune dead tokens:", error);
+    else console.log(`[sendPush] Pruned ${deadTokens.length} unregistered token(s)`);
   }
 }
 

@@ -26,6 +26,10 @@ const AuthContext = createContext(null);
 // ── Push notification helper ──────────────────────────────────
 // Requests permission, gets the Expo push token, and saves it to the backend.
 // Silently ignores errors so it never breaks the login flow.
+// The token is per device, so it is remembered here and sent on logout to remove
+// only this device's registration (other devices on the same account keep theirs).
+let devicePushToken = null;
+
 async function registerPushToken() {
   try {
     if (Platform.OS === 'web') return;
@@ -52,6 +56,7 @@ async function registerPushToken() {
     const token     = tokenData.data;
 
     if (token) {
+      devicePushToken = token;
       console.log('[Push] Registering token:', token);
       await api.post('/push-token', { token });
       console.log('[Push] Token saved successfully');
@@ -198,7 +203,12 @@ export function AuthProvider({ children }) {
 
   const logout = async () => {
     // Best-effort: remove push token from server before clearing session
-    try { await api.delete('/push-token'); } catch { /* ignore */ }
+    try {
+      if (devicePushToken) {
+        await api.delete('/push-token', { params: { token: devicePushToken } });
+      }
+    } catch { /* ignore */ }
+    devicePushToken = null;
     await storage.removeItem('token');
     await storage.removeItem('user');
     await storage.removeItem('school');
